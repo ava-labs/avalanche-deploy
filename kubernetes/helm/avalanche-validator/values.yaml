@@ -71,24 +71,37 @@ securityContext:
   runAsUser: 1000
   fsGroup: 1000
 
-# Liveness and readiness probes
+# L1 Configuration (set after create-l1)
+l1:
+  enabled: false
+  subnetId: ""
+  chainId: ""
+  bootstrapIds: ""  # Comma-separated NodeIDs
+  bootstrapIps: ""  # Comma-separated IP:port
+
+# Liveness probe - use info endpoint (more lenient than /ext/health)
 livenessProbe:
-  httpGet:
-    path: /ext/health
-    port: http
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - "curl -sf localhost:9650/ext/info -X POST -H 'content-type:application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.getNodeID\"}'"
   initialDelaySeconds: 30
   periodSeconds: 10
   timeoutSeconds: 5
   failureThreshold: 6
 
+# Readiness probe - check P-Chain bootstrap
 readinessProbe:
-  httpGet:
-    path: /ext/health
-    port: http
-  initialDelaySeconds: 10
-  periodSeconds: 5
-  timeoutSeconds: 3
-  failureThreshold: 3
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - "curl -sf localhost:9650/ext/info -X POST -H 'content-type:application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.isBootstrapped\",\"params\":{\"chain\":\"P\"}}' | grep -q 'true'"
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
 
 # Service account
 serviceAccount:

@@ -60,6 +60,13 @@ spec:
             - --index-enabled={{ .Values.config.indexEnabled }}
             - --db-dir=/data/db
             - --plugin-dir=/plugins
+            {{- if .Values.l1.enabled }}
+            - --track-subnets={{ .Values.l1.subnetId }}
+            {{- if .Values.l1.bootstrapIds }}
+            - --bootstrap-ids={{ .Values.l1.bootstrapIds }}
+            - --bootstrap-ips={{ .Values.l1.bootstrapIps }}
+            {{- end }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.config.httpPort }}

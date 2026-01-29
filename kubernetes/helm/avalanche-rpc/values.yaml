@@ -64,19 +64,31 @@ securityContext:
   runAsUser: 1000
   fsGroup: 1000
 
+# L1 Configuration
+l1:
+  enabled: false
+  subnetId: ""
+  chainId: ""
+  bootstrapIds: ""
+  bootstrapIps: ""
+
 livenessProbe:
-  httpGet:
-    path: /ext/health
-    port: http
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - "curl -sf localhost:9650/ext/info -X POST -H 'content-type:application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.getNodeID\"}'"
   initialDelaySeconds: 30
   periodSeconds: 10
 
 readinessProbe:
-  httpGet:
-    path: /ext/health
-    port: http
-  initialDelaySeconds: 10
-  periodSeconds: 5
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - "curl -sf localhost:9650/ext/info -X POST -H 'content-type:application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.isBootstrapped\",\"params\":{\"chain\":\"P\"}}' | grep -q 'true'"
+  initialDelaySeconds: 60
+  periodSeconds: 10
 
 serviceAccount:
   create: true

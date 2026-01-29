@@ -2,14 +2,21 @@ apiVersion: v2
 name: avalanche-rpc
 description: Avalanche L1 RPC Nodes
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "1.14.1"
 
 keywords:
   - avalanche
   - blockchain
   - rpc
+  - l1
+  - subnet
 
-home: https://github.com/your-org/avalanche-deploy
+home: https://github.com/ava-labs/avalanche-deploy
 sources:
   - https://github.com/ava-labs/avalanchego
+  - https://github.com/ava-labs/subnet-evm
+
+maintainers:
+  - name: Ava Labs
+    url: https://avax.network
