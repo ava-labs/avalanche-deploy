@@ -13,5 +13,9 @@
     "log-dir": "{{ avalanchego_log_dir }}",
     "db-dir": "{{ avalanchego_data_dir }}/db",
     "plugin-dir": "{{ avalanchego_plugin_dir }}",
-    "chain-config-dir": "{{ avalanchego_config_dir }}/chains"
+    "chain-config-dir": "{{ avalanchego_config_dir }}/chains",
+    "partial-sync-primary-network": {{ partial_sync_primary_network | default(true) | lower }}{% if track_subnets is defined and track_subnets | length > 0 %},
+    "track-subnets": "{{ track_subnets | join(',') }}"{% endif %}{% if l1_bootstrap_ids is defined and l1_bootstrap_ids | length > 0 %},
+    "bootstrap-ids": "{{ l1_bootstrap_ids | join(',') }}",
+    "bootstrap-ips": "{{ l1_bootstrap_ips | join(',') }}"{% endif %}
 }

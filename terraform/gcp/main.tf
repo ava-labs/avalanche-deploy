@@ -148,6 +148,14 @@ resource "google_compute_instance" "validators" {
     }
   }
 
+  # Local NVMe SSDs for high-performance storage
+  dynamic "scratch_disk" {
+    for_each = range(var.local_ssd_count)
+    content {
+      interface = "NVME"
+    }
+  }
+
   network_interface {
     network    = google_compute_network.main.name
     subnetwork = google_compute_subnetwork.main.name
@@ -188,6 +196,14 @@ resource "google_compute_instance" "rpc" {
       image = "ubuntu-os-cloud/ubuntu-2404-lts-amd64"
       size  = var.disk_size_gb
       type  = "pd-ssd"
+    }
+  }
+
+  # Local NVMe SSDs for high-performance storage
+  dynamic "scratch_disk" {
+    for_each = range(var.local_ssd_count)
+    content {
+      interface = "NVME"
     }
   }
 

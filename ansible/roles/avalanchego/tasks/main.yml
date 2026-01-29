@@ -1,21 +1,36 @@
 ---
 # Avalanchego installation and configuration
 
+# Create user/group FIRST (needed for NVMe ownership)
+- name: Create avalanche group
+  group:
+    name: "{{ avalanchego_group }}"
+    system: yes
+
 - name: Create avalanche user
   user:
     name: "{{ avalanchego_user }}"
     group: "{{ avalanchego_group }}"
     system: yes
     shell: /bin/false
-    create_home: no
-  register: user_created
+    home: /home/{{ avalanchego_user }}
+    create_home: yes
 
-- name: Create avalanche group
-  group:
-    name: "{{ avalanchego_group }}"
-    system: yes
-  when: user_created is changed
+- name: Create staking directory for auto-generated keys
+  file:
+    path: "/home/{{ avalanchego_user }}/.avalanchego/staking"
+    state: directory
+    owner: "{{ avalanchego_user }}"
+    group: "{{ avalanchego_group }}"
+    mode: "0700"
 
+# Mount local NVMe if available (AWS instance store, GCP local SSD, Azure Lsv3)
+# This mounts to avalanchego_data_dir (/var/lib/avalanchego)
+- name: Setup NVMe storage
+  include_tasks: nvme.yml
+  when: use_local_nvme | default(true)
+
+# Create directories (data_dir may already be a mount point from NVMe)
 - name: Create directories
   file:
     path: "{{ item }}"
@@ -25,6 +40,8 @@
     mode: "0755"
   loop:
     - "{{ avalanchego_data_dir }}"
+    - "{{ avalanchego_data_dir }}/db"
+    - "{{ avalanchego_data_dir }}/staking"
     - "{{ avalanchego_config_dir }}"
     - "{{ avalanchego_log_dir }}"
     - "{{ avalanchego_plugin_dir }}"
@@ -99,16 +116,22 @@
     state: started
     daemon_reload: yes
 
-- name: Wait for node to be healthy
+- name: Wait for P-Chain to bootstrap
   uri:
-    url: "http://127.0.0.1:{{ http_port }}/ext/health"
-    method: GET
+    url: "http://127.0.0.1:{{ http_port }}/ext/info"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      id: 1
+      method: "info.isBootstrapped"
+      params:
+        chain: "P"
     return_content: yes
-  register: health_check
-  until: health_check.status == 200 and (health_check.json.healthy | default(false))
+  register: bootstrap_check
+  until: bootstrap_check.status == 200 and (bootstrap_check.json.result.isBootstrapped | default(false))
   retries: 60
   delay: 10
-  ignore_errors: yes
 
 - name: Clean up temp files
   file:

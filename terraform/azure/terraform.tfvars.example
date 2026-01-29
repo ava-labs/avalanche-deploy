@@ -19,18 +19,25 @@ operator_ip = ""
 validator_count = 3
 rpc_count       = 2
 
-# VM sizes
-# Fuji recommendations:
-#   Validators: Standard_D8s_v5 (8 vCPU, 32GB) or larger
-#   RPC: Standard_D4s_v5 (4 vCPU, 16GB) or larger
-# Mainnet recommendations:
-#   Validators: Standard_D16s_v5 (16 vCPU, 64GB) or larger
-#   RPC: Standard_D8s_v5 (8 vCPU, 32GB) or larger
-validator_vm_size = "Standard_D8s_v5"
-rpc_vm_size       = "Standard_D4s_v5"
+# VM sizes - using Lsv3 series for LOCAL NVMe storage
+#
+# IMPORTANT: Lsv3 series = local NVMe SSDs (fast, ephemeral)
+#            Dsv5 series = managed disks only (network-attached, slower)
+#
+# Testing/Fuji (smaller, cost-effective):
+#   Validators: Standard_L8s_v3 (8 vCPU, 64GB, 1x800GB NVMe) - smallest Lsv3
+#   RPC: Standard_L8s_v3 (8 vCPU, 64GB, 1x800GB NVMe)
+#   Note: Lsv3 starts at 8 vCPU, no smaller option with local NVMe
+#
+# Alternative without local NVMe (cheaper but slower):
+#   Validators: Standard_D4s_v5 (4 vCPU, 16GB) + Premium SSD
+#   RPC: Standard_D2s_v5 (2 vCPU, 8GB) + Premium SSD
+#
+validator_vm_size = "Standard_L8s_v3"   # 8 vCPU, 64GB, 1x800GB NVMe
+rpc_vm_size       = "Standard_L8s_v3"   # 8 vCPU, 64GB, 1x800GB NVMe
 
-# Disk configuration
-disk_size_gb = 500 # GB
+# Disk configuration (OS disk - data goes on local NVMe for Lsv3)
+disk_size_gb = 100 # GB
 
 # SSH configuration
 admin_username = "azureuser"

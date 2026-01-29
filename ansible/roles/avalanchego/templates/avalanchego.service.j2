@@ -8,6 +8,7 @@ Wants=network-online.target
 Type=simple
 User={{ avalanchego_user }}
 Group={{ avalanchego_group }}
+Environment="HOME=/home/{{ avalanchego_user }}"
 ExecStart=/usr/local/bin/avalanchego --config-file={{ avalanchego_config_dir }}/node.json
 Restart=always
 RestartSec=5

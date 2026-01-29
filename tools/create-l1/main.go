@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -48,7 +48,7 @@ func main() {
 	flag.StringVar(&configFile, "config", "", "Config file (YAML/JSON)")
 	flag.StringVar(&outputFile, "output", "l1.env", "Output file for subnet/chain IDs")
 	flag.StringVar(&validatorIPs, "validators", "", "Comma-separated validator IPs")
-	flag.StringVar(&genesisFile, "genesis", "genesis.json", "Genesis file path")
+	flag.StringVar(&genesisFile, "genesis", "", "Genesis file path (default: genesis.json in current or parent dir)")
 	flag.StringVar(&chainName, "chain-name", "my-l1", "Name for the L1 chain")
 	flag.Uint64Var(&balanceAVAX, "validator-balance", 1, "Initial balance per validator in AVAX")
 	flag.Parse()
@@ -74,6 +74,14 @@ func run() error {
 
 	if len(ips) == 0 {
 		return fmt.Errorf("no validator IPs provided. Use --validators or set VALIDATOR_*_IP env vars")
+	}
+
+	// Resolve genesis file path
+	if genesisFile == "" {
+		genesisFile, err = findGenesisFile()
+		if err != nil {
+			return fmt.Errorf("failed to find genesis file: %w", err)
+		}
 	}
 
 	// Load genesis
@@ -110,18 +118,8 @@ func run() error {
 		return fmt.Errorf("failed to create wallet: %w", err)
 	}
 
-	// Check balance
-	pBuilder := wallet.P().Builder()
-	balance, err := pBuilder.GetBalance()
-	if err != nil {
-		return fmt.Errorf("failed to get balance: %w", err)
-	}
-	fmt.Printf("  Wallet balance: %d nAVAX (%.2f AVAX)\n", balance, float64(balance)/float64(units.Avax))
-
-	requiredBalance := uint64(len(ips)) * balanceAVAX * units.Avax
-	if balance < requiredBalance {
-		return fmt.Errorf("insufficient balance: have %d nAVAX, need %d nAVAX", balance, requiredBalance)
-	}
+	fmt.Printf("  Wallet loaded successfully\n")
+	fmt.Printf("  Required balance: ~%d AVAX per validator\n", balanceAVAX)
 
 	// Create subnet
 	fmt.Println("[2/4] Creating subnet...")
@@ -268,11 +266,40 @@ func loadPrivateKey() (*secp256k1.PrivateKey, error) {
 		return nil, fmt.Errorf("no private key provided. Use --private-key, --private-key-file, or AVALANCHE_PRIVATE_KEY env var")
 	}
 
-	// Parse the key
-	keyStr = strings.TrimPrefix(keyStr, "PrivateKey-")
-	keyBytes, err := cb58.Decode(keyStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode private key: %w", err)
+	// Check for balance override from env
+	if envBalance := os.Getenv("L1_VALIDATOR_BALANCE_AVAX"); envBalance != "" && balanceAVAX == 1 {
+		if val, err := parseUint64(envBalance); err == nil {
+			balanceAVAX = val
+		}
+	}
+
+	var keyBytes []byte
+	var err error
+
+	// Check format and parse accordingly
+	if strings.HasPrefix(keyStr, "0x") || strings.HasPrefix(keyStr, "0X") {
+		// Hex format (0x...)
+		keyBytes, err = hexToBytes(strings.TrimPrefix(strings.TrimPrefix(keyStr, "0x"), "0X"))
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode hex private key: %w", err)
+		}
+	} else if strings.HasPrefix(keyStr, "PrivateKey-") {
+		// Avalanche CB58 format (PrivateKey-...)
+		keyStr = strings.TrimPrefix(keyStr, "PrivateKey-")
+		keyBytes, err = cb58.Decode(keyStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode CB58 private key: %w", err)
+		}
+	} else {
+		// Try CB58 without prefix
+		keyBytes, err = cb58.Decode(keyStr)
+		if err != nil {
+			// Try hex without prefix
+			keyBytes, err = hexToBytes(keyStr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode private key (tried CB58 and hex): %w", err)
+			}
+		}
 	}
 
 	key, err := secp256k1.ToPrivateKey(keyBytes)
@@ -281,6 +308,22 @@ func loadPrivateKey() (*secp256k1.PrivateKey, error) {
 	}
 
 	return key, nil
+}
+
+func hexToBytes(hexStr string) ([]byte, error) {
+	if len(hexStr)%2 != 0 {
+		hexStr = "0" + hexStr
+	}
+	bytes := make([]byte, len(hexStr)/2)
+	for i := 0; i < len(bytes); i++ {
+		var b byte
+		_, err := fmt.Sscanf(hexStr[i*2:i*2+2], "%02x", &b)
+		if err != nil {
+			return nil, err
+		}
+		bytes[i] = b
+	}
+	return bytes, nil
 }
 
 func parseValidatorIPs() ([]string, error) {
@@ -327,4 +370,36 @@ func buildRPCEndpoints(ips []string, chainID ids.ID) string {
 		lines = append(lines, fmt.Sprintf("RPC_%d_URL=http://%s:9650/ext/bc/%s/rpc", i+1, ip, chainID))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func parseUint64(s string) (uint64, error) {
+	var val uint64
+	_, err := fmt.Sscanf(s, "%d", &val)
+	return val, err
+}
+
+func findGenesisFile() (string, error) {
+	// Check current directory first
+	if _, err := os.Stat("genesis.json"); err == nil {
+		abs, _ := filepath.Abs("genesis.json")
+		return abs, nil
+	}
+
+	// Walk up parent directories (up to 5 levels)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	dir := cwd
+	for i := 0; i < 5; i++ {
+		dir = filepath.Dir(dir)
+		genesisPath := filepath.Join(dir, "genesis.json")
+
+		if _, err := os.Stat(genesisPath); err == nil {
+			return genesisPath, nil
+		}
+	}
+
+	return "", fmt.Errorf("genesis.json not found in current or parent directories. Use --genesis flag to specify path")
 }

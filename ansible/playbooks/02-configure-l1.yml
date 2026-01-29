@@ -112,19 +112,42 @@
         state: restarted
 
   post_tasks:
-    - name: Wait for node to be healthy
+    - name: Wait for node to restart
       uri:
-        url: "http://127.0.0.1:9650/ext/health"
-        method: GET
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.getNodeID"
         return_content: yes
-      register: health_check
-      until: health_check.status == 200
-      retries: 60
-      delay: 10
+      register: node_check
+      until: node_check.status == 200
+      retries: 30
+      delay: 5
+
+    - name: Wait for L1 chain to be ready
+      uri:
+        url: "http://127.0.0.1:9650/ext/bc/{{ chain_id }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "eth_chainId"
+          params: []
+        return_content: yes
+      register: l1_check
+      until: l1_check.status == 200
+      retries: 30
+      delay: 5
+      when: chain_id != ""
+      ignore_errors: yes
 
     - name: Display status
       debug:
-        msg: "{{ inventory_hostname }} ({{ node_id }}) is now tracking subnet {{ subnet_id }}"
+        msg: "{{ inventory_hostname }} is now tracking subnet {{ subnet_id }}{% if chain_id != '' %} (L1 chain ready){% endif %}"
 
 - name: Display completion message
   hosts: localhost

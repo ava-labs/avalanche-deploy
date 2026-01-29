@@ -58,19 +58,25 @@ variable "rpc_count" {
 variable "validator_machine_type" {
   description = "GCP machine type for validators"
   type        = string
-  default     = "n2-standard-8" # 8 vCPU, 32GB RAM
+  default     = "n2-standard-4" # 4 vCPU, 16GB RAM
 }
 
 variable "rpc_machine_type" {
   description = "GCP machine type for RPC nodes"
   type        = string
-  default     = "n2-standard-4" # 4 vCPU, 16GB RAM
+  default     = "n2-standard-2" # 2 vCPU, 8GB RAM
 }
 
 variable "disk_size_gb" {
-  description = "Boot disk size in GB"
+  description = "Boot disk size in GB (data goes on local SSD)"
   type        = number
-  default     = 500
+  default     = 100
+}
+
+variable "local_ssd_count" {
+  description = "Number of 375GB local NVMe SSDs to attach (0 = none)"
+  type        = number
+  default     = 1
 }
 
 #

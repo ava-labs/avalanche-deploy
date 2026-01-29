@@ -23,17 +23,24 @@ validator_count = 3
 rpc_count       = 2
 
 # Machine types
-# Fuji recommendations:
-#   Validators: n2-standard-8 (8 vCPU, 32GB) or larger
-#   RPC: n2-standard-4 (4 vCPU, 16GB) or larger
-# Mainnet recommendations:
-#   Validators: n2-standard-16 (16 vCPU, 64GB) or larger
-#   RPC: n2-standard-8 (8 vCPU, 32GB) or larger
-validator_machine_type = "n2-standard-8"
-rpc_machine_type       = "n2-standard-4"
+#
+# IMPORTANT: GCP local SSDs must be attached separately (375GB each)
+#            Set local_ssd_count > 0 to attach NVMe local SSDs
+#
+# Testing/Fuji (smaller, cost-effective):
+#   Validators: n2-standard-4 (4 vCPU, 16GB) + 1 local SSD
+#   RPC: n2-standard-2 (2 vCPU, 8GB) + 1 local SSD
+#
+# Production/Mainnet:
+#   Validators: n2-standard-8 (8 vCPU, 32GB) + 1-2 local SSDs
+#   RPC: n2-standard-4 (4 vCPU, 16GB) + 1 local SSD
+#
+validator_machine_type = "n2-standard-4"  # 4 vCPU, 16GB - good for testing
+rpc_machine_type       = "n2-standard-2"  # 2 vCPU, 8GB - good for testing
 
 # Disk configuration
-disk_size_gb = 500 # GB
+disk_size_gb    = 100  # GB - boot disk only, data on local SSD
+local_ssd_count = 1    # Number of 375GB local NVMe SSDs to attach
 
 # SSH configuration
 ssh_user       = "ubuntu"

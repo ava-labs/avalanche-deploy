@@ -51,15 +51,15 @@ variable "rpc_count" {
 }
 
 variable "validator_vm_size" {
-  description = "Azure VM size for validators"
+  description = "Azure VM size for validators (Lsv3 series has local NVMe)"
   type        = string
-  default     = "Standard_D8s_v5" # 8 vCPU, 32GB RAM
+  default     = "Standard_L8s_v3" # 8 vCPU, 64GB RAM, 1x800GB NVMe
 }
 
 variable "rpc_vm_size" {
-  description = "Azure VM size for RPC nodes"
+  description = "Azure VM size for RPC nodes (Lsv3 series has local NVMe)"
   type        = string
-  default     = "Standard_D4s_v5" # 4 vCPU, 16GB RAM
+  default     = "Standard_L8s_v3" # 8 vCPU, 64GB RAM, 1x800GB NVMe
 }
 
 variable "disk_size_gb" {

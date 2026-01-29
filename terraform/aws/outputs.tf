@@ -46,6 +46,9 @@ validator-1 ansible_host=${aws_instance.validators[0].public_ip} ansible_user=ub
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+%{if var.ssh_private_key_file != ""~}
+ansible_ssh_private_key_file=${var.ssh_private_key_file}
+%{endif~}
 EOT
 }
 
@@ -67,6 +70,9 @@ validator-1 ansible_host=${aws_instance.validators[0].public_ip} ansible_user=ub
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+%{if var.ssh_private_key_file != ""~}
+ansible_ssh_private_key_file=${var.ssh_private_key_file}
+%{endif~}
 EOT
   filename = "${path.module}/../../ansible/inventory/aws_hosts"
 }

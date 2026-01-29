@@ -1,6 +1,11 @@
 ---
 # Grafana installation and configuration
 
+- name: Create grafana group
+  group:
+    name: "{{ grafana_group }}"
+    system: yes
+
 - name: Create grafana user
   user:
     name: "{{ grafana_user }}"
@@ -8,11 +13,6 @@
     system: yes
     shell: /bin/false
     create_home: no
-
-- name: Create grafana group
-  group:
-    name: "{{ grafana_group }}"
-    system: yes
 
 - name: Create directories
   file:

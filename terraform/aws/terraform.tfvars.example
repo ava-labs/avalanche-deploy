@@ -19,26 +19,36 @@ operator_ip = ""
 validator_count = 3
 rpc_count       = 2
 
-# Instance types
-# Fuji recommendations:
-#   Validators: m6i.2xlarge (8 vCPU, 32GB) or larger
-#   RPC: m6i.xlarge (4 vCPU, 16GB) or larger
-# Mainnet recommendations:
-#   Validators: m6i.4xlarge (16 vCPU, 64GB) or larger
-#   RPC: m6i.2xlarge (8 vCPU, 32GB) or larger
-validator_instance_type = "m6i.2xlarge"
-rpc_instance_type       = "m6i.xlarge"
+# Instance types - using "d" variants for LOCAL NVMe storage (not network-attached EBS!)
+#
+# IMPORTANT: "d" suffix = local NVMe SSDs (fast, ephemeral)
+#            Without "d" = EBS only (network-attached, slower)
+#
+# Testing/Fuji (smaller, cost-effective):
+#   Validators: m6id.xlarge (4 vCPU, 16GB, 1x237GB NVMe)
+#   RPC: m6id.large (2 vCPU, 8GB, 1x118GB NVMe)
+#
+# Production/Mainnet (recommended):
+#   Validators: m6id.2xlarge (8 vCPU, 32GB, 1x474GB NVMe) or i3.xlarge (4 vCPU, 30GB, 1x950GB NVMe)
+#   RPC: m6id.xlarge (4 vCPU, 16GB, 1x237GB NVMe)
+#
+validator_instance_type = "m6id.xlarge"   # 4 vCPU, 16GB, 1x237GB NVMe - good for testing
+rpc_instance_type       = "m6id.large"    # 2 vCPU, 8GB, 1x118GB NVMe - good for testing
 
-# Disk configuration
-disk_size_gb   = 500  # GB
-disk_iops      = 6000
-disk_throughput = 500 # MB/s
+# Disk configuration (root EBS - data goes on local NVMe)
+disk_size_gb    = 100  # GB - smaller root disk, data on NVMe
+disk_iops       = 3000
+disk_throughput = 250  # MB/s
 
 # SSH - provide ONE of these:
 # Option 1: Content of your public key (creates new key pair)
 ssh_public_key = ""
 # Option 2: Name of existing AWS key pair
 ssh_key_name = ""
+
+# Path to private key for Ansible (auto-added to inventory)
+# Example: "~/.ssh/avalanche-fuji"
+ssh_private_key_file = ""
 
 # Access control
 enable_public_rpc     = false # Set true to expose RPC to internet

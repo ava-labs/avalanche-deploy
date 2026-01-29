@@ -51,3 +51,11 @@ db_type: leveldb
 
 # Metrics
 metrics_enabled: true
+
+# Storage
+# Set to true to auto-detect and mount local NVMe drives (AWS instance store, GCP local SSD, Azure Lsv3)
+use_local_nvme: true
+
+# Partial sync - for L1 validators that don't need full primary network state
+# Set to true to only sync P-chain headers (much faster bootstrap)
+partial_sync_primary_network: true

@@ -1,6 +1,11 @@
 ---
 # Prometheus installation and configuration
 
+- name: Create prometheus group
+  group:
+    name: "{{ prometheus_group }}"
+    system: yes
+
 - name: Create prometheus user
   user:
     name: "{{ prometheus_user }}"
@@ -8,11 +13,6 @@
     system: yes
     shell: /bin/false
     create_home: no
-
-- name: Create prometheus group
-  group:
-    name: "{{ prometheus_group }}"
-    system: yes
 
 - name: Create directories
   file:

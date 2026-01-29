@@ -51,15 +51,15 @@ variable "rpc_count" {
 }
 
 variable "validator_instance_type" {
-  description = "EC2 instance type for validators"
+  description = "EC2 instance type for validators (use 'd' suffix for local NVMe)"
   type        = string
-  default     = "m6i.2xlarge" # 8 vCPU, 32GB RAM
+  default     = "m6id.xlarge" # 4 vCPU, 16GB RAM, 1x237GB NVMe
 }
 
 variable "rpc_instance_type" {
-  description = "EC2 instance type for RPC nodes"
+  description = "EC2 instance type for RPC nodes (use 'd' suffix for local NVMe)"
   type        = string
-  default     = "m6i.xlarge" # 4 vCPU, 16GB RAM
+  default     = "m6id.large" # 2 vCPU, 8GB RAM, 1x118GB NVMe
 }
 
 variable "disk_size_gb" {
@@ -92,6 +92,12 @@ variable "ssh_public_key" {
 
 variable "ssh_key_name" {
   description = "Existing SSH key pair name. Takes precedence over ssh_public_key."
+  type        = string
+  default     = ""
+}
+
+variable "ssh_private_key_file" {
+  description = "Path to SSH private key file for Ansible inventory (e.g., ~/.ssh/my-key)"
   type        = string
   default     = ""
 }

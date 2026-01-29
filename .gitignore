@@ -13,6 +13,7 @@ ansible/node_ids.txt
 # Generated
 l1.env
 *.env.local
+.env
 notes/terraform-outputs.json
 
 # Tools
@@ -27,6 +28,9 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# AI Assistant
+CLAUDE.md
 
 # Internal
 notes/
