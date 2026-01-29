@@ -21,13 +21,13 @@ Pick one. Most people start with Terraform + Ansible.
 
 ---
 
-## Quick Start (AWS + Ansible)
+## Quick Start (AWS)
 
 ### Prerequisites
 
 ```bash
 # Install tools
-brew install terraform ansible awscli
+brew install terraform ansible awscli jq
 
 # Verify
 terraform --version
@@ -61,8 +61,6 @@ cat ~/.ssh/avalanche-deploy.pub
 
 ```bash
 cd terraform/aws
-
-# Create config
 cp terraform.tfvars.example terraform.tfvars
 ```
 
@@ -72,14 +70,16 @@ name_prefix = "my-l1"
 environment = "fuji"
 
 validator_count = 3
-rpc_count       = 0
+rpc_count       = 1  # Add an RPC node for querying
 
-# Paste your public key here
+# Paste your public key
 ssh_public_key = "ssh-rsa AAAA..."
 
 # Path to private key (for Ansible)
 ssh_private_key_file = "~/.ssh/avalanche-deploy"
 ```
+
+> **Note:** Validators only expose port 9651 (P2P) publicly. Add an RPC node (`rpc_count = 1`) to query your L1 without SSH tunneling.
 
 ### 4. Create Infrastructure
 
@@ -97,26 +97,40 @@ make deploy
 
 ### 6. Wait for Sync
 
-Nodes need to sync with Fuji (~10-30 min).
+Nodes need to sync with Fuji P-Chain before you can create an L1.
 
 ```bash
-make status                    # check once
-# or
-./scripts/wait-for-sync.sh     # wait with spinner
+make status   # check sync progress
 ```
 
-### 7. Customize Genesis (Optional)
+Wait until you see `P:OK` for all nodes.
 
-Edit `genesis.json` in the repo root to customize your L1:
+### 7. Create Genesis
 
-```bash
-# Key fields:
-# - chainId: Pick a unique ID (check chainlist.org)
-# - alloc: Pre-fund addresses with native token
-# - feeConfig: Gas limits and base fees
+Use the [Avalanche Builder Console](https://build.avax.network/console/layer-1/create/create-chain) to generate your genesis configuration, or edit `genesis.json` directly:
+
+```json
+{
+  "config": {
+    "chainId": 99999,
+    "feeConfig": {
+      "gasLimit": 15000000,
+      "targetBlockRate": 2,
+      "minBaseFee": 25000000000
+    }
+  },
+  "alloc": {
+    "0xYourAddress": {
+      "balance": "0x52B7D2DCC80CD2E4000000"
+    }
+  }
+}
 ```
 
-See [GENESIS.md](GENESIS.md) for all options.
+Key fields:
+- `chainId`: Unique ID for your chain (check [chainlist.org](https://chainlist.org))
+- `alloc`: Pre-fund addresses (balance in wei, hex format)
+- `feeConfig.minBaseFee`: Minimum gas price in wei
 
 ### 8. Create Your L1
 
@@ -124,22 +138,22 @@ See [GENESIS.md](GENESIS.md) for all options.
 # Build the tool
 make create-l1
 
-# Set your funded P-Chain private key (see "Where Do I Get a Private Key?" below)
+# Set your funded P-Chain private key
 export AVALANCHE_PRIVATE_KEY="PrivateKey-ewoq..."
-
-# Optional: Set validator balance (default: 1 AVAX per validator)
-export L1_VALIDATOR_BALANCE_AVAX=5
+# Or hex format: export AVALANCHE_PRIVATE_KEY="0x..."
 
 # Get validator IPs
 export VALIDATORS=$(cd terraform/aws && terraform output -json validator_ips | jq -r 'join(",")')
 
-# Create the L1! (auto-finds genesis.json in repo root)
+# Create the L1
 ./tools/create-l1/create-l1 \
   --network=fuji \
   --validators=$VALIDATORS \
-  --chain-name=my-l1 \
+  --chain-name=mychain \
   --output=l1.env
 ```
+
+> **Note:** Chain names must be alphanumeric only (no hyphens or special characters).
 
 ### 9. Configure Nodes for L1
 
@@ -151,9 +165,10 @@ make configure-l1 SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID
 ### 10. Done!
 
 ```bash
-IP=$(cd terraform/aws && terraform output -json validator_ips | jq -r '.[0]')
-echo "RPC: http://$IP:9650/ext/bc/$CHAIN_ID/rpc"
+make status   # shows L1 status and RPC endpoint
 ```
+
+Your RPC endpoint will be displayed. If you added an RPC node, use that IP for queries.
 
 ---
 
@@ -181,7 +196,9 @@ avalanche key create mykey
 avalanche key export mykey
 ```
 
-The private key format is: `PrivateKey-ewoqjP7PxY4yr3iLTpLisriqt94hdyDFNgchSxGGztUrTXtNN`
+The private key can be either format:
+- Avalanche: `PrivateKey-ewoqjP7PxY4yr3iLTpLisriqt94hdyDFNgchSxGGztUrTXtNN`
+- Hex: `0x56289e99c94b6912bfc12adc093c9b51124f0dc54ac7a766b2bc5ccf558d8027`
 
 ---
 
@@ -207,13 +224,13 @@ See [kubernetes/README.md](kubernetes/README.md) for details.
 
 ## Cost Estimate
 
-| Cloud | Instance | Monthly Cost (3 validators) |
-|-------|----------|----------------------------|
-| AWS   | m6id.large | ~$210 |
-| GCP   | n2-standard-2 + local SSD | ~$180 |
-| Azure | Standard_L8s_v3 | ~$400 |
+| Cloud | Instance | Monthly Cost (3 validators + 1 RPC) |
+|-------|----------|-------------------------------------|
+| AWS   | m6id.large | ~$280 |
+| GCP   | n2-standard-2 + local SSD | ~$240 |
+| Azure | Standard_L8s_v3 | ~$530 |
 
-Remember to `terraform destroy` when done testing!
+Remember to `make destroy` when done testing!
 
 ---
 
@@ -233,11 +250,22 @@ cat ansible/inventory/aws_hosts
 make logs   # view avalanchego logs
 ```
 
-**create-l1 fails**
+**create-l1 fails with "insufficient funds"**
 ```bash
-# Check node is healthy
-make status
-
 # Check you have AVAX on P-Chain
 # Go to https://subnets.avax.network/fuji and search your address
+```
+
+**create-l1 fails with "illegal name character"**
+```bash
+# Chain names must be alphanumeric only
+# Use: mychain, testl1, prodchain
+# Not: my-chain, test_l1, prod.chain
+```
+
+**Can't reach RPC endpoint**
+```bash
+# Validators don't expose 9650 publicly (security)
+# Option 1: Add an RPC node (rpc_count = 1 in terraform.tfvars)
+# Option 2: SSH tunnel: ssh -L 9650:localhost:9650 ubuntu@<validator-ip>
 ```
