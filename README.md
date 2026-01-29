@@ -204,21 +204,29 @@ The private key can be either format:
 
 ## Kubernetes Option
 
-If you have an existing Kubernetes cluster:
+For existing Kubernetes clusters or local testing with kind:
 
 ```bash
-cd kubernetes/helm
+cd kubernetes
 
-# Install validators
-helm install my-l1-validators ./avalanche-validator \
+# Local testing: create kind cluster
+./scripts/create-kind-cluster.sh
+
+# Deploy validators
+helm install validators ./helm/avalanche-validator \
   --set replicaCount=3 \
   --set network=fuji
 
+# Wait for sync, create L1, configure
+./scripts/wait-for-sync.sh
+./scripts/create-l1.sh --chain-name=mychain
+./scripts/configure-l1.sh
+
 # Check status
-kubectl get pods -l app=avalanche-validator
+./scripts/status.sh
 ```
 
-See [kubernetes/README.md](kubernetes/README.md) for details.
+See [kubernetes/README.md](kubernetes/README.md) for full documentation.
 
 ---
 
