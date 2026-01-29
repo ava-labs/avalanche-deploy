@@ -7,14 +7,11 @@ replicaCount: 3
 network: fuji
 
 image:
-  repository: avaplatform/avalanchego
-  tag: "v1.14.1"
+  # Uses bundled image with avalanchego + subnet-evm
+  # Tag format: v{avalanchego}-v{subnet-evm}
+  repository: avaplatform/subnet-evm_avalanchego
+  tag: "v1.14.1-v0.8.0"
   pullPolicy: IfNotPresent
-
-# SubnetEVM plugin
-subnetEvm:
-  enabled: true
-  version: "v0.8.0"
 
 # Resource limits
 resources:

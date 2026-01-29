@@ -29,21 +29,6 @@ spec:
       serviceAccountName: {{ include "avalanche-rpc.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.securityContext | nindent 8 }}
-      initContainers:
-        {{- if .Values.subnetEvm.enabled }}
-        - name: download-subnet-evm
-          image: curlimages/curl:latest
-          command:
-            - /bin/sh
-            - -c
-            - |
-              VERSION={{ .Values.subnetEvm.version | trimPrefix "v" }}
-              curl -L -o /plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy \
-                "https://github.com/ava-labs/subnet-evm/releases/download/v${VERSION}/subnet-evm_${VERSION}_linux_amd64.tar.gz" | tar -xz -C /plugins
-          volumeMounts:
-            - name: plugins
-              mountPath: /plugins
-        {{- end }}
       containers:
         - name: avalanchego
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -59,7 +44,6 @@ spec:
             - --api-health-enabled={{ .Values.config.apiHealthEnabled }}
             - --index-enabled={{ .Values.config.indexEnabled }}
             - --db-dir=/data/db
-            - --plugin-dir=/plugins
             {{- if .Values.l1.enabled }}
             - --track-subnets={{ .Values.l1.subnetId }}
             {{- if .Values.l1.bootstrapIds }}
@@ -83,8 +67,6 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
-            - name: plugins
-              mountPath: /plugins
       volumes:
         - name: data
           {{- if .Values.persistence.enabled }}
@@ -93,5 +75,3 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
-        - name: plugins
-          emptyDir: {}
