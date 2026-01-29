@@ -1,0 +1,19 @@
+apiVersion: v2
+name: avalanche-validator
+description: Avalanche L1 Validator Nodes
+type: application
+version: 0.1.0
+appVersion: "1.14.1"
+
+keywords:
+  - avalanche
+  - blockchain
+  - validator
+
+home: https://github.com/your-org/avalanche-deploy
+sources:
+  - https://github.com/ava-labs/avalanchego
+
+maintainers:
+  - name: Your Name
+    email: you@example.com

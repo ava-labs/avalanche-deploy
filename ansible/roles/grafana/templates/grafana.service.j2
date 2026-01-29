@@ -1,0 +1,18 @@
+[Unit]
+Description=Grafana
+Documentation=https://grafana.com/docs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ grafana_user }}
+Group={{ grafana_group }}
+ExecStart=/opt/grafana/bin/grafana-server \
+    --config={{ grafana_config_dir }}/grafana.ini \
+    --homepath=/opt/grafana
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

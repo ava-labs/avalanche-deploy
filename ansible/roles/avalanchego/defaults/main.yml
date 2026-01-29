@@ -1,0 +1,53 @@
+---
+# Avalanchego role defaults
+
+# Versions
+avalanchego_version: "v1.14.1"
+subnet_evm_version: "v0.8.0"
+
+# Network: fuji or mainnet
+avalanchego_network: "fuji"
+
+# Node type: validator or rpc
+node_type: "validator"
+
+# Directories
+avalanchego_data_dir: /var/lib/avalanchego
+avalanchego_config_dir: /etc/avalanchego
+avalanchego_log_dir: /var/log/avalanchego
+avalanchego_plugin_dir: "{{ avalanchego_data_dir }}/plugins"
+
+# User/group
+avalanchego_user: avalanche
+avalanchego_group: avalanche
+
+# Network IDs
+network_ids:
+  fuji: 5
+  mainnet: 1
+
+# Bootstrap nodes (official Avalanche nodes)
+bootstrap_nodes:
+  fuji:
+    - "NodeID-5mb46qkSBj81k9g9e4VFjGGSbaaSLFRzD@bootstrap.fuji.network:9651"
+  mainnet:
+    - "NodeID-A6onFGyJjA37EZ7kYHvRQC8YR4e5YrkCF@bootstrap.avax.network:9651"
+
+# Ports
+http_port: 9650
+staking_port: 9651
+
+# API configuration
+api_admin_enabled: false
+api_info_enabled: true
+api_health_enabled: true
+
+# Logging
+log_level: info
+log_display_level: info
+
+# Database
+db_type: leveldb
+
+# Metrics
+metrics_enabled: true

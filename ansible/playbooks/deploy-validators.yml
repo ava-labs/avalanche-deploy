@@ -1,0 +1,36 @@
+---
+# Deploy Avalanche validators
+#
+# Usage:
+#   ansible-playbook playbooks/deploy-validators.yml
+
+- name: Deploy Avalanche Validators
+  hosts: validators
+  become: true
+  gather_facts: true
+
+  vars:
+    avalanchego_version: "v1.14.1"
+    subnet_evm_version: "v0.8.0"
+    network: "{{ lookup('env', 'AVALANCHE_NETWORK') | default('fuji', true) }}"
+    data_dir: /var/lib/avalanchego
+    config_dir: /etc/avalanchego
+    log_dir: /var/log/avalanchego
+
+  roles:
+    - role: avalanchego
+      vars:
+        node_type: validator
+        avalanchego_network: "{{ network }}"
+
+  post_tasks:
+    - name: Display validator node IDs
+      command: >
+        curl -s -X POST --data '{"jsonrpc":"2.0","id":1,"method":"info.getNodeID"}'
+        -H 'content-type:application/json;' http://127.0.0.1:9650/ext/info
+      register: node_id_result
+      changed_when: false
+
+    - name: Show node ID
+      debug:
+        msg: "Node ID: {{ (node_id_result.stdout | from_json).result.nodeID }}"

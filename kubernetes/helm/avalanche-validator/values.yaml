@@ -1,0 +1,102 @@
+# Default values for avalanche-validator
+
+# Number of validator replicas
+replicaCount: 3
+
+# Network: fuji or mainnet
+network: fuji
+
+image:
+  repository: avaplatform/avalanchego
+  tag: "v1.14.1"
+  pullPolicy: IfNotPresent
+
+# SubnetEVM plugin
+subnetEvm:
+  enabled: true
+  version: "v0.8.0"
+
+# Resource limits
+resources:
+  requests:
+    cpu: "4"
+    memory: "16Gi"
+  limits:
+    cpu: "8"
+    memory: "32Gi"
+
+# Persistent storage
+persistence:
+  enabled: true
+  storageClass: ""  # Use default
+  size: 500Gi
+  accessModes:
+    - ReadWriteOnce
+
+# Node configuration
+config:
+  httpPort: 9650
+  stakingPort: 9651
+  logLevel: info
+  apiAdminEnabled: false
+  apiInfoEnabled: true
+  apiHealthEnabled: true
+  indexEnabled: false
+
+# Service configuration
+service:
+  type: ClusterIP
+  httpPort: 9650
+  stakingPort: 9651
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Node affinity - spread across zones
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: avalanche-validator
+          topologyKey: topology.kubernetes.io/zone
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Liveness and readiness probes
+livenessProbe:
+  httpGet:
+    path: /ext/health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+
+readinessProbe:
+  httpGet:
+    path: /ext/health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Service account
+serviceAccount:
+  create: true
+  name: ""
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []

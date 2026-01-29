@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: avalanche-validator
+  namespace: avalanche
+spec:
+  serviceName: avalanche-validator
+  replicas: 3
+  selector:
+    matchLabels:
+      app: avalanche-validator
+  template:
+    metadata:
+      labels:
+        app: avalanche-validator
+    spec:
+      containers:
+        - name: avalanchego
+          image: avaplatform/avalanchego:v1.14.1
+          args:
+            - --network-id=5
+            - --http-host=0.0.0.0
+            - --http-port=9650
+            - --staking-port=9651
+            - --log-level=info
+            - --db-dir=/data/db
+            - --plugin-dir=/plugins
+          ports:
+            - containerPort: 9650
+              name: http
+            - containerPort: 9651
+              name: staking
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/avalanchego
+          livenessProbe:
+            httpGet:
+              path: /ext/health
+              port: 9650
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ext/health
+              port: 9650
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "4"
+              memory: "16Gi"
+            limits:
+              cpu: "8"
+              memory: "32Gi"
+      volumes:
+        - name: config
+          configMap:
+            name: avalanche-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 500Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: avalanche-validator
+  namespace: avalanche
+spec:
+  clusterIP: None
+  selector:
+    app: avalanche-validator
+  ports:
+    - port: 9650
+      name: http
+    - port: 9651
+      name: staking
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: avalanche-validator-p2p
+  namespace: avalanche
+spec:
+  type: LoadBalancer
+  selector:
+    app: avalanche-validator
+  ports:
+    - port: 9651
+      name: staking

@@ -1,0 +1,41 @@
+# Azure Terraform Configuration
+# Copy to terraform.tfvars and customize
+
+# Azure region
+location = "East US"
+
+# Resource naming
+name_prefix = "avalanche-l1"
+environment = "fuji" # or "mainnet"
+
+# Network
+vnet_cidr   = "10.0.0.0/16"
+subnet_cidr = "10.0.1.0/24"
+
+# Operator IP (leave empty to auto-detect, or specify e.g., "1.2.3.4/32")
+operator_ip = ""
+
+# Node counts
+validator_count = 3
+rpc_count       = 2
+
+# VM sizes
+# Fuji recommendations:
+#   Validators: Standard_D8s_v5 (8 vCPU, 32GB) or larger
+#   RPC: Standard_D4s_v5 (4 vCPU, 16GB) or larger
+# Mainnet recommendations:
+#   Validators: Standard_D16s_v5 (16 vCPU, 64GB) or larger
+#   RPC: Standard_D8s_v5 (8 vCPU, 32GB) or larger
+validator_vm_size = "Standard_D8s_v5"
+rpc_vm_size       = "Standard_D4s_v5"
+
+# Disk configuration
+disk_size_gb = 500 # GB
+
+# SSH configuration
+admin_username = "azureuser"
+ssh_public_key = "ssh-rsa AAAA..." # Your public key content
+
+# Access control
+enable_public_rpc     = false
+enable_public_grafana = true

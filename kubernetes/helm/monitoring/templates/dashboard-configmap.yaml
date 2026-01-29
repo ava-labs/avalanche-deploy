@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: avalanche-dashboards
+  labels:
+    grafana_dashboard: "1"
+data:
+  avalanche-l1.json: |-
+{{ .Files.Get "dashboards/avalanche-l1.json" | indent 4 }}

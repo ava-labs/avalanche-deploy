@@ -1,0 +1,117 @@
+---
+# Grafana installation and configuration
+
+- name: Create grafana user
+  user:
+    name: "{{ grafana_user }}"
+    group: "{{ grafana_group }}"
+    system: yes
+    shell: /bin/false
+    create_home: no
+
+- name: Create grafana group
+  group:
+    name: "{{ grafana_group }}"
+    system: yes
+
+- name: Create directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ grafana_user }}"
+    group: "{{ grafana_group }}"
+    mode: "0755"
+  loop:
+    - "{{ grafana_config_dir }}"
+    - "{{ grafana_config_dir }}/provisioning"
+    - "{{ grafana_config_dir }}/provisioning/datasources"
+    - "{{ grafana_config_dir }}/provisioning/dashboards"
+    - "{{ grafana_data_dir }}"
+    - "{{ grafana_data_dir }}/dashboards"
+
+- name: Download Grafana
+  get_url:
+    url: "https://dl.grafana.com/oss/release/grafana-{{ grafana_version }}.linux-amd64.tar.gz"
+    dest: /tmp/grafana.tar.gz
+    mode: "0644"
+
+- name: Extract Grafana
+  unarchive:
+    src: /tmp/grafana.tar.gz
+    dest: /opt/
+    remote_src: yes
+    creates: "/opt/grafana-v{{ grafana_version }}"
+
+- name: Create symlink
+  file:
+    src: "/opt/grafana-v{{ grafana_version }}"
+    dest: /opt/grafana
+    state: link
+
+- name: Generate Grafana configuration
+  template:
+    src: grafana.ini.j2
+    dest: "{{ grafana_config_dir }}/grafana.ini"
+    owner: "{{ grafana_user }}"
+    group: "{{ grafana_group }}"
+    mode: "0644"
+  notify: Restart grafana
+
+- name: Configure datasource provisioning
+  template:
+    src: datasources.yml.j2
+    dest: "{{ grafana_config_dir }}/provisioning/datasources/datasources.yml"
+    owner: "{{ grafana_user }}"
+    group: "{{ grafana_group }}"
+    mode: "0644"
+  notify: Restart grafana
+
+- name: Configure dashboard provisioning
+  template:
+    src: dashboards.yml.j2
+    dest: "{{ grafana_config_dir }}/provisioning/dashboards/dashboards.yml"
+    owner: "{{ grafana_user }}"
+    group: "{{ grafana_group }}"
+    mode: "0644"
+  notify: Restart grafana
+
+- name: Copy Avalanche dashboard
+  copy:
+    src: "{{ playbook_dir }}/../../shared/dashboards/avalanche-l1.json"
+    dest: "{{ grafana_data_dir }}/dashboards/avalanche-l1.json"
+    owner: "{{ grafana_user }}"
+    group: "{{ grafana_group }}"
+    mode: "0644"
+  notify: Restart grafana
+
+- name: Create systemd service
+  template:
+    src: grafana.service.j2
+    dest: /etc/systemd/system/grafana.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart grafana
+
+- name: Enable and start Grafana
+  systemd:
+    name: grafana
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Wait for Grafana to be ready
+  uri:
+    url: "http://127.0.0.1:{{ grafana_port }}/api/health"
+    method: GET
+  register: grafana_ready
+  until: grafana_ready.status == 200
+  retries: 30
+  delay: 5
+
+- name: Clean up temp files
+  file:
+    path: /tmp/grafana.tar.gz
+    state: absent

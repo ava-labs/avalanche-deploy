@@ -1,0 +1,44 @@
+# GCP Terraform Configuration
+# Copy to terraform.tfvars and customize
+
+# GCP project
+project_id = "your-project-id"
+
+# Region and zones
+region = "us-central1"
+zones  = ["us-central1-a", "us-central1-b", "us-central1-c"]
+
+# Resource naming
+name_prefix = "avalanche-l1"
+environment = "fuji" # or "mainnet"
+
+# Network
+subnet_cidr = "10.0.0.0/24"
+
+# Operator IP (leave empty to auto-detect, or specify e.g., "1.2.3.4/32")
+operator_ip = ""
+
+# Node counts
+validator_count = 3
+rpc_count       = 2
+
+# Machine types
+# Fuji recommendations:
+#   Validators: n2-standard-8 (8 vCPU, 32GB) or larger
+#   RPC: n2-standard-4 (4 vCPU, 16GB) or larger
+# Mainnet recommendations:
+#   Validators: n2-standard-16 (16 vCPU, 64GB) or larger
+#   RPC: n2-standard-8 (8 vCPU, 32GB) or larger
+validator_machine_type = "n2-standard-8"
+rpc_machine_type       = "n2-standard-4"
+
+# Disk configuration
+disk_size_gb = 500 # GB
+
+# SSH configuration
+ssh_user       = "ubuntu"
+ssh_public_key = "" # Content of your public key
+
+# Access control
+enable_public_rpc     = false
+enable_public_grafana = true

@@ -1,0 +1,21 @@
+[Unit]
+Description=Prometheus Monitoring
+Documentation=https://prometheus.io/docs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ prometheus_user }}
+Group={{ prometheus_group }}
+ExecStart=/usr/local/bin/prometheus \
+    --config.file={{ prometheus_config_dir }}/prometheus.yml \
+    --storage.tsdb.path={{ prometheus_data_dir }} \
+    --storage.tsdb.retention.time={{ retention_time }} \
+    --web.listen-address=0.0.0.0:{{ prometheus_port }} \
+    --web.enable-lifecycle
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

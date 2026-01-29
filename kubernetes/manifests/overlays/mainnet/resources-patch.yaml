@@ -1,0 +1,3 @@
+# This file patches resources for mainnet (larger instances)
+# Currently the resources are defined directly in validators.yaml and rpc.yaml
+# This file is a placeholder for future patches

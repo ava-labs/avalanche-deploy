@@ -1,0 +1,10 @@
+{
+    "http-host": "0.0.0.0",
+    "http-allowed-hosts": "*",
+    "api-admin-enabled": false,
+    "api-info-enabled": true,
+    "api-health-enabled": true,
+    "index-enabled": false,
+    "log-level": "info",
+    "log-display-level": "info"
+}

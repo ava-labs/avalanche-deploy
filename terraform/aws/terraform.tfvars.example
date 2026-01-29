@@ -1,0 +1,45 @@
+# AWS Terraform Configuration
+# Copy to terraform.tfvars and customize
+
+# Region and availability zones
+region             = "us-east-1"
+availability_zones = ["us-east-1a", "us-east-1b", "us-east-1c"]
+
+# Resource naming
+name_prefix = "avalanche-l1"
+environment = "fuji" # or "mainnet"
+
+# Network
+vpc_cidr = "10.0.0.0/16"
+
+# Operator IP (leave empty to auto-detect, or specify e.g., "1.2.3.4/32")
+operator_ip = ""
+
+# Node counts
+validator_count = 3
+rpc_count       = 2
+
+# Instance types
+# Fuji recommendations:
+#   Validators: m6i.2xlarge (8 vCPU, 32GB) or larger
+#   RPC: m6i.xlarge (4 vCPU, 16GB) or larger
+# Mainnet recommendations:
+#   Validators: m6i.4xlarge (16 vCPU, 64GB) or larger
+#   RPC: m6i.2xlarge (8 vCPU, 32GB) or larger
+validator_instance_type = "m6i.2xlarge"
+rpc_instance_type       = "m6i.xlarge"
+
+# Disk configuration
+disk_size_gb   = 500  # GB
+disk_iops      = 6000
+disk_throughput = 500 # MB/s
+
+# SSH - provide ONE of these:
+# Option 1: Content of your public key (creates new key pair)
+ssh_public_key = ""
+# Option 2: Name of existing AWS key pair
+ssh_key_name = ""
+
+# Access control
+enable_public_rpc     = false # Set true to expose RPC to internet
+enable_public_grafana = true  # Grafana dashboard access

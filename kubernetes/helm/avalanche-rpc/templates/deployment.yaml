@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "avalanche-rpc.fullname" . }}
+  labels:
+    {{- include "avalanche-rpc.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "avalanche-rpc.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "avalanche-rpc.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "avalanche-rpc.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      initContainers:
+        {{- if .Values.subnetEvm.enabled }}
+        - name: download-subnet-evm
+          image: curlimages/curl:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              VERSION={{ .Values.subnetEvm.version | trimPrefix "v" }}
+              curl -L -o /plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy \
+                "https://github.com/ava-labs/subnet-evm/releases/download/v${VERSION}/subnet-evm_${VERSION}_linux_amd64.tar.gz" | tar -xz -C /plugins
+          volumeMounts:
+            - name: plugins
+              mountPath: /plugins
+        {{- end }}
+      containers:
+        - name: avalanchego
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --network-id={{ include "avalanche-rpc.networkId" . }}
+            - --http-host=0.0.0.0
+            - --http-port={{ .Values.config.httpPort }}
+            - --staking-port={{ .Values.config.stakingPort }}
+            - --log-level={{ .Values.config.logLevel }}
+            - --api-admin-enabled={{ .Values.config.apiAdminEnabled }}
+            - --api-info-enabled={{ .Values.config.apiInfoEnabled }}
+            - --api-health-enabled={{ .Values.config.apiHealthEnabled }}
+            - --index-enabled={{ .Values.config.indexEnabled }}
+            - --db-dir=/data/db
+            - --plugin-dir=/plugins
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.httpPort }}
+              protocol: TCP
+            - name: staking
+              containerPort: {{ .Values.config.stakingPort }}
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: plugins
+              mountPath: /plugins
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "avalanche-rpc.fullname" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: plugins
+          emptyDir: {}

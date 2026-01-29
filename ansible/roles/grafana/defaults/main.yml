@@ -1,0 +1,18 @@
+---
+# Grafana role defaults
+
+grafana_version: "11.2.2"
+grafana_user: grafana
+grafana_group: grafana
+
+grafana_config_dir: /etc/grafana
+grafana_data_dir: /var/lib/grafana
+grafana_port: 3000
+
+# Authentication
+grafana_anonymous_enabled: true
+grafana_admin_user: admin
+grafana_admin_password: admin
+
+# Prometheus datasource
+prometheus_url: "http://localhost:9090"

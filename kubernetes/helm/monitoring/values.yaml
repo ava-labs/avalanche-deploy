@@ -1,0 +1,76 @@
+# Monitoring stack values
+
+prometheus:
+  enabled: true
+  server:
+    persistentVolume:
+      size: 50Gi
+    retention: 15d
+
+  serverFiles:
+    prometheus.yml:
+      scrape_configs:
+        - job_name: 'avalanche-validators'
+          kubernetes_sd_configs:
+            - role: pod
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+              action: keep
+              regex: avalanche-validator
+            - source_labels: [__meta_kubernetes_pod_ip]
+              target_label: __address__
+              replacement: ${1}:9650
+          metrics_path: '/ext/metrics'
+
+        - job_name: 'avalanche-rpc'
+          kubernetes_sd_configs:
+            - role: pod
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+              action: keep
+              regex: avalanche-rpc
+            - source_labels: [__meta_kubernetes_pod_ip]
+              target_label: __address__
+              replacement: ${1}:9650
+          metrics_path: '/ext/metrics'
+
+grafana:
+  enabled: true
+
+  adminUser: admin
+  adminPassword: admin  # Change this!
+
+  persistence:
+    enabled: true
+    size: 10Gi
+
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          url: http://{{ .Release.Name }}-prometheus-server
+          access: proxy
+          isDefault: true
+          uid: prometheus
+
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: 'avalanche'
+          orgId: 1
+          folder: 'Avalanche'
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/avalanche
+
+  dashboardsConfigMaps:
+    avalanche: "avalanche-dashboards"
+
+  service:
+    type: LoadBalancer
+    port: 3000

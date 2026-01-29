@@ -1,0 +1,155 @@
+---
+# Phase 2: Configure nodes to track and validate your L1
+#
+# Run this AFTER create-l1 tool has created your subnet/chain.
+#
+# Usage:
+#   ansible-playbook playbooks/02-configure-l1.yml -e subnet_id=<SUBNET_ID>
+#
+# Or with chain config:
+#   ansible-playbook playbooks/02-configure-l1.yml \
+#     -e subnet_id=<SUBNET_ID> \
+#     -e chain_id=<CHAIN_ID>
+
+- name: Gather L1 Validator Info
+  hosts: validators
+  become: false
+  gather_facts: false
+
+  tasks:
+    - name: Get NodeID from each validator
+      uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.getNodeID"
+        return_content: yes
+      register: node_id_result
+      delegate_to: "{{ inventory_hostname }}"
+
+    - name: Store NodeID as fact
+      set_fact:
+        node_id: "{{ node_id_result.json.result.nodeID }}"
+
+- name: Configure Nodes for L1 (Phase 2)
+  hosts: validators:rpc
+  become: true
+  gather_facts: true
+
+  vars:
+    subnet_id: "{{ subnet_id }}"  # Required - pass via -e
+    chain_id: "{{ chain_id | default('') }}"  # Optional
+    avalanchego_network: "{{ network | default('fuji') }}"
+    avalanchego_config_dir: /etc/avalanchego
+    avalanchego_data_dir: /var/lib/avalanchego
+    avalanchego_log_dir: /var/log/avalanchego
+    avalanchego_plugin_dir: "{{ avalanchego_data_dir }}/plugins"
+    avalanchego_user: avalanche
+    avalanchego_group: avalanche
+    http_port: 9650
+    staking_port: 9651
+    api_admin_enabled: false
+    api_info_enabled: true
+    api_health_enabled: true
+    log_level: info
+    log_display_level: info
+    partial_sync_primary_network: true
+    network_ids:
+      fuji: 5
+      mainnet: 1
+
+  pre_tasks:
+    - name: Validate subnet_id is provided
+      fail:
+        msg: "subnet_id is required. Run with: -e subnet_id=<YOUR_SUBNET_ID>"
+      when: subnet_id is not defined or subnet_id == ""
+
+    - name: Build L1 bootstrap lists
+      set_fact:
+        l1_bootstrap_ids: "{{ groups['validators'] | map('extract', hostvars, 'node_id') | list }}"
+        l1_bootstrap_ips: "{{ groups['validators'] | map('extract', hostvars, 'ansible_host') | map('regex_replace', '$', ':9651') | list }}"
+
+  tasks:
+    - name: Update node config with subnet tracking and bootstrap info
+      template:
+        src: ../roles/avalanchego/templates/node-config.json.j2
+        dest: "{{ avalanchego_config_dir }}/node.json"
+        owner: "{{ avalanchego_user }}"
+        group: "{{ avalanchego_group }}"
+        mode: "0644"
+      vars:
+        track_subnets:
+          - "{{ subnet_id }}"
+      notify: Restart avalanchego
+
+    - name: Create chain config directory for L1
+      file:
+        path: "{{ avalanchego_config_dir }}/chains/{{ chain_id }}"
+        state: directory
+        owner: "{{ avalanchego_user }}"
+        group: "{{ avalanchego_group }}"
+        mode: "0755"
+      when: chain_id != ""
+
+    - name: Copy chain config
+      copy:
+        src: "{{ playbook_dir }}/../../shared/configs/chain-config.json"
+        dest: "{{ avalanchego_config_dir }}/chains/{{ chain_id }}/config.json"
+        owner: "{{ avalanchego_user }}"
+        group: "{{ avalanchego_group }}"
+        mode: "0644"
+      when: chain_id != ""
+      failed_when: false
+      notify: Restart avalanchego
+
+  handlers:
+    - name: Restart avalanchego
+      systemd:
+        name: avalanchego
+        state: restarted
+
+  post_tasks:
+    - name: Wait for node to be healthy
+      uri:
+        url: "http://127.0.0.1:9650/ext/health"
+        method: GET
+        return_content: yes
+      register: health_check
+      until: health_check.status == 200
+      retries: 60
+      delay: 10
+
+    - name: Display status
+      debug:
+        msg: "{{ inventory_hostname }} ({{ node_id }}) is now tracking subnet {{ subnet_id }}"
+
+- name: Display completion message
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Show L1 info
+      debug:
+        msg: |
+
+          ============================================
+          Phase 2 Complete - L1 Configured
+          ============================================
+
+          Subnet ID: {{ subnet_id }}
+          {% if chain_id is defined and chain_id != '' %}
+          Chain ID:  {{ chain_id }}
+          {% endif %}
+
+          Your L1 validators are now running!
+
+          Bootstrap IDs configured for validator discovery.
+
+          RPC Endpoints:
+          {% for host in groups['validators'] | default([]) %}
+            http://{{ hostvars[host]['ansible_host'] }}:9650/ext/bc/{{ chain_id }}/rpc
+          {% endfor %}
+
+          ============================================

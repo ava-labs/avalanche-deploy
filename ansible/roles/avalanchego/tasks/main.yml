@@ -1,0 +1,121 @@
+---
+# Avalanchego installation and configuration
+
+- name: Create avalanche user
+  user:
+    name: "{{ avalanchego_user }}"
+    group: "{{ avalanchego_group }}"
+    system: yes
+    shell: /bin/false
+    create_home: no
+  register: user_created
+
+- name: Create avalanche group
+  group:
+    name: "{{ avalanchego_group }}"
+    system: yes
+  when: user_created is changed
+
+- name: Create directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ avalanchego_user }}"
+    group: "{{ avalanchego_group }}"
+    mode: "0755"
+  loop:
+    - "{{ avalanchego_data_dir }}"
+    - "{{ avalanchego_config_dir }}"
+    - "{{ avalanchego_log_dir }}"
+    - "{{ avalanchego_plugin_dir }}"
+    - "{{ avalanchego_config_dir }}/chains"
+
+- name: Download avalanchego
+  get_url:
+    url: "https://github.com/ava-labs/avalanchego/releases/download/{{ avalanchego_version }}/avalanchego-linux-amd64-{{ avalanchego_version }}.tar.gz"
+    dest: /tmp/avalanchego.tar.gz
+    mode: "0644"
+
+- name: Extract avalanchego
+  unarchive:
+    src: /tmp/avalanchego.tar.gz
+    dest: /tmp/
+    remote_src: yes
+
+- name: Install avalanchego binary
+  copy:
+    src: "/tmp/avalanchego-{{ avalanchego_version }}/avalanchego"
+    dest: /usr/local/bin/avalanchego
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: yes
+
+- name: Download subnet-evm plugin
+  get_url:
+    url: "https://github.com/ava-labs/subnet-evm/releases/download/{{ subnet_evm_version }}/subnet-evm_{{ subnet_evm_version | regex_replace('^v', '') }}_linux_amd64.tar.gz"
+    dest: /tmp/subnet-evm.tar.gz
+    mode: "0644"
+
+- name: Extract subnet-evm
+  unarchive:
+    src: /tmp/subnet-evm.tar.gz
+    dest: /tmp/
+    remote_src: yes
+
+- name: Install subnet-evm plugin
+  copy:
+    src: /tmp/subnet-evm
+    dest: "{{ avalanchego_plugin_dir }}/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
+    owner: "{{ avalanchego_user }}"
+    group: "{{ avalanchego_group }}"
+    mode: "0755"
+    remote_src: yes
+
+- name: Generate node configuration
+  template:
+    src: node-config.json.j2
+    dest: "{{ avalanchego_config_dir }}/node.json"
+    owner: "{{ avalanchego_user }}"
+    group: "{{ avalanchego_group }}"
+    mode: "0644"
+  notify: Restart avalanchego
+
+- name: Create systemd service
+  template:
+    src: avalanchego.service.j2
+    dest: /etc/systemd/system/avalanchego.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart avalanchego
+
+- name: Enable and start avalanchego
+  systemd:
+    name: avalanchego
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Wait for node to be healthy
+  uri:
+    url: "http://127.0.0.1:{{ http_port }}/ext/health"
+    method: GET
+    return_content: yes
+  register: health_check
+  until: health_check.status == 200 and (health_check.json.healthy | default(false))
+  retries: 60
+  delay: 10
+  ignore_errors: yes
+
+- name: Clean up temp files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/avalanchego.tar.gz
+    - "/tmp/avalanchego-{{ avalanchego_version }}"
+    - /tmp/subnet-evm.tar.gz
+    - /tmp/subnet-evm

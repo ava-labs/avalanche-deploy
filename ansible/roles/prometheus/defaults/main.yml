@@ -1,0 +1,17 @@
+---
+# Prometheus role defaults
+
+prometheus_version: "2.54.1"
+prometheus_user: prometheus
+prometheus_group: prometheus
+
+prometheus_config_dir: /etc/prometheus
+prometheus_data_dir: /var/lib/prometheus
+prometheus_port: 9090
+
+# Scrape interval
+scrape_interval: 15s
+evaluation_interval: 15s
+
+# Retention
+retention_time: 15d

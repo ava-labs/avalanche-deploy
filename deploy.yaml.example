@@ -1,0 +1,74 @@
+# Avalanche L1 Deployment Configuration
+# Copy to deploy.yaml and customize
+
+# Network: fuji or mainnet
+network: fuji
+
+# L1 Configuration
+l1:
+  name: "my-l1"
+  # Chain ID for your EVM chain (pick a unique one)
+  chain_id: 12345
+
+# Validator nodes (participate in consensus)
+validators:
+  count: 3
+  # Initial balance for each validator (in AVAX, used during ConvertSubnetToL1)
+  initial_balance: 1  # AVAX
+
+# RPC nodes (API access only, no validation)
+rpc_nodes:
+  count: 2
+
+# VM Configuration
+vm:
+  # subnet-evm is the default EVM-compatible VM
+  type: subnet-evm
+  version: v0.8.0
+  # Uncomment to use a custom VM binary
+  # custom_binary: /path/to/your-vm
+
+# Genesis configuration (for EVM chains)
+genesis:
+  # Gas limit per block
+  gas_limit: 15000000
+  # Target block rate in seconds
+  target_block_rate: 2
+  # Min base fee in wei
+  min_base_fee: 25000000000  # 25 gwei
+  # Pre-funded addresses (address: balance in wei)
+  alloc:
+    "0xYourAddress": "1000000000000000000000"  # 1000 native tokens
+
+# Chain runtime configuration
+chain_config:
+  # Transaction pool settings
+  tx_pool_account_slots: 64
+  tx_pool_global_slots: 8192
+  # Cache settings (MB)
+  trie_clean_cache: 512
+  trie_dirty_cache: 512
+  snapshot_cache: 512
+
+# Node configuration
+node_config:
+  # Enable metrics endpoint
+  metrics_enabled: true
+  # Log level: debug, info, warn, error
+  log_level: info
+  # API endpoints to enable
+  api_admin_enabled: false
+  api_info_enabled: true
+  api_health_enabled: true
+
+# Monitoring
+monitoring:
+  enabled: true
+  # Prometheus scrape interval
+  scrape_interval: 15s
+  # Grafana settings
+  grafana:
+    # Anonymous access (set false for production)
+    anonymous_access: true
+    # Admin password (change this!)
+    admin_password: "admin"

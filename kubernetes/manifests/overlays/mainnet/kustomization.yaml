@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: avalanche
+
+resources:
+  - ../../base
+  - validators.yaml
+  - rpc.yaml
+
+commonLabels:
+  network: mainnet
+
+configMapGenerator:
+  - name: avalanche-network
+    literals:
+      - NETWORK_ID=1
+      - NETWORK_NAME=mainnet
+
+# Mainnet uses larger instances
+patchesStrategicMerge:
+  - resources-patch.yaml

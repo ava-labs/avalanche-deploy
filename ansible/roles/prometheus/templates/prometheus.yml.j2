@@ -1,0 +1,24 @@
+global:
+  scrape_interval: {{ scrape_interval }}
+  evaluation_interval: {{ evaluation_interval }}
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:{{ prometheus_port }}']
+
+  - job_name: 'avalanche-validators'
+    metrics_path: '/ext/metrics'
+    static_configs:
+      - targets:
+{% for host in groups['validators'] %}
+          - '{{ hostvars[host]['ansible_host'] }}:9650'
+{% endfor %}
+
+  - job_name: 'avalanche-rpc'
+    metrics_path: '/ext/metrics'
+    static_configs:
+      - targets:
+{% for host in groups['rpc'] %}
+          - '{{ hostvars[host]['ansible_host'] }}:9650'
+{% endfor %}

@@ -1,0 +1,17 @@
+{
+    "network-id": "{{ network_ids[avalanchego_network] }}",
+    "http-host": "0.0.0.0",
+    "http-port": {{ http_port }},
+    "staking-port": {{ staking_port }},
+    "http-allowed-hosts": "*",
+    "api-admin-enabled": {{ api_admin_enabled | lower }},
+    "api-info-enabled": {{ api_info_enabled | lower }},
+    "api-health-enabled": {{ api_health_enabled | lower }},
+    "index-enabled": false,
+    "log-level": "{{ log_level }}",
+    "log-display-level": "{{ log_display_level }}",
+    "log-dir": "{{ avalanchego_log_dir }}",
+    "db-dir": "{{ avalanchego_data_dir }}/db",
+    "plugin-dir": "{{ avalanchego_plugin_dir }}",
+    "chain-config-dir": "{{ avalanchego_config_dir }}/chains"
+}

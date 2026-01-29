@@ -1,0 +1,9 @@
+---
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Restart avalanchego
+  systemd:
+    name: avalanchego
+    state: restarted

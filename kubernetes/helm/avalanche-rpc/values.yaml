@@ -1,0 +1,86 @@
+# Default values for avalanche-rpc
+
+replicaCount: 2
+
+network: fuji
+
+image:
+  repository: avaplatform/avalanchego
+  tag: "v1.14.1"
+  pullPolicy: IfNotPresent
+
+subnetEvm:
+  enabled: true
+  version: "v0.8.0"
+
+resources:
+  requests:
+    cpu: "2"
+    memory: "8Gi"
+  limits:
+    cpu: "4"
+    memory: "16Gi"
+
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 500Gi
+  accessModes:
+    - ReadWriteOnce
+
+config:
+  httpPort: 9650
+  stakingPort: 9651
+  logLevel: info
+  apiAdminEnabled: false
+  apiInfoEnabled: true
+  apiHealthEnabled: true
+  indexEnabled: true  # Enable indexing for RPC queries
+
+service:
+  type: LoadBalancer
+  httpPort: 9650
+  stakingPort: 9651
+
+# Horizontal pod autoscaler
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: avalanche-rpc
+          topologyKey: topology.kubernetes.io/zone
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+livenessProbe:
+  httpGet:
+    path: /ext/health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /ext/health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 5
+
+serviceAccount:
+  create: true
+  name: ""
+
+nodeSelector: {}
+tolerations: []

@@ -1,0 +1,15 @@
+apiVersion: v2
+name: avalanche-rpc
+description: Avalanche L1 RPC Nodes
+type: application
+version: 0.1.0
+appVersion: "1.14.1"
+
+keywords:
+  - avalanche
+  - blockchain
+  - rpc
+
+home: https://github.com/your-org/avalanche-deploy
+sources:
+  - https://github.com/ava-labs/avalanchego

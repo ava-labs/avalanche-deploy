@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: avalanche-config
+  namespace: avalanche
+data:
+  node-config.json: |
+    {
+        "http-host": "0.0.0.0",
+        "http-allowed-hosts": "*",
+        "api-admin-enabled": false,
+        "api-info-enabled": true,
+        "api-health-enabled": true,
+        "index-enabled": false,
+        "log-level": "info",
+        "log-display-level": "info"
+    }
+  chain-config.json: |
+    {
+        "tx-pool-account-slots": 64,
+        "tx-pool-global-slots": 8192,
+        "tx-pool-account-queue": 128,
+        "tx-pool-global-queue": 16384,
+        "tx-pool-lifetime": "10m",
+        "trie-clean-cache": 512,
+        "trie-dirty-cache": 512,
+        "snapshot-cache": 512,
+        "pruning-enabled": true,
+        "local-txs-enabled": false
+    }

@@ -1,0 +1,33 @@
+# Terraform
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock.info
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+
+# Ansible
+ansible/inventory/*_hosts
+ansible/node_ids.txt
+
+# Generated
+l1.env
+*.env.local
+notes/terraform-outputs.json
+
+# Tools
+tools/create-l1/create-l1
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Internal
+notes/
+GENESIS.md
