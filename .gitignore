@@ -18,6 +18,7 @@ l1.env
 .env
 *-creds.sh
 .aws-creds*
+e2e-deploy.sh
 notes/terraform-outputs.json
 
 # Tools

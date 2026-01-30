@@ -19,6 +19,24 @@ make destroy   # tear down (stops billing!)
 
 Pick one. Most people start with Terraform + Ansible.
 
+### Default Architecture (2 Validators + 1 RPC)
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Validator 1   │    │   Validator 2   │    │    RPC Node     │
+│                 │    │                 │    │                 │
+│  - avalanchego  │◄──►│  - avalanchego  │◄──►│  - avalanchego  │
+│  - Prometheus   │    │                 │    │                 │
+│  - Grafana      │    │                 │    │  Blockscout ──► │
+│  - Blockscout   │    │                 │    │   (connects)    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+     monitoring              validator            RPC queries
+```
+
+- **Validators**: Produce blocks, validate transactions
+- **RPC Node**: Handle queries, Blockscout indexing (keeps validator load low)
+- **Monitoring**: Grafana dashboards for all nodes, Blockscout explorer
+
 ---
 
 ## Quick Start (AWS)
@@ -69,8 +87,8 @@ Edit `terraform.tfvars`:
 name_prefix = "my-l1"
 environment = "fuji"
 
-validator_count = 3
-rpc_count       = 1  # Add an RPC node for querying
+validator_count = 2  # Minimum recommended
+rpc_count       = 1  # For RPC queries and Blockscout
 
 # Paste your public key
 ssh_public_key = "ssh-rsa AAAA..."
@@ -304,33 +322,40 @@ For production L1s, you can pre-deploy a TransparentUpgradeableProxy in genesis 
 
 ## Deploy Monitoring (Prometheus + Grafana)
 
-Deploy monitoring stack to track node health and performance:
+Deploy monitoring stack to track node health and performance. Prometheus scrapes metrics from **all validators and RPC nodes**.
 
 ```bash
-source l1.env
 cd ansible
 ansible-playbook playbooks/03-setup-monitoring.yml \
   -i inventory/aws_hosts
 ```
 
-Access Grafana at `http://<monitoring-ip>:3000` (default: admin/admin).
+Access Grafana at `http://<monitoring-ip>:3000` (default credentials: admin/admin).
 
-The monitoring host is the first validator by default. Change with `-e "monitoring_host=<ip>"`.
+```bash
+# Get the Grafana URL
+cd terraform/aws && terraform output grafana_url
+```
+
+The monitoring host is the first validator by default. Grafana dashboards show:
+- Node health (P-Chain, X-Chain, C-Chain, L1 chain status)
+- Resource usage (CPU, memory, disk, network)
+- Avalanche metrics (block height, tx throughput, peers)
 
 ---
 
 ## Deploy Blockscout Block Explorer
 
-After your L1 is running, deploy Blockscout to explore transactions:
+After your L1 is running, deploy Blockscout to explore transactions. Blockscout connects to the **RPC node** (not validators) for indexing.
 
 ```bash
 # Source your L1 config
 source l1.env
 
-# Get RPC node IP (or use a validator IP)
+# Get RPC node IP
 RPC_IP=$(cd terraform/aws && terraform output -json rpc_ips | jq -r '.[0]')
 
-# Deploy Blockscout
+# Deploy Blockscout (runs on monitoring host, connects to RPC)
 cd ansible
 ansible-playbook playbooks/04-deploy-blockscout.yml \
   -i inventory/aws_hosts \
@@ -342,12 +367,15 @@ Blockscout will be available at:
 - **Frontend**: http://\<monitoring-ip\>:4001
 - **API**: http://\<monitoring-ip\>:4000/api
 
-Get the URL from terraform output:
 ```bash
+# Get the Blockscout URL
 cd terraform/aws && terraform output blockscout_url
 ```
 
-> **Note:** Initial indexing may take time depending on chain history. Blockscout runs on the monitoring host (first validator by default).
+**Architecture:**
+- Blockscout runs on the monitoring host (first validator)
+- Connects to RPC node for chain data (keeps validator load low)
+- Initial indexing may take time depending on chain history
 
 ---
 
@@ -415,11 +443,11 @@ terraform output blockscout_url
 
 ## Cost Estimate
 
-| Cloud | Instance | Monthly Cost (3 validators + 1 RPC) |
+| Cloud | Instance | Monthly Cost (2 validators + 1 RPC) |
 |-------|----------|-------------------------------------|
-| AWS   | m6id.large | ~$280 |
-| GCP   | n2-standard-2 + local SSD | ~$240 |
-| Azure | Standard_L8s_v3 | ~$530 |
+| AWS   | m6id.large | ~$210 |
+| GCP   | n2-standard-2 + local SSD | ~$180 |
+| Azure | Standard_L8s_v3 | ~$400 |
 
 Remember to `make destroy` when done testing!
 

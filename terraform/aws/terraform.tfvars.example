@@ -15,9 +15,9 @@ vpc_cidr = "10.0.0.0/16"
 # Operator IP (leave empty to auto-detect, or specify e.g., "1.2.3.4/32")
 operator_ip = ""
 
-# Node counts
-validator_count = 3
-rpc_count       = 2
+# Node counts (2 validators + 1 RPC is minimum recommended)
+validator_count = 2
+rpc_count       = 1
 
 # Instance types - using "d" variants for LOCAL NVMe storage (not network-attached EBS!)
 #

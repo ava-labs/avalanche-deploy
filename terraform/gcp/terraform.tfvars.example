@@ -19,8 +19,8 @@ subnet_cidr = "10.0.0.0/24"
 operator_ip = ""
 
 # Node counts
-validator_count = 3
-rpc_count       = 2
+validator_count = 2
+rpc_count       = 1
 
 # Machine types
 #
