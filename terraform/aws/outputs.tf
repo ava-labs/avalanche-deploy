@@ -43,12 +43,12 @@ output "ansible_inventory" {
   value       = <<-EOT
 [validators]
 %{for i, ip in aws_instance.validators[*].public_ip~}
-validator-${i + 1} ansible_host=${ip} ansible_user=ubuntu
+validator-${i + 1} ansible_host=${ip} ansible_user=ubuntu node_type=validator
 %{endfor~}
 
 [rpc]
 %{for i, ip in aws_instance.rpc[*].public_ip~}
-rpc-${i + 1} ansible_host=${ip} ansible_user=ubuntu
+rpc-${i + 1} ansible_host=${ip} ansible_user=ubuntu node_type=rpc
 %{endfor~}
 
 [monitoring]
@@ -67,12 +67,12 @@ resource "local_file" "ansible_inventory" {
   content  = <<-EOT
 [validators]
 %{for i, ip in aws_instance.validators[*].public_ip~}
-validator-${i + 1} ansible_host=${ip} ansible_user=ubuntu
+validator-${i + 1} ansible_host=${ip} ansible_user=ubuntu node_type=validator
 %{endfor~}
 
 [rpc]
 %{for i, ip in aws_instance.rpc[*].public_ip~}
-rpc-${i + 1} ansible_host=${ip} ansible_user=ubuntu
+rpc-${i + 1} ansible_host=${ip} ansible_user=ubuntu node_type=rpc
 %{endfor~}
 
 [monitoring]

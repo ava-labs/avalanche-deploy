@@ -43,12 +43,12 @@ output "ansible_inventory" {
   value       = <<-EOT
 [validators]
 %{for i, ip in azurerm_public_ip.validators[*].ip_address~}
-validator-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username}
+validator-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username} node_type=validator
 %{endfor~}
 
 [rpc]
 %{for i, ip in azurerm_public_ip.rpc[*].ip_address~}
-rpc-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username}
+rpc-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username} node_type=rpc
 %{endfor~}
 
 [monitoring]
@@ -63,12 +63,12 @@ resource "local_file" "ansible_inventory" {
   content  = <<-EOT
 [validators]
 %{for i, ip in azurerm_public_ip.validators[*].ip_address~}
-validator-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username}
+validator-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username} node_type=validator
 %{endfor~}
 
 [rpc]
 %{for i, ip in azurerm_public_ip.rpc[*].ip_address~}
-rpc-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username}
+rpc-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username} node_type=rpc
 %{endfor~}
 
 [monitoring]

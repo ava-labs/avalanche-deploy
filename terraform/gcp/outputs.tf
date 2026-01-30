@@ -38,12 +38,12 @@ output "ansible_inventory" {
   value       = <<-EOT
 [validators]
 %{for i, instance in google_compute_instance.validators~}
-validator-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user}
+validator-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user} node_type=validator
 %{endfor~}
 
 [rpc]
 %{for i, instance in google_compute_instance.rpc~}
-rpc-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user}
+rpc-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user} node_type=rpc
 %{endfor~}
 
 [monitoring]
@@ -58,12 +58,12 @@ resource "local_file" "ansible_inventory" {
   content  = <<-EOT
 [validators]
 %{for i, instance in google_compute_instance.validators~}
-validator-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user}
+validator-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user} node_type=validator
 %{endfor~}
 
 [rpc]
 %{for i, instance in google_compute_instance.rpc~}
-rpc-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user}
+rpc-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user} node_type=rpc
 %{endfor~}
 
 [monitoring]

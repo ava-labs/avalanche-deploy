@@ -89,9 +89,48 @@
     mode: "0755"
     remote_src: yes
 
-- name: Generate node configuration
-  template:
-    src: node-config.json.j2
+- name: Load custom node config from repo root
+  set_fact:
+    custom_node_config: "{{ lookup('file', playbook_dir + '/../../' + node_type + '-node-config.json') | from_json }}"
+  ignore_errors: yes
+
+- name: Build base node configuration
+  set_fact:
+    base_node_config:
+      network-id: "{{ network_ids[avalanchego_network] }}"
+      http-host: "0.0.0.0"
+      http-port: "{{ http_port }}"
+      staking-port: "{{ staking_port }}"
+      http-allowed-hosts: "*"
+      api-admin-enabled: "{{ api_admin_enabled }}"
+      api-info-enabled: "{{ api_info_enabled }}"
+      api-health-enabled: "{{ api_health_enabled }}"
+      index-enabled: "{{ index_enabled }}"
+      log-level: "{{ log_level }}"
+      log-display-level: "{{ log_display_level }}"
+      log-dir: "{{ avalanchego_log_dir }}"
+      db-dir: "{{ avalanchego_data_dir }}/db"
+      plugin-dir: "{{ avalanchego_plugin_dir }}"
+      chain-config-dir: "{{ avalanchego_config_dir }}/chains"
+      partial-sync-primary-network: "{{ partial_sync_primary_network | default(true) }}"
+
+- name: Add subnet tracking to config
+  set_fact:
+    base_node_config: "{{ base_node_config | combine({'track-subnets': track_subnets | join(',')}) }}"
+  when: track_subnets is defined and track_subnets | length > 0
+
+- name: Add L1 bootstrap info to config
+  set_fact:
+    base_node_config: "{{ base_node_config | combine({'bootstrap-ids': l1_bootstrap_ids | join(','), 'bootstrap-ips': l1_bootstrap_ips | join(',')}) }}"
+  when: l1_bootstrap_ids is defined and l1_bootstrap_ids | length > 0
+
+- name: Merge custom config with base config
+  set_fact:
+    final_node_config: "{{ base_node_config | combine(custom_node_config | default({})) }}"
+
+- name: Write node configuration
+  copy:
+    content: "{{ final_node_config | to_nice_json }}"
     dest: "{{ avalanchego_config_dir }}/node.json"
     owner: "{{ avalanchego_user }}"
     group: "{{ avalanchego_group }}"
