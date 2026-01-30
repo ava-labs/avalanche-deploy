@@ -16,13 +16,17 @@ blockscout_network_logo_url: ""
 blockscout_network_icon_url: ""
 
 # Chain configuration
-blockscout_chain_id: 43114
+# blockscout_chain_id is the Avalanche chain ID string (used in RPC URL paths)
+blockscout_chain_id: ""
+# blockscout_evm_chain_id is the numeric EVM chain ID (used for wallet/frontend NETWORK_ID)
+blockscout_evm_chain_id: 43114
 blockscout_coin_name: "AVAX"
 blockscout_coin_symbol: "AVAX"
 
 # RPC endpoint (required - set this to your L1 RPC)
-blockscout_rpc_url: "http://localhost:9650/ext/bc/{{ blockscout_chain_id }}/rpc"
-blockscout_ws_url: ""
+# Use host.docker.internal which resolves to the host from inside Docker containers
+blockscout_rpc_url: "http://host.docker.internal:9650/ext/bc/{{ blockscout_chain_id }}/rpc"
+blockscout_ws_url: "ws://host.docker.internal:9650/ext/bc/{{ blockscout_chain_id }}/ws"
 blockscout_trace_url: ""
 
 # Ports
@@ -53,8 +57,10 @@ blockscout_enable_sourcify: true
 blockscout_enable_smart_contract_verification: true
 
 # Indexer configuration
-blockscout_indexer_disable_pending_txs: false
-blockscout_indexer_disable_internal_txs: false
+# Disable pending tx fetcher - Subnet-EVM doesn't support txpool subscriptions
+blockscout_indexer_disable_pending_txs: true
+# Disable internal tx fetcher - Subnet-EVM doesn't support debug_traceTransaction
+blockscout_indexer_disable_internal_txs: true
 blockscout_block_transformer: base
 
 # API configuration

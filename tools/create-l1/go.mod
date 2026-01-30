@@ -7,6 +7,7 @@ toolchain go1.24.12
 require (
 	github.com/ava-labs/avalanchego v1.14.1
 	github.com/ava-labs/ledger-avalanche-go v1.1.0
+	golang.org/x/crypto v0.45.0
 )
 
 require (
@@ -93,7 +94,6 @@ require (
 	go.uber.org/mock v0.5.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/exp v0.0.0-20241215155358-4a5509556b9e // indirect
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/net v0.47.0 // indirect

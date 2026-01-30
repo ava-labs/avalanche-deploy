@@ -125,6 +125,15 @@ resource "aws_security_group" "validators" {
     self        = true
   }
 
+  # Metrics scraping from within VPC (for Prometheus on validator-1 to reach other nodes)
+  ingress {
+    description = "Metrics scraping from VPC"
+    from_port   = 9650
+    to_port     = 9650
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
   # Prometheus metrics - operator only
   ingress {
     description = "Prometheus scrape"
@@ -177,6 +186,42 @@ resource "aws_security_group" "rpc" {
     to_port     = 9651
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Blockscout API - configurable (runs on RPC node)
+  ingress {
+    description = "Blockscout API"
+    from_port   = 4000
+    to_port     = 4000
+    protocol    = "tcp"
+    cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
+  }
+
+  # Blockscout Frontend - configurable (runs on RPC node)
+  ingress {
+    description = "Blockscout Frontend"
+    from_port   = 4001
+    to_port     = 4001
+    protocol    = "tcp"
+    cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
+  }
+
+  # Blockscout Stats API - configurable (runs on RPC node, needed for frontend charts)
+  ingress {
+    description = "Blockscout Stats"
+    from_port   = 8050
+    to_port     = 8050
+    protocol    = "tcp"
+    cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
+  }
+
+  # Metrics scraping from within VPC (for Prometheus on monitoring node)
+  ingress {
+    description = "Metrics scraping from VPC"
+    from_port   = 9650
+    to_port     = 9650
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
   }
 
   egress {

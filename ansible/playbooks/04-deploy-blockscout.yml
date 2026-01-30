@@ -13,16 +13,21 @@
 #   blockscout_coin_symbol: Token symbol (default: AVAX)
 
 - name: Deploy Blockscout Block Explorer
-  hosts: monitoring
+  hosts: rpc
   become: yes
   vars:
     # Override these in your inventory or via -e
     blockscout_network_name: "{{ l1_name | default('Avalanche L1') }}"
     blockscout_network_short_name: "{{ l1_short_name | default('AVAX-L1') }}"
-    blockscout_chain_id: "{{ chain_id | default(43114) }}"
+    # chain_id is the Avalanche chain ID (string, used for RPC URL paths)
+    blockscout_chain_id: "{{ chain_id | default('') }}"
+    # evm_chain_id is the numeric EVM chain ID (used for wallet/frontend)
+    blockscout_evm_chain_id: "{{ evm_chain_id | default(43114) }}"
     blockscout_coin_symbol: "{{ coin_symbol | default('AVAX') }}"
     blockscout_coin_name: "{{ coin_name | default('Avalanche') }}"
-    blockscout_rpc_url: "{{ rpc_url | default('http://localhost:9650/ext/bc/' + (chain_id | string) + '/rpc') }}"
+    # Use host.docker.internal which maps to the host machine from inside Docker
+    blockscout_rpc_url: "{{ rpc_url | default('http://host.docker.internal:9650/ext/bc/' + (chain_id | string) + '/rpc') }}"
+    blockscout_ws_url: "{{ ws_url | default('ws://host.docker.internal:9650/ext/bc/' + (chain_id | string) + '/ws') }}"
 
   roles:
     - blockscout

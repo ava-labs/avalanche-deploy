@@ -24,8 +24,8 @@ output "grafana_url" {
 }
 
 output "blockscout_url" {
-  description = "Blockscout block explorer URL"
-  value       = "http://${aws_instance.validators[0].public_ip}:4001"
+  description = "Blockscout block explorer URL (on RPC node)"
+  value       = length(aws_instance.rpc) > 0 ? "http://${aws_instance.rpc[0].public_ip}:4001" : ""
 }
 
 output "monitoring_ip" {
