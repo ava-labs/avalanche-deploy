@@ -27,5 +27,11 @@
 
   "continuous-profiler-dir": "",
   "continuous-profiler-frequency": 900000000000,
-  "continuous-profiler-max-files": 5
+  "continuous-profiler-max-files": 5,
+
+  "priority-regossip-frequency": "1s",
+  "priority-regossip-max-txs": 32,
+  "priority-regossip-txs-per-address": 16,
+
+  "min-block-delay": "250ms"
 }

@@ -129,9 +129,9 @@
         mode: "0755"
       when: chain_id != ""
 
-    - name: Copy chain config from root
+    - name: Copy chain config (validator or RPC specific)
       copy:
-        src: "{{ playbook_dir }}/../../chain-config.json"
+        src: "{{ playbook_dir }}/../../{{ node_type }}-chain-config.json"
         dest: "{{ avalanchego_config_dir }}/chains/{{ chain_id }}/config.json"
         owner: "{{ avalanchego_user }}"
         group: "{{ avalanchego_group }}"

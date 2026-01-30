@@ -1,0 +1,33 @@
+{
+  "log-level": "info",
+
+  "eth-apis": [
+    "eth",
+    "eth-filter",
+    "net",
+    "web3",
+    "internal-eth",
+    "internal-blockchain",
+    "internal-transaction",
+    "internal-debug",
+    "debug-tracer"
+  ],
+
+  "tx-pool-account-slots": 64,
+  "tx-pool-global-slots": 8192,
+  "tx-pool-account-queue": 128,
+  "tx-pool-global-queue": 4096,
+  "tx-pool-lifetime": "10m",
+
+  "trie-clean-cache": 512,
+  "trie-dirty-cache": 512,
+  "snapshot-cache": 256,
+
+  "pruning-enabled": false,
+  "local-txs-enabled": false,
+  "state-sync-enabled": false,
+
+  "continuous-profiler-dir": "",
+  "continuous-profiler-frequency": 900000000000,
+  "continuous-profiler-max-files": 5
+}

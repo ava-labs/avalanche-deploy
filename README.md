@@ -330,20 +330,31 @@ EVM genesis configuration for your L1 chain. Key settings:
 - `feeConfig`: Gas limits and base fees
 - `warpConfig`: Cross-chain messaging settings
 
-### chain-config.json
-Subnet-EVM chain configuration (deployed to all nodes). Controls:
-- **Transaction Pool**: `tx-pool-*` settings for mempool size
-- **Caching**: `trie-clean-cache`, `trie-dirty-cache`, `snapshot-cache`
-- **APIs**: Which RPC methods to expose
+### validator-chain-config.json
+Subnet-EVM chain config for **validators**:
+- **Pruning enabled**: Reduces disk usage by pruning old state
+- **Block timing**: `min-block-delay: 250ms` for faster block production
+- **State sync enabled**: Faster initial sync
 
 ```json
 {
-  "tx-pool-account-slots": 64,
-  "tx-pool-global-slots": 8192,
-  "trie-clean-cache": 512,
-  "trie-dirty-cache": 512,
-  "snapshot-cache": 256,
-  "pruning-enabled": true
+  "pruning-enabled": true,
+  "state-sync-enabled": true,
+  "min-block-delay": "250ms"
+}
+```
+
+### rpc-chain-config.json
+Subnet-EVM chain config for **RPC/archive nodes**:
+- **Pruning disabled**: Keeps full historical state for queries
+- **Debug APIs**: Enables `debug-tracer` for transaction tracing
+- **State sync disabled**: Full sync for complete history
+
+```json
+{
+  "pruning-enabled": false,
+  "state-sync-enabled": false,
+  "eth-apis": ["eth", "eth-filter", "net", "web3", "internal-debug", "debug-tracer"]
 }
 ```
 
