@@ -103,18 +103,6 @@ resource "azurerm_network_security_group" "validators" {
     destination_address_prefix = "*"
   }
 
-  security_rule {
-    name                       = "Prometheus"
-    priority                   = 130
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "9090"
-    source_address_prefix      = local.operator_cidr
-    destination_address_prefix = "*"
-  }
-
   tags = local.common_tags
 }
 
@@ -159,29 +147,9 @@ resource "azurerm_network_security_group" "rpc" {
     destination_address_prefix = "*"
   }
 
-  tags = local.common_tags
-}
-
-resource "azurerm_network_security_group" "grafana" {
-  name                = "${var.name_prefix}-grafana-nsg"
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
-
-  security_rule {
-    name                       = "Grafana"
-    priority                   = 100
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "3000"
-    source_address_prefix      = var.enable_public_grafana ? "*" : local.operator_cidr
-    destination_address_prefix = "*"
-  }
-
   security_rule {
     name                       = "BlockscoutAPI"
-    priority                   = 110
+    priority                   = 130
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
@@ -193,13 +161,69 @@ resource "azurerm_network_security_group" "grafana" {
 
   security_rule {
     name                       = "BlockscoutFrontend"
-    priority                   = 120
+    priority                   = 140
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "4001"
     source_address_prefix      = var.enable_public_blockscout ? "*" : local.operator_cidr
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "BlockscoutStats"
+    priority                   = 150
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "8050"
+    source_address_prefix      = var.enable_public_blockscout ? "*" : local.operator_cidr
+    destination_address_prefix = "*"
+  }
+
+  tags = local.common_tags
+}
+
+resource "azurerm_network_security_group" "monitoring" {
+  name                = "${var.name_prefix}-monitoring-nsg"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  security_rule {
+    name                       = "SSH"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = local.operator_cidr
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "Grafana"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3000"
+    source_address_prefix      = var.enable_public_grafana ? "*" : local.operator_cidr
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "Prometheus"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "9090"
+    source_address_prefix      = local.operator_cidr
     destination_address_prefix = "*"
   }
 
@@ -273,12 +297,6 @@ resource "azurerm_network_interface" "rpc" {
 #
 
 resource "azurerm_network_interface_security_group_association" "validators" {
-  count                     = var.validator_count
-  network_interface_id      = azurerm_network_interface.validators[count.index].id
-  network_security_group_id = count.index == 0 ? azurerm_network_security_group.grafana.id : azurerm_network_security_group.validators.id
-}
-
-resource "azurerm_network_interface_security_group_association" "validators_base" {
   count                     = var.validator_count
   network_interface_id      = azurerm_network_interface.validators[count.index].id
   network_security_group_id = azurerm_network_security_group.validators.id
@@ -361,5 +379,71 @@ resource "azurerm_linux_virtual_machine" "rpc" {
 
   tags = merge(local.common_tags, {
     Role = "rpc"
+  })
+}
+
+#
+# MONITORING SERVER
+#
+
+resource "azurerm_public_ip" "monitoring" {
+  name                = "${var.name_prefix}-monitoring-ip"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+
+  tags = local.common_tags
+}
+
+resource "azurerm_network_interface" "monitoring" {
+  name                = "${var.name_prefix}-monitoring-nic"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.main.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.monitoring.id
+  }
+
+  tags = local.common_tags
+}
+
+resource "azurerm_network_interface_security_group_association" "monitoring" {
+  network_interface_id      = azurerm_network_interface.monitoring.id
+  network_security_group_id = azurerm_network_security_group.monitoring.id
+}
+
+resource "azurerm_linux_virtual_machine" "monitoring" {
+  name                = "${var.name_prefix}-monitoring"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  size                = var.monitoring_vm_size
+  admin_username      = var.admin_username
+
+  network_interface_ids = [azurerm_network_interface.monitoring.id]
+
+  admin_ssh_key {
+    username   = var.admin_username
+    public_key = var.ssh_public_key
+  }
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+    disk_size_gb         = var.monitoring_disk_size_gb
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "ubuntu-24_04-lts"
+    sku       = "server"
+    version   = "latest"
+  }
+
+  tags = merge(local.common_tags, {
+    Role = "monitoring"
   })
 }

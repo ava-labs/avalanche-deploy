@@ -119,11 +119,11 @@ resource "google_compute_firewall" "blockscout" {
 
   allow {
     protocol = "tcp"
-    ports    = ["4000", "4001"]
+    ports    = ["4000", "4001", "8050"]
   }
 
   source_ranges = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
-  target_tags   = ["grafana"] # Blockscout runs on the monitoring node (validator-1)
+  target_tags   = ["avalanche-rpc"] # Blockscout runs on RPC nodes
 }
 
 resource "google_compute_firewall" "rpc_public" {
@@ -140,6 +140,32 @@ resource "google_compute_firewall" "rpc_public" {
   target_tags   = ["avalanche-rpc"]
 }
 
+resource "google_compute_firewall" "monitoring_ssh" {
+  name    = "${var.name_prefix}-allow-monitoring-ssh"
+  network = google_compute_network.main.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  source_ranges = [local.operator_cidr]
+  target_tags   = ["monitoring"]
+}
+
+resource "google_compute_firewall" "prometheus" {
+  name    = "${var.name_prefix}-allow-prometheus"
+  network = google_compute_network.main.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["9090"]
+  }
+
+  source_ranges = [local.operator_cidr]
+  target_tags   = ["monitoring"]
+}
+
 #
 # COMPUTE INSTANCES - VALIDATORS
 #
@@ -151,7 +177,7 @@ resource "google_compute_instance" "validators" {
   machine_type = var.validator_machine_type
   zone         = var.zones[count.index % length(var.zones)]
 
-  tags = count.index == 0 ? ["avalanche-node", "grafana"] : ["avalanche-node"]
+  tags = ["avalanche-node"]
 
   boot_disk {
     initialize_params {
@@ -235,6 +261,47 @@ resource "google_compute_instance" "rpc" {
 
   labels = merge(local.labels, {
     role = "rpc"
+  })
+
+  service_account {
+    scopes = ["cloud-platform"]
+  }
+}
+
+#
+# COMPUTE INSTANCE - MONITORING
+#
+
+resource "google_compute_instance" "monitoring" {
+  name         = "${var.name_prefix}-monitoring"
+  machine_type = var.monitoring_machine_type
+  zone         = var.zones[0]
+
+  tags = ["monitoring"]
+
+  boot_disk {
+    initialize_params {
+      image = "ubuntu-os-cloud/ubuntu-2404-lts-amd64"
+      size  = var.monitoring_disk_size_gb
+      type  = "pd-ssd"
+    }
+  }
+
+  network_interface {
+    network    = google_compute_network.main.name
+    subnetwork = google_compute_subnetwork.main.name
+
+    access_config {
+      // Ephemeral public IP
+    }
+  }
+
+  metadata = {
+    ssh-keys = var.ssh_user != "" && var.ssh_public_key != "" ? "${var.ssh_user}:${var.ssh_public_key}" : null
+  }
+
+  labels = merge(local.labels, {
+    role = "monitoring"
   })
 
   service_account {

@@ -104,3 +104,19 @@ variable "enable_public_blockscout" {
   type        = bool
   default     = true
 }
+
+#
+# Monitoring Configuration
+#
+
+variable "monitoring_vm_size" {
+  description = "Azure VM size for monitoring server (Prometheus, Grafana)"
+  type        = string
+  default     = "Standard_B2s" # 2 vCPU, 4GB RAM
+}
+
+variable "monitoring_disk_size_gb" {
+  description = "Disk size for monitoring server in GB"
+  type        = number
+  default     = 50
+}

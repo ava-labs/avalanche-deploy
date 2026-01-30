@@ -20,7 +20,7 @@ output "rpc_private_ips" {
 
 output "grafana_url" {
   description = "Grafana dashboard URL"
-  value       = "http://${aws_instance.validators[0].public_ip}:3000"
+  value       = "http://${aws_instance.monitoring.public_ip}:3000"
 }
 
 output "blockscout_url" {
@@ -29,8 +29,13 @@ output "blockscout_url" {
 }
 
 output "monitoring_ip" {
-  description = "IP of the monitoring node (Grafana, Blockscout)"
-  value       = aws_instance.validators[0].public_ip
+  description = "IP of the dedicated monitoring server (Prometheus, Grafana)"
+  value       = aws_instance.monitoring.public_ip
+}
+
+output "monitoring_private_ip" {
+  description = "Private IP of the monitoring server"
+  value       = aws_instance.monitoring.private_ip
 }
 
 output "vpc_id" {
@@ -52,7 +57,7 @@ rpc-${i + 1} ansible_host=${ip} ansible_user=ubuntu node_type=rpc
 %{endfor~}
 
 [monitoring]
-validator-1 ansible_host=${aws_instance.validators[0].public_ip} ansible_user=ubuntu
+monitoring-1 ansible_host=${aws_instance.monitoring.public_ip} ansible_user=ubuntu
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
@@ -76,7 +81,7 @@ rpc-${i + 1} ansible_host=${ip} ansible_user=ubuntu node_type=rpc
 %{endfor~}
 
 [monitoring]
-validator-1 ansible_host=${aws_instance.validators[0].public_ip} ansible_user=ubuntu
+monitoring-1 ansible_host=${aws_instance.monitoring.public_ip} ansible_user=ubuntu
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'

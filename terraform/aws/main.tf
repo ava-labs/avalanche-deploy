@@ -134,15 +134,6 @@ resource "aws_security_group" "validators" {
     cidr_blocks = [var.vpc_cidr]
   }
 
-  # Prometheus metrics - operator only
-  ingress {
-    description = "Prometheus scrape"
-    from_port   = 9090
-    to_port     = 9090
-    protocol    = "tcp"
-    cidr_blocks = [local.operator_cidr]
-  }
-
   egress {
     description = "All outbound"
     from_port   = 0
@@ -239,8 +230,17 @@ resource "aws_security_group" "rpc" {
 
 resource "aws_security_group" "monitoring" {
   name        = "${var.name_prefix}-monitoring"
-  description = "Security group for monitoring (Grafana, Blockscout)"
+  description = "Security group for dedicated monitoring server (Prometheus, Grafana)"
   vpc_id      = aws_vpc.main.id
+
+  # SSH - operator only
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [local.operator_cidr]
+  }
 
   # Grafana - configurable
   ingress {
@@ -251,22 +251,21 @@ resource "aws_security_group" "monitoring" {
     cidr_blocks = var.enable_public_grafana ? ["0.0.0.0/0"] : [local.operator_cidr]
   }
 
-  # Blockscout API - configurable
+  # Prometheus - operator only
   ingress {
-    description = "Blockscout API"
-    from_port   = 4000
-    to_port     = 4000
+    description = "Prometheus"
+    from_port   = 9090
+    to_port     = 9090
     protocol    = "tcp"
-    cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
+    cidr_blocks = [local.operator_cidr]
   }
 
-  # Blockscout Frontend - configurable
-  ingress {
-    description = "Blockscout Frontend"
-    from_port   = 4001
-    to_port     = 4001
-    protocol    = "tcp"
-    cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
+  egress {
+    description = "All outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   tags = merge(local.common_tags, {
@@ -312,7 +311,7 @@ resource "aws_instance" "validators" {
   instance_type          = var.validator_instance_type
   key_name               = var.ssh_key_name != "" ? var.ssh_key_name : (length(aws_key_pair.main) > 0 ? aws_key_pair.main[0].key_name : null)
   subnet_id              = aws_subnet.public[count.index % length(aws_subnet.public)].id
-  vpc_security_group_ids = count.index == 0 ? [aws_security_group.validators.id, aws_security_group.monitoring.id] : [aws_security_group.validators.id]
+  vpc_security_group_ids = [aws_security_group.validators.id]
 
   metadata_options {
     http_endpoint               = "enabled"
@@ -364,5 +363,34 @@ resource "aws_instance" "rpc" {
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-rpc-${count.index + 1}"
     Role = "rpc"
+  })
+}
+
+#
+# EC2 INSTANCE - MONITORING
+#
+
+resource "aws_instance" "monitoring" {
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.monitoring_instance_type
+  key_name               = var.ssh_key_name != "" ? var.ssh_key_name : (length(aws_key_pair.main) > 0 ? aws_key_pair.main[0].key_name : null)
+  subnet_id              = aws_subnet.public[0].id
+  vpc_security_group_ids = [aws_security_group.monitoring.id]
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+  }
+
+  root_block_device {
+    volume_size = var.monitoring_disk_size_gb
+    volume_type = "gp3"
+    encrypted   = true
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-monitoring"
+    Role = "monitoring"
   })
 }

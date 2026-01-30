@@ -20,17 +20,22 @@ output "rpc_private_ips" {
 
 output "grafana_url" {
   description = "Grafana dashboard URL"
-  value       = "http://${azurerm_public_ip.validators[0].ip_address}:3000"
+  value       = "http://${azurerm_public_ip.monitoring.ip_address}:3000"
 }
 
 output "blockscout_url" {
-  description = "Blockscout block explorer URL"
-  value       = "http://${azurerm_public_ip.validators[0].ip_address}:4001"
+  description = "Blockscout block explorer URL (on RPC node)"
+  value       = length(azurerm_public_ip.rpc) > 0 ? "http://${azurerm_public_ip.rpc[0].ip_address}:4001" : ""
 }
 
 output "monitoring_ip" {
-  description = "IP of the monitoring node (Grafana, Blockscout)"
-  value       = azurerm_public_ip.validators[0].ip_address
+  description = "IP of the dedicated monitoring server (Prometheus, Grafana)"
+  value       = azurerm_public_ip.monitoring.ip_address
+}
+
+output "monitoring_private_ip" {
+  description = "Private IP of the monitoring server"
+  value       = azurerm_network_interface.monitoring.private_ip_address
 }
 
 output "resource_group_name" {
@@ -52,7 +57,7 @@ rpc-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username} node_type=rpc
 %{endfor~}
 
 [monitoring]
-validator-1 ansible_host=${azurerm_public_ip.validators[0].ip_address} ansible_user=${var.admin_username}
+monitoring-1 ansible_host=${azurerm_public_ip.monitoring.ip_address} ansible_user=${var.admin_username}
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
@@ -72,7 +77,7 @@ rpc-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username} node_type=rpc
 %{endfor~}
 
 [monitoring]
-validator-1 ansible_host=${azurerm_public_ip.validators[0].ip_address} ansible_user=${var.admin_username}
+monitoring-1 ansible_host=${azurerm_public_ip.monitoring.ip_address} ansible_user=${var.admin_username}
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'

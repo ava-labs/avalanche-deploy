@@ -116,3 +116,19 @@ variable "enable_public_blockscout" {
   type        = bool
   default     = true
 }
+
+#
+# Monitoring Configuration
+#
+
+variable "monitoring_machine_type" {
+  description = "GCP machine type for monitoring server (Prometheus, Grafana)"
+  type        = string
+  default     = "e2-small" # 2 vCPU, 2GB RAM
+}
+
+variable "monitoring_disk_size_gb" {
+  description = "Disk size for monitoring server in GB"
+  type        = number
+  default     = 50
+}

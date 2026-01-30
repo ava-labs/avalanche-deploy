@@ -20,17 +20,22 @@ output "rpc_private_ips" {
 
 output "grafana_url" {
   description = "Grafana dashboard URL"
-  value       = "http://${google_compute_instance.validators[0].network_interface[0].access_config[0].nat_ip}:3000"
+  value       = "http://${google_compute_instance.monitoring.network_interface[0].access_config[0].nat_ip}:3000"
 }
 
 output "blockscout_url" {
-  description = "Blockscout block explorer URL"
-  value       = "http://${google_compute_instance.validators[0].network_interface[0].access_config[0].nat_ip}:4001"
+  description = "Blockscout block explorer URL (on RPC node)"
+  value       = length(google_compute_instance.rpc) > 0 ? "http://${google_compute_instance.rpc[0].network_interface[0].access_config[0].nat_ip}:4001" : ""
 }
 
 output "monitoring_ip" {
-  description = "IP of the monitoring node (Grafana, Blockscout)"
-  value       = google_compute_instance.validators[0].network_interface[0].access_config[0].nat_ip
+  description = "IP of the dedicated monitoring server (Prometheus, Grafana)"
+  value       = google_compute_instance.monitoring.network_interface[0].access_config[0].nat_ip
+}
+
+output "monitoring_private_ip" {
+  description = "Private IP of the monitoring server"
+  value       = google_compute_instance.monitoring.network_interface[0].network_ip
 }
 
 output "ansible_inventory" {
@@ -47,7 +52,7 @@ rpc-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_i
 %{endfor~}
 
 [monitoring]
-validator-1 ansible_host=${google_compute_instance.validators[0].network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user}
+monitoring-1 ansible_host=${google_compute_instance.monitoring.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user}
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
@@ -67,7 +72,7 @@ rpc-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_i
 %{endfor~}
 
 [monitoring]
-validator-1 ansible_host=${google_compute_instance.validators[0].network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user}
+monitoring-1 ansible_host=${google_compute_instance.monitoring.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user}
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'

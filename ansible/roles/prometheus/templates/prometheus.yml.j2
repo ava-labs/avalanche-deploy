@@ -12,13 +12,8 @@ scrape_configs:
     static_configs:
       - targets:
 {% for host in groups['validators'] %}
-{% if host == inventory_hostname %}
-          # Use localhost for the monitoring node itself
-          - 'localhost:9650'
-{% else %}
           # Use private IP for internal VPC communication (requires security group to allow port 9650 from VPC CIDR)
           - '{{ hostvars[host]['ansible_default_ipv4']['address'] | default(hostvars[host]['ansible_host']) }}:9650'
-{% endif %}
 {% endfor %}
 
   - job_name: 'avalanche-rpc'

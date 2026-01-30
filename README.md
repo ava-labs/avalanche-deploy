@@ -19,7 +19,7 @@ make destroy   # tear down (stops billing!)
 
 Pick one. Most people start with Terraform + Ansible.
 
-### Default Architecture (2 Validators + 1 RPC)
+### Default Architecture (2 Validators + 1 RPC + Monitoring)
 
 ```
                               ┌──────────────────────────────────────────┐
@@ -27,47 +27,46 @@ Pick one. Most people start with Terraform + Ansible.
                               │         (Fuji Testnet / Mainnet)         │
                               └─────────────────────┬────────────────────┘
                                                     │
-                          ┌─────────────────────────┼─────────────────────────┐
-                          │                         │                         │
-                          ▼                         ▼                         ▼
-              ┌───────────────────┐    ┌───────────────────┐    ┌───────────────────┐
-              │   Validator 1     │    │   Validator 2     │    │    RPC Node       │
-              │   ─────────────   │    │   ─────────────   │    │   ─────────────   │
-              │                   │    │                   │    │                   │
-              │  ┌─────────────┐  │    │  ┌─────────────┐  │    │  ┌─────────────┐  │
-              │  │ AvalancheGo │  │◄──►│  │ AvalancheGo │  │◄──►│  │ AvalancheGo │  │
-              │  │   :9651     │  │P2P │  │   :9651     │  │P2P │  │ :9650/:9651 │  │
-              │  └─────────────┘  │    │  └─────────────┘  │    │  └─────────────┘  │
-              │                   │    │                   │    │        │          │
-              │  ┌─────────────┐  │    │                   │    │        ▼          │
-              │  │ Prometheus  │──┼────┼───────────────────┼────┼─► Scrapes all     │
-              │  │   :9090     │  │    │                   │    │   node metrics    │
-              │  └─────────────┘  │    │                   │    │                   │
-              │        │         │    │                   │    │  ┌─────────────┐  │
-              │        ▼         │    │                   │    │  │ Blockscout  │  │
-              │  ┌─────────────┐  │    │                   │    │  │ :4000/:4001 │  │
-              │  │  Grafana    │  │    │                   │    │  │   :8050     │  │
-              │  │   :3000     │  │    │                   │    │  └─────────────┘  │
-              │  └─────────────┘  │    │                   │    │                   │
-              └───────────────────┘    └───────────────────┘    └───────────────────┘
-                   Monitoring              Consensus                 Public API
-                                                                         │
-                          ┌──────────────────────────────────────────────┘
-                          │
-                          ▼
-              ┌───────────────────────────────────────────────────────────┐
-              │                      External Access                      │
-              │  • RPC API:     http://<rpc-ip>:9650/ext/bc/<chain>/rpc  │
-              │  • WebSocket:   ws://<rpc-ip>:9650/ext/bc/<chain>/ws     │
-              │  • Blockscout:  http://<rpc-ip>:4001 (explorer)          │
-              │  • Grafana:     http://<validator-1>:3000 (dashboards)   │
-              └───────────────────────────────────────────────────────────┘
+              ┌─────────────────────────────────────┼─────────────────────────────────────┐
+              │                         │           │           │                         │
+              ▼                         ▼           │           ▼                         ▼
+  ┌───────────────────┐    ┌───────────────────┐   │   ┌───────────────────┐    ┌───────────────────┐
+  │   Validator 1     │    │   Validator 2     │   │   │    RPC Node       │    │    Monitoring     │
+  │   ─────────────   │    │   ─────────────   │   │   │   ─────────────   │    │   ─────────────   │
+  │                   │    │                   │   │   │                   │    │                   │
+  │  ┌─────────────┐  │    │  ┌─────────────┐  │   │   │  ┌─────────────┐  │    │  ┌─────────────┐  │
+  │  │ AvalancheGo │  │◄──►│  │ AvalancheGo │  │◄──┼──►│  │ AvalancheGo │  │    │  │ Prometheus  │  │
+  │  │   :9651     │  │P2P │  │   :9651     │  │ P2P   │  │ :9650/:9651 │  │    │  │   :9090     │  │
+  │  └─────────────┘  │    │  └─────────────┘  │       │  └─────────────┘  │    │  └──────┬──────┘  │
+  │        │          │    │        │          │       │        │          │    │         │         │
+  │        │ :9650    │    │        │ :9650    │       │        │ :9650    │    │         ▼         │
+  │        │ metrics  │    │        │ metrics  │       │        │ metrics  │    │  ┌─────────────┐  │
+  │        └──────────┼────┼────────┴──────────┼───────┼────────┴──────────┼───►│  │  Grafana    │  │
+  │                   │    │                   │       │                   │    │  │   :3000     │  │
+  │                   │    │                   │       │  ┌─────────────┐  │    │  └─────────────┘  │
+  │                   │    │                   │       │  │ Blockscout  │  │    │                   │
+  │                   │    │                   │       │  │ :4000/:4001 │  │    │                   │
+  │                   │    │                   │       │  │   :8050     │  │    │                   │
+  │                   │    │                   │       │  └─────────────┘  │    │                   │
+  └───────────────────┘    └───────────────────┘       └───────────────────┘    └───────────────────┘
+       Consensus               Consensus                   Public API              Observability
+                                                               │                        │
+              ┌────────────────────────────────────────────────┴────────────────────────┘
+              │
+              ▼
+  ┌───────────────────────────────────────────────────────────────────────────────────────┐
+  │                                   External Access                                     │
+  │  • RPC API:     http://<rpc-ip>:9650/ext/bc/<chain>/rpc                              │
+  │  • WebSocket:   ws://<rpc-ip>:9650/ext/bc/<chain>/ws                                 │
+  │  • Blockscout:  http://<rpc-ip>:4001 (block explorer)                                │
+  │  • Grafana:     http://<monitoring-ip>:3000 (dashboards)                             │
+  └───────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Node Roles:**
-- **Validators** (2+): Produce blocks, validate transactions. Only expose P2P port (9651) publicly.
+- **Validators** (2+): Produce blocks, validate transactions. Isolated - only expose P2P port (9651) publicly.
 - **RPC Node** (1+): Handles external queries & Blockscout indexing. Keeps validator load low.
-- **Monitoring**: Prometheus scrapes all nodes; Grafana dashboards on validator-1.
+- **Monitoring** (1): Dedicated server for Prometheus + Grafana. Scrapes metrics from all nodes via VPC.
 
 ---
 
@@ -402,7 +401,7 @@ For production L1s, you can pre-deploy a TransparentUpgradeableProxy in genesis 
 
 ## Deploy Monitoring (Prometheus + Grafana)
 
-Deploy monitoring stack to track node health and performance. Prometheus scrapes metrics from **all validators and RPC nodes**.
+Deploy monitoring stack to track node health and performance. Monitoring runs on a **dedicated lightweight server** (t3.small/e2-small) separate from validators to keep them isolated.
 
 ```bash
 cd ansible
@@ -415,12 +414,18 @@ Access Grafana at `http://<monitoring-ip>:3000` (default credentials: admin/admi
 ```bash
 # Get the Grafana URL
 cd terraform/aws && terraform output grafana_url
+
+# Get the monitoring server IP
+terraform output monitoring_ip
 ```
 
-The monitoring host is the first validator by default. Grafana dashboards show:
-- Node health (P-Chain, X-Chain, C-Chain, L1 chain status)
-- Resource usage (CPU, memory, disk, network)
-- Avalanche metrics (block height, tx throughput, peers)
+**Architecture:**
+- Prometheus runs on the dedicated monitoring server
+- Scrapes metrics from all validators and RPC nodes via private IPs (VPC internal)
+- Grafana dashboards show:
+  - Node health (P-Chain, X-Chain, C-Chain, L1 chain status)
+  - Resource usage (CPU, memory, disk, network)
+  - Avalanche metrics (block height, tx throughput, peers)
 
 ---
 
@@ -470,11 +475,12 @@ cd terraform/aws
 terraform output
 
 # Specific outputs
-terraform output validator_ips      # Validator public IPs
-terraform output rpc_ips            # RPC node public IPs
-terraform output monitoring_ip      # Monitoring/Grafana host
-terraform output grafana_url        # Grafana dashboard URL
-terraform output blockscout_url     # Blockscout explorer URL
+terraform output validator_ips         # Validator public IPs
+terraform output rpc_ips               # RPC node public IPs
+terraform output monitoring_ip         # Dedicated monitoring server IP
+terraform output monitoring_private_ip # Monitoring server private IP (for VPC)
+terraform output grafana_url           # Grafana dashboard URL
+terraform output blockscout_url        # Blockscout explorer URL (on RPC node)
 ```
 
 ---
@@ -523,11 +529,11 @@ terraform output blockscout_url
 
 ## Cost Estimate
 
-| Cloud | Instance | Monthly Cost (2 validators + 1 RPC) |
-|-------|----------|-------------------------------------|
-| AWS   | m6id.large | ~$210 |
-| GCP   | n2-standard-2 + local SSD | ~$180 |
-| Azure | Standard_L8s_v3 | ~$400 |
+| Cloud | Node Instances | Monitoring | Monthly Total (2 validators + 1 RPC + monitoring) |
+|-------|----------------|------------|---------------------------------------------------|
+| AWS   | m6id.large     | t3.small   | ~$225 |
+| GCP   | n2-standard-2 + local SSD | e2-small | ~$195 |
+| Azure | Standard_L8s_v3 | Standard_B2s | ~$420 |
 
 Remember to `make destroy` when done testing!
 
