@@ -179,6 +179,30 @@ resource "azurerm_network_security_group" "grafana" {
     destination_address_prefix = "*"
   }
 
+  security_rule {
+    name                       = "BlockscoutAPI"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "4000"
+    source_address_prefix      = var.enable_public_blockscout ? "*" : local.operator_cidr
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "BlockscoutFrontend"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "4001"
+    source_address_prefix      = var.enable_public_blockscout ? "*" : local.operator_cidr
+    destination_address_prefix = "*"
+  }
+
   tags = local.common_tags
 }
 

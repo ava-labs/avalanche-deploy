@@ -98,3 +98,9 @@ variable "enable_public_grafana" {
   type        = bool
   default     = true
 }
+
+variable "enable_public_blockscout" {
+  description = "Allow public access to Blockscout block explorer"
+  type        = bool
+  default     = true
+}

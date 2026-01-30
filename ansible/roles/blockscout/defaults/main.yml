@@ -1,0 +1,65 @@
+---
+# Blockscout defaults
+
+# Service user/group
+blockscout_user: blockscout
+blockscout_group: blockscout
+
+# Installation directories
+blockscout_install_dir: /opt/blockscout
+blockscout_data_dir: /var/lib/blockscout
+
+# Network configuration
+blockscout_network_name: "Avalanche L1"
+blockscout_network_short_name: "AVAX-L1"
+blockscout_network_logo_url: ""
+blockscout_network_icon_url: ""
+
+# Chain configuration
+blockscout_chain_id: 43114
+blockscout_coin_name: "AVAX"
+blockscout_coin_symbol: "AVAX"
+
+# RPC endpoint (required - set this to your L1 RPC)
+blockscout_rpc_url: "http://localhost:9650/ext/bc/{{ blockscout_chain_id }}/rpc"
+blockscout_ws_url: ""
+blockscout_trace_url: ""
+
+# Ports
+blockscout_http_port: 4000
+blockscout_frontend_port: 4001
+blockscout_ws_port: 4002
+
+# PostgreSQL configuration
+blockscout_db_name: blockscout
+blockscout_db_user: blockscout
+blockscout_db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+blockscout_db_port: 5432
+
+# Docker images
+blockscout_backend_image: blockscout/blockscout:latest
+blockscout_frontend_image: ghcr.io/blockscout/frontend:latest
+blockscout_postgres_image: postgres:15-alpine
+blockscout_redis_image: redis:7-alpine
+blockscout_sig_provider_image: ghcr.io/blockscout/sig-provider:latest
+blockscout_smart_contract_verifier_image: ghcr.io/blockscout/smart-contract-verifier:latest
+blockscout_visualizer_image: ghcr.io/blockscout/visualizer:latest
+blockscout_stats_image: ghcr.io/blockscout/stats:latest
+
+# Feature flags
+blockscout_disable_exchange_rates: true
+blockscout_disable_write_methods: false
+blockscout_enable_sourcify: true
+blockscout_enable_smart_contract_verification: true
+
+# Indexer configuration
+blockscout_indexer_disable_pending_txs: false
+blockscout_indexer_disable_internal_txs: false
+blockscout_block_transformer: base
+
+# API configuration
+blockscout_api_rate_limit: 50
+blockscout_api_rate_limit_by_ip: true
+
+# External services (optional)
+blockscout_coingecko_api_key: ""

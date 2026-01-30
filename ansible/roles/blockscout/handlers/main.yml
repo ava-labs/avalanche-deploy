@@ -1,0 +1,11 @@
+---
+# Blockscout handlers
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Restart blockscout
+  systemd:
+    name: blockscout
+    state: restarted

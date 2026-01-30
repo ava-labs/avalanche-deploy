@@ -47,5 +47,6 @@ ssh_user       = "ubuntu"
 ssh_public_key = "" # Content of your public key
 
 # Access control
-enable_public_rpc     = false
-enable_public_grafana = true
+enable_public_rpc        = false
+enable_public_grafana    = true
+enable_public_blockscout = true

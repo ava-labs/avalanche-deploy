@@ -4,7 +4,10 @@ go 1.24.11
 
 toolchain go1.24.12
 
-require github.com/ava-labs/avalanchego v1.14.1
+require (
+	github.com/ava-labs/avalanchego v1.14.1
+	github.com/ava-labs/ledger-avalanche-go v1.1.0
+)
 
 require (
 	connectrpc.com/connect v1.18.1 // indirect
@@ -41,6 +44,7 @@ require (
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/gofrs/flock v0.8.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
 	github.com/google/btree v1.1.2 // indirect
 	github.com/google/renameio/v2 v2.0.0 // indirect
@@ -74,6 +78,9 @@ require (
 	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
+	github.com/zondax/golem v0.27.0 // indirect
+	github.com/zondax/hid v0.9.2 // indirect
+	github.com/zondax/ledger-go v1.0.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.37.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.37.0 // indirect

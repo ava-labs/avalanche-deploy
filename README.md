@@ -230,6 +230,30 @@ See [kubernetes/README.md](kubernetes/README.md) for full documentation.
 
 ---
 
+## Deploy Blockscout Block Explorer
+
+After your L1 is running, deploy Blockscout to explore transactions:
+
+```bash
+# Source your L1 config
+source l1.env
+
+# Deploy Blockscout (runs on monitoring host or any server with Docker)
+cd ansible
+ansible-playbook playbooks/04-deploy-blockscout.yml \
+  -e "blockscout_rpc_url=http://<RPC_NODE_IP>:9650/ext/bc/$CHAIN_ID/rpc" \
+  -e "blockscout_chain_id=$CHAIN_ID" \
+  -e "blockscout_network_name=My Avalanche L1"
+```
+
+Blockscout will be available at:
+- **Frontend**: http://\<server\>:4001
+- **API**: http://\<server\>:4000/api
+
+> **Note:** Initial indexing may take time depending on chain history.
+
+---
+
 ## Cost Estimate
 
 | Cloud | Instance | Monthly Cost (3 validators + 1 RPC) |

@@ -51,5 +51,6 @@ ssh_key_name = ""
 ssh_private_key_file = ""
 
 # Access control
-enable_public_rpc     = false # Set true to expose RPC to internet
-enable_public_grafana = true  # Grafana dashboard access
+enable_public_rpc        = false # Set true to expose RPC to internet
+enable_public_grafana    = true  # Grafana dashboard access
+enable_public_blockscout = true  # Blockscout block explorer access

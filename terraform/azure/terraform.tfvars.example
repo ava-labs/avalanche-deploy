@@ -44,5 +44,6 @@ admin_username = "azureuser"
 ssh_public_key = "ssh-rsa AAAA..." # Your public key content
 
 # Access control
-enable_public_rpc     = false
-enable_public_grafana = true
+enable_public_rpc        = false
+enable_public_grafana    = true
+enable_public_blockscout = true

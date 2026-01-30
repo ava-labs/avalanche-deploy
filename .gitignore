@@ -5,6 +5,8 @@
 .terraform/
 .terraform.lock.hcl
 terraform.tfvars
+tfplan
+*.tfplan
 
 # Ansible
 ansible/inventory/*_hosts
@@ -14,6 +16,8 @@ ansible/node_ids.txt
 l1.env
 *.env.local
 .env
+*-creds.sh
+.aws-creds*
 notes/terraform-outputs.json
 
 # Tools

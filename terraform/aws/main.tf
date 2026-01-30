@@ -194,7 +194,7 @@ resource "aws_security_group" "rpc" {
 
 resource "aws_security_group" "monitoring" {
   name        = "${var.name_prefix}-monitoring"
-  description = "Security group for monitoring (Grafana)"
+  description = "Security group for monitoring (Grafana, Blockscout)"
   vpc_id      = aws_vpc.main.id
 
   # Grafana - configurable
@@ -204,6 +204,24 @@ resource "aws_security_group" "monitoring" {
     to_port     = 3000
     protocol    = "tcp"
     cidr_blocks = var.enable_public_grafana ? ["0.0.0.0/0"] : [local.operator_cidr]
+  }
+
+  # Blockscout API - configurable
+  ingress {
+    description = "Blockscout API"
+    from_port   = 4000
+    to_port     = 4000
+    protocol    = "tcp"
+    cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
+  }
+
+  # Blockscout Frontend - configurable
+  ingress {
+    description = "Blockscout Frontend"
+    from_port   = 4001
+    to_port     = 4001
+    protocol    = "tcp"
+    cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
   }
 
   tags = merge(local.common_tags, {

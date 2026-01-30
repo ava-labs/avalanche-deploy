@@ -113,6 +113,19 @@ resource "google_compute_firewall" "grafana" {
   target_tags   = ["grafana"]
 }
 
+resource "google_compute_firewall" "blockscout" {
+  name    = "${var.name_prefix}-allow-blockscout"
+  network = google_compute_network.main.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["4000", "4001"]
+  }
+
+  source_ranges = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
+  target_tags   = ["grafana"] # Blockscout runs on the monitoring node (validator-1)
+}
+
 resource "google_compute_firewall" "rpc_public" {
   count   = var.enable_public_rpc ? 1 : 0
   name    = "${var.name_prefix}-allow-rpc-public"

@@ -1,0 +1,47 @@
+---
+# Deploy Blockscout block explorer to a monitoring server
+#
+# Usage:
+#   ansible-playbook -i inventory.yml 04-deploy-blockscout.yml \
+#     -e "blockscout_rpc_url=http://validator1:9650/ext/bc/CHAIN_ID/rpc" \
+#     -e "blockscout_chain_id=YOUR_CHAIN_ID"
+#
+# Variables (can be set in inventory or via -e):
+#   blockscout_rpc_url: RPC endpoint of your L1 chain
+#   blockscout_chain_id: Chain ID of your L1
+#   blockscout_network_name: Display name for your network
+#   blockscout_coin_symbol: Token symbol (default: AVAX)
+
+- name: Deploy Blockscout Block Explorer
+  hosts: monitoring
+  become: yes
+  vars:
+    # Override these in your inventory or via -e
+    blockscout_network_name: "{{ l1_name | default('Avalanche L1') }}"
+    blockscout_network_short_name: "{{ l1_short_name | default('AVAX-L1') }}"
+    blockscout_chain_id: "{{ chain_id | default(43114) }}"
+    blockscout_coin_symbol: "{{ coin_symbol | default('AVAX') }}"
+    blockscout_coin_name: "{{ coin_name | default('Avalanche') }}"
+    blockscout_rpc_url: "{{ rpc_url | default('http://localhost:9650/ext/bc/' + (chain_id | string) + '/rpc') }}"
+
+  roles:
+    - blockscout
+
+  post_tasks:
+    - name: Display access information
+      debug:
+        msg: |
+          ============================================
+          Blockscout Block Explorer Deployed!
+          ============================================
+
+          Frontend URL: http://{{ ansible_host }}:{{ blockscout_frontend_port | default(4001) }}
+          API URL: http://{{ ansible_host }}:{{ blockscout_http_port | default(4000) }}/api
+
+          Network: {{ blockscout_network_name }}
+          Chain ID: {{ blockscout_chain_id }}
+          RPC: {{ blockscout_rpc_url }}
+
+          Note: Initial sync may take some time depending
+          on the number of blocks in your chain.
+          ============================================

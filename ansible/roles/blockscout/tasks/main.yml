@@ -1,0 +1,147 @@
+---
+# Blockscout installation using Docker Compose
+
+- name: Install Docker prerequisites
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+    update_cache: yes
+
+- name: Add Docker GPG key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Add Docker repository
+  apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+
+- name: Install Docker
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+    update_cache: yes
+
+- name: Start Docker service
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Create blockscout group
+  group:
+    name: "{{ blockscout_group }}"
+    system: yes
+
+- name: Create blockscout user
+  user:
+    name: "{{ blockscout_user }}"
+    group: "{{ blockscout_group }}"
+    groups: docker
+    system: yes
+    shell: /bin/bash
+    create_home: yes
+
+- name: Create directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ blockscout_user }}"
+    group: "{{ blockscout_group }}"
+    mode: "0755"
+  loop:
+    - "{{ blockscout_install_dir }}"
+    - "{{ blockscout_data_dir }}"
+    - "{{ blockscout_data_dir }}/postgres"
+    - "{{ blockscout_data_dir }}/redis"
+    - "{{ blockscout_data_dir }}/logs"
+
+- name: Generate docker-compose.yml
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ blockscout_install_dir }}/docker-compose.yml"
+    owner: "{{ blockscout_user }}"
+    group: "{{ blockscout_group }}"
+    mode: "0644"
+  notify: Restart blockscout
+
+- name: Generate backend environment file
+  template:
+    src: backend.env.j2
+    dest: "{{ blockscout_install_dir }}/backend.env"
+    owner: "{{ blockscout_user }}"
+    group: "{{ blockscout_group }}"
+    mode: "0600"
+  notify: Restart blockscout
+
+- name: Generate frontend environment file
+  template:
+    src: frontend.env.j2
+    dest: "{{ blockscout_install_dir }}/frontend.env"
+    owner: "{{ blockscout_user }}"
+    group: "{{ blockscout_group }}"
+    mode: "0644"
+  notify: Restart blockscout
+
+- name: Generate common environment file
+  template:
+    src: common.env.j2
+    dest: "{{ blockscout_install_dir }}/common.env"
+    owner: "{{ blockscout_user }}"
+    group: "{{ blockscout_group }}"
+    mode: "0644"
+  notify: Restart blockscout
+
+- name: Create systemd service for blockscout
+  template:
+    src: blockscout.service.j2
+    dest: /etc/systemd/system/blockscout.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart blockscout
+
+- name: Pull Docker images
+  community.docker.docker_compose_v2:
+    project_src: "{{ blockscout_install_dir }}"
+    pull: always
+    state: present
+  become: yes
+  become_user: "{{ blockscout_user }}"
+
+- name: Enable and start Blockscout
+  systemd:
+    name: blockscout
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Wait for Blockscout to be ready
+  uri:
+    url: "http://127.0.0.1:{{ blockscout_http_port }}/api/v2/stats"
+    method: GET
+    status_code: [200, 503]
+  register: blockscout_ready
+  until: blockscout_ready.status == 200
+  retries: 60
+  delay: 10
+  ignore_errors: yes
+
+- name: Display Blockscout URL
+  debug:
+    msg: |
+      Blockscout is available at:
+      - Frontend: http://{{ ansible_host }}:{{ blockscout_frontend_port }}
+      - API: http://{{ ansible_host }}:{{ blockscout_http_port }}/api

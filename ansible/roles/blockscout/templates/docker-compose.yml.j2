@@ -1,0 +1,162 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: {{ blockscout_postgres_image }}
+    restart: unless-stopped
+    container_name: blockscout-db
+    command: postgres -c 'max_connections=500'
+    environment:
+      POSTGRES_DB: {{ blockscout_db_name }}
+      POSTGRES_USER: {{ blockscout_db_user }}
+      POSTGRES_PASSWORD: {{ blockscout_db_password }}
+    volumes:
+      - {{ blockscout_data_dir }}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ blockscout_db_user }} -d {{ blockscout_db_name }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - blockscout
+
+  # Redis Cache
+  redis:
+    image: {{ blockscout_redis_image }}
+    restart: unless-stopped
+    container_name: blockscout-redis
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - {{ blockscout_data_dir }}/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - blockscout
+
+  # Blockscout Backend (Indexer + API)
+  backend:
+    image: {{ blockscout_backend_image }}
+    restart: unless-stopped
+    container_name: blockscout-backend
+    command:
+      - /bin/sh
+      - -c
+      - bin/blockscout eval "Elixir.Explorer.ReleaseTasks.create_and_migrate()" && bin/blockscout start
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - backend.env
+      - common.env
+    environment:
+      DATABASE_URL: "postgresql://{{ blockscout_db_user }}:{{ blockscout_db_password }}@db:5432/{{ blockscout_db_name }}"
+    ports:
+      - "{{ blockscout_http_port }}:4000"
+    volumes:
+      - {{ blockscout_data_dir }}/logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/v2/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - blockscout
+
+{% if blockscout_enable_smart_contract_verification %}
+  # Smart Contract Verifier
+  smart-contract-verifier:
+    image: {{ blockscout_smart_contract_verifier_image }}
+    restart: unless-stopped
+    container_name: blockscout-verifier
+    environment:
+      SMART_CONTRACT_VERIFIER__SERVER__HTTP__ADDR: 0.0.0.0:8050
+      SMART_CONTRACT_VERIFIER__SOLIDITY__ENABLED: "true"
+      SMART_CONTRACT_VERIFIER__SOLIDITY__COMPILERS_DIR: /tmp/solidity-compilers
+      SMART_CONTRACT_VERIFIER__SOLIDITY__REFRESH_VERSIONS_SCHEDULE: "0 0 * * * * *"
+      SMART_CONTRACT_VERIFIER__VYPER__ENABLED: "true"
+      SMART_CONTRACT_VERIFIER__VYPER__COMPILERS_DIR: /tmp/vyper-compilers
+      SMART_CONTRACT_VERIFIER__VYPER__REFRESH_VERSIONS_SCHEDULE: "0 0 * * * * *"
+      SMART_CONTRACT_VERIFIER__SOURCIFY__ENABLED: "{{ blockscout_enable_sourcify | lower }}"
+{% if blockscout_enable_sourcify %}
+      SMART_CONTRACT_VERIFIER__SOURCIFY__API_URL: https://sourcify.dev/server/
+      SMART_CONTRACT_VERIFIER__SOURCIFY__VERIFICATION_URL: https://sourcify.dev/server/
+{% endif %}
+    networks:
+      - blockscout
+
+  # Signature Provider
+  sig-provider:
+    image: {{ blockscout_sig_provider_image }}
+    restart: unless-stopped
+    container_name: blockscout-sig-provider
+    networks:
+      - blockscout
+{% endif %}
+
+  # Visualizer for contract graphs
+  visualizer:
+    image: {{ blockscout_visualizer_image }}
+    restart: unless-stopped
+    container_name: blockscout-visualizer
+    environment:
+      VISUALIZER__SERVER__HTTP__ADDR: 0.0.0.0:8050
+    networks:
+      - blockscout
+
+  # Stats service
+  stats:
+    image: {{ blockscout_stats_image }}
+    restart: unless-stopped
+    container_name: blockscout-stats
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      STATS__DB_URL: "postgresql://{{ blockscout_db_user }}:{{ blockscout_db_password }}@db:5432/{{ blockscout_db_name }}"
+      STATS__BLOCKSCOUT_DB_URL: "postgresql://{{ blockscout_db_user }}:{{ blockscout_db_password }}@db:5432/{{ blockscout_db_name }}"
+      STATS__CREATE_DATABASE: "false"
+      STATS__RUN_MIGRATIONS: "true"
+      STATS__SERVER__HTTP__ADDR: 0.0.0.0:8050
+    networks:
+      - blockscout
+
+  # Frontend (Next.js UI)
+  frontend:
+    image: {{ blockscout_frontend_image }}
+    restart: unless-stopped
+    container_name: blockscout-frontend
+    depends_on:
+      - backend
+    env_file:
+      - frontend.env
+      - common.env
+    environment:
+      # Server-side API calls (within docker network)
+      NEXT_PUBLIC_API_HOST: backend
+      NEXT_PUBLIC_API_PORT: 4000
+      NEXT_PUBLIC_API_PROTOCOL: http
+      # Client-side API calls (browser to host)
+      NEXT_PUBLIC_API_BASE_PATH: /
+      NEXT_PUBLIC_STATS_API_HOST: http://stats:8050
+      NEXT_PUBLIC_VISUALIZE_API_HOST: http://visualizer:8050
+{% if blockscout_enable_smart_contract_verification %}
+      NEXT_PUBLIC_CONTRACT_INFO_API_HOST: http://smart-contract-verifier:8050
+{% endif %}
+    ports:
+      - "{{ blockscout_frontend_port }}:3000"
+    networks:
+      - blockscout
+
+networks:
+  blockscout:
+    driver: bridge
