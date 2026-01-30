@@ -287,6 +287,43 @@ See [kubernetes/README.md](kubernetes/README.md) for full documentation.
 
 ---
 
+## Configuration Files
+
+The repo includes default configuration files in the root directory that you can customize:
+
+### genesis.json
+EVM genesis configuration for your L1 chain. Key settings:
+- `chainId`: Unique chain identifier
+- `alloc`: Pre-funded addresses
+- `feeConfig`: Gas limits and base fees
+- `warpConfig`: Cross-chain messaging settings
+
+### chain-config.json
+Subnet-EVM chain configuration (deployed to all nodes). Controls:
+- **Transaction Pool**: `tx-pool-*` settings for mempool size
+- **Caching**: `trie-clean-cache`, `trie-dirty-cache`, `snapshot-cache`
+- **APIs**: Which RPC methods to expose
+
+```json
+{
+  "tx-pool-account-slots": 64,
+  "tx-pool-global-slots": 8192,
+  "trie-clean-cache": 512,
+  "trie-dirty-cache": 512,
+  "snapshot-cache": 256,
+  "pruning-enabled": true
+}
+```
+
+### validator-node-config.json / rpc-node-config.json
+AvalancheGo node configuration. Key difference:
+- **Validators**: `index-enabled: false` (no indexing needed)
+- **RPC nodes**: `index-enabled: true` (enables transaction indexing for queries)
+
+These settings are applied via Ansible. Edit the files and re-run `make deploy` to apply changes.
+
+---
+
 ## ValidatorManager with Genesis Proxy (Advanced)
 
 For production L1s, you can pre-deploy a TransparentUpgradeableProxy in genesis with a vanity address, then upgrade it to the ValidatorManager implementation after L1 conversion.

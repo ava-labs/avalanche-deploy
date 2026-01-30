@@ -59,3 +59,7 @@ use_local_nvme: true
 # Partial sync - for L1 validators that don't need full primary network state
 # Set to true to only sync P-chain headers (much faster bootstrap)
 partial_sync_primary_network: true
+
+# Index settings - RPC nodes need indexing for queries, validators don't
+# This is automatically set based on node_type, but can be overridden
+index_enabled: "{{ true if node_type == 'rpc' else false }}"

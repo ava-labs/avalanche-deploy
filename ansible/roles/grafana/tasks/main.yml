@@ -77,7 +77,7 @@
 
 - name: Copy Avalanche dashboard
   copy:
-    src: "{{ playbook_dir }}/../../shared/dashboards/avalanche-l1.json"
+    src: avalanche-l1.json
     dest: "{{ grafana_data_dir }}/dashboards/avalanche-l1.json"
     owner: "{{ grafana_user }}"
     group: "{{ grafana_group }}"

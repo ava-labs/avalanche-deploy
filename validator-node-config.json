@@ -1,0 +1,8 @@
+{
+  "index-enabled": false,
+  "api-admin-enabled": false,
+  "api-info-enabled": true,
+  "api-health-enabled": true,
+  "log-level": "info",
+  "log-display-level": "info"
+}

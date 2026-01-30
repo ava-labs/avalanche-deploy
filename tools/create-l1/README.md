@@ -101,7 +101,7 @@ RPC_3_URL=http://1.2.3.6:9650/ext/bc/.../rpc
 
 ## Genesis File
 
-Use the templates in `shared/genesis/` or create your own:
+Edit `genesis.json` in the repo root, or create your own:
 
 ```json
 {

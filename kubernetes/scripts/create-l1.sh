@@ -74,10 +74,8 @@ echo "Validators: $VALIDATOR_IPS"
 if [ -z "$GENESIS" ]; then
     if [ -f "$ROOT_DIR/genesis.json" ]; then
         GENESIS="$ROOT_DIR/genesis.json"
-    elif [ -f "$ROOT_DIR/shared/genesis/evm-${NETWORK}.json" ]; then
-        GENESIS="$ROOT_DIR/shared/genesis/evm-${NETWORK}.json"
     else
-        echo "Error: No genesis file found"
+        echo "Error: No genesis file found. Create genesis.json in repo root."
         exit 1
     fi
 fi

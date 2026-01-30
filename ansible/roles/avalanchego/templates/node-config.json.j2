@@ -7,7 +7,7 @@
     "api-admin-enabled": {{ api_admin_enabled | lower }},
     "api-info-enabled": {{ api_info_enabled | lower }},
     "api-health-enabled": {{ api_health_enabled | lower }},
-    "index-enabled": false,
+    "index-enabled": {{ index_enabled | lower }},
     "log-level": "{{ log_level }}",
     "log-display-level": "{{ log_display_level }}",
     "log-dir": "{{ avalanchego_log_dir }}",

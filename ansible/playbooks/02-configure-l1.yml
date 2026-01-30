@@ -94,15 +94,14 @@
         mode: "0755"
       when: chain_id != ""
 
-    - name: Copy chain config
+    - name: Copy chain config from root
       copy:
-        src: "{{ playbook_dir }}/../../shared/configs/chain-config.json"
+        src: "{{ playbook_dir }}/../../chain-config.json"
         dest: "{{ avalanchego_config_dir }}/chains/{{ chain_id }}/config.json"
         owner: "{{ avalanchego_user }}"
         group: "{{ avalanchego_group }}"
         mode: "0644"
       when: chain_id != ""
-      failed_when: false
       notify: Restart avalanchego
 
   handlers:
@@ -171,8 +170,11 @@
           Bootstrap IDs configured for validator discovery.
 
           RPC Endpoints:
+          {% for host in groups['rpc'] | default([]) %}
+            http://{{ hostvars[host]['ansible_host'] }}:9650/ext/bc/{{ chain_id }}/rpc (RPC node - recommended)
+          {% endfor %}
           {% for host in groups['validators'] | default([]) %}
-            http://{{ hostvars[host]['ansible_host'] }}:9650/ext/bc/{{ chain_id }}/rpc
+            http://{{ hostvars[host]['ansible_host'] }}:9650/ext/bc/{{ chain_id }}/rpc (validator - SSH tunnel only)
           {% endfor %}
 
           ============================================
