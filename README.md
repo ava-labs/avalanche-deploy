@@ -117,6 +117,14 @@ Use the [Avalanche Builder Console](https://build.avax.network/console/layer-1/c
       "gasLimit": 15000000,
       "targetBlockRate": 2,
       "minBaseFee": 25000000000
+    },
+    "subnetEVMTimestamp": 0,
+    "durangoTimestamp": 0,
+    "etnaTimestamp": 0,
+    "warpConfig": {
+      "blockTimestamp": 0,
+      "quorumNumerator": 67,
+      "requirePrimaryNetworkSigners": true
     }
   },
   "alloc": {
@@ -131,6 +139,8 @@ Key fields:
 - `chainId`: Unique ID for your chain (check [chainlist.org](https://chainlist.org))
 - `alloc`: Pre-fund addresses (balance in wei, hex format)
 - `feeConfig.minBaseFee`: Minimum gas price in wei
+- `durangoTimestamp`, `etnaTimestamp`: **Required** for warp/ICM messaging (set to 0 for genesis activation)
+- `warpConfig`: Enable cross-chain messaging (required for ValidatorManager)
 
 ### 8. Create Your L1
 
@@ -150,10 +160,39 @@ export VALIDATORS=$(cd terraform/aws && terraform output -json validator_ips | j
   --network=fuji \
   --validators=$VALIDATORS \
   --chain-name=mychain \
+  --validator-balance=1.0 \
   --output=l1.env
 ```
 
 > **Note:** Chain names must be alphanumeric only (no hyphens or special characters).
+
+#### create-l1 Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--network` | `fuji` | Network: `fuji` or `mainnet` |
+| `--validators` | - | Comma-separated validator IPs |
+| `--chain-name` | `my-l1` | Chain name (alphanumeric only) |
+| `--validator-balance` | `1.0` | AVAX per validator (supports decimals: `0.1`, `0.5`) |
+| `--genesis` | auto-detect | Path to genesis.json |
+| `--genesis-proxy-address` | - | Use pre-deployed proxy as ValidatorManager (e.g., `0xfacade...`) |
+| `--private-key` | - | P-Chain private key (or use `AVALANCHE_PRIVATE_KEY` env) |
+| `--output` | `l1.env` | Output file for subnet/chain IDs |
+
+#### Low Balance Testing
+
+For testing with minimal P-Chain funds:
+
+```bash
+./tools/create-l1/create-l1 \
+  --network=fuji \
+  --validators=$VALIDATORS \
+  --chain-name=TestL1 \
+  --validator-balance=0.1 \
+  --output=l1.env
+```
+
+This creates validators with 0.1 AVAX each instead of 1 AVAX, reducing the total P-Chain requirement.
 
 ### 9. Configure Nodes for L1
 
@@ -230,6 +269,56 @@ See [kubernetes/README.md](kubernetes/README.md) for full documentation.
 
 ---
 
+## ValidatorManager with Genesis Proxy (Advanced)
+
+For production L1s, you can pre-deploy a TransparentUpgradeableProxy in genesis with a vanity address, then upgrade it to the ValidatorManager implementation after L1 conversion.
+
+### Why Use a Genesis Proxy?
+
+- **Deterministic addresses**: Use vanity addresses like `0xfacade...` for your ValidatorManager
+- **Upgradeable**: Proxy pattern allows upgrading the implementation later
+- **Clean deployment**: Contracts in genesis, no deployment transactions needed
+
+### Setup
+
+1. **Add proxy contracts to genesis.json** (see `genesis.json` for example):
+   - TransparentUpgradeableProxy at vanity address (e.g., `0xfacade0000000000000000000000000000000000`)
+   - ProxyAdmin at another address (e.g., `0xdad0000000000000000000000000000000000000`)
+   - Set EIP-1967 storage slots for admin and implementation
+
+2. **Create L1 with genesis proxy**:
+   ```bash
+   ./tools/create-l1/create-l1 \
+     --network=fuji \
+     --validators=$VALIDATORS \
+     --chain-name=MyL1 \
+     --genesis-proxy-address=0xfacade0000000000000000000000000000000000 \
+     --output=l1.env
+   ```
+
+3. **After L1 conversion**, deploy the ValidatorManager implementation and upgrade the proxy using your ProxyAdmin.
+
+4. **Call `initializeValidatorSet`** on the proxy to register validators.
+
+---
+
+## Deploy Monitoring (Prometheus + Grafana)
+
+Deploy monitoring stack to track node health and performance:
+
+```bash
+source l1.env
+cd ansible
+ansible-playbook playbooks/03-setup-monitoring.yml \
+  -i inventory/aws_hosts
+```
+
+Access Grafana at `http://<monitoring-ip>:3000` (default: admin/admin).
+
+The monitoring host is the first validator by default. Change with `-e "monitoring_host=<ip>"`.
+
+---
+
 ## Deploy Blockscout Block Explorer
 
 After your L1 is running, deploy Blockscout to explore transactions:
@@ -238,19 +327,89 @@ After your L1 is running, deploy Blockscout to explore transactions:
 # Source your L1 config
 source l1.env
 
-# Deploy Blockscout (runs on monitoring host or any server with Docker)
+# Get RPC node IP (or use a validator IP)
+RPC_IP=$(cd terraform/aws && terraform output -json rpc_ips | jq -r '.[0]')
+
+# Deploy Blockscout
 cd ansible
 ansible-playbook playbooks/04-deploy-blockscout.yml \
-  -e "blockscout_rpc_url=http://<RPC_NODE_IP>:9650/ext/bc/$CHAIN_ID/rpc" \
-  -e "blockscout_chain_id=$CHAIN_ID" \
-  -e "blockscout_network_name=My Avalanche L1"
+  -i inventory/aws_hosts \
+  -e "chain_id=$CHAIN_ID" \
+  -e "l1_rpc_url=http://$RPC_IP:9650/ext/bc/$CHAIN_ID/rpc"
 ```
 
 Blockscout will be available at:
-- **Frontend**: http://\<server\>:4001
-- **API**: http://\<server\>:4000/api
+- **Frontend**: http://\<monitoring-ip\>:4001
+- **API**: http://\<monitoring-ip\>:4000/api
 
-> **Note:** Initial indexing may take time depending on chain history.
+Get the URL from terraform output:
+```bash
+cd terraform/aws && terraform output blockscout_url
+```
+
+> **Note:** Initial indexing may take time depending on chain history. Blockscout runs on the monitoring host (first validator by default).
+
+---
+
+## Terraform Outputs
+
+After `terraform apply`, useful outputs are available:
+
+```bash
+cd terraform/aws
+
+# Get all outputs
+terraform output
+
+# Specific outputs
+terraform output validator_ips      # Validator public IPs
+terraform output rpc_ips            # RPC node public IPs
+terraform output monitoring_ip      # Monitoring/Grafana host
+terraform output grafana_url        # Grafana dashboard URL
+terraform output blockscout_url     # Blockscout explorer URL
+```
+
+---
+
+## Full Deployment Workflow
+
+Complete workflow from zero to running L1 with monitoring:
+
+```bash
+# 1. Infrastructure
+cd terraform/aws
+terraform init && terraform apply
+
+# 2. Deploy nodes
+cd ../..
+make deploy
+
+# 3. Wait for P-Chain sync
+make status  # wait for P:OK on all nodes
+
+# 4. Create L1
+source /tmp/aws_creds.env  # or set AWS creds
+export AVALANCHE_PRIVATE_KEY="0x..."
+export VALIDATORS=$(cd terraform/aws && terraform output -json validator_ips | jq -r 'join(",")')
+./tools/create-l1/create-l1 --network=fuji --validators=$VALIDATORS --chain-name=MyL1 --output=l1.env
+
+# 5. Configure nodes for L1
+source l1.env
+make configure-l1 SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID
+
+# 6. Deploy monitoring
+cd ansible && ansible-playbook playbooks/03-setup-monitoring.yml -i inventory/aws_hosts
+
+# 7. Deploy Blockscout
+RPC_IP=$(cd ../terraform/aws && terraform output -json rpc_ips | jq -r '.[0]')
+ansible-playbook playbooks/04-deploy-blockscout.yml -i inventory/aws_hosts -e "chain_id=$CHAIN_ID" -e "l1_rpc_url=http://$RPC_IP:9650/ext/bc/$CHAIN_ID/rpc"
+
+# 8. Get URLs
+cd ../terraform/aws
+echo "RPC: http://$(terraform output -json rpc_ips | jq -r '.[0]'):9650/ext/bc/$CHAIN_ID/rpc"
+terraform output grafana_url
+terraform output blockscout_url
+```
 
 ---
 
@@ -300,4 +459,20 @@ make logs   # view avalanchego logs
 # Validators don't expose 9650 publicly (security)
 # Option 1: Add an RPC node (rpc_count = 1 in terraform.tfvars)
 # Option 2: SSH tunnel: ssh -L 9650:localhost:9650 ubuntu@<validator-ip>
+```
+
+**Chain fails with "warp cannot be activated before Durango"**
+```bash
+# Your genesis.json is missing upgrade timestamps
+# Add these to the config section:
+"subnetEVMTimestamp": 0,
+"durangoTimestamp": 0,
+"etnaTimestamp": 0
+```
+
+**create-l1 fails with "insufficient funds" for low amounts**
+```bash
+# Use fractional balance flag
+./tools/create-l1/create-l1 --validator-balance=0.1 ...
+# This requires only 0.3 AVAX total for 3 validators instead of 3 AVAX
 ```
