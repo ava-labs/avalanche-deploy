@@ -22,20 +22,52 @@ Pick one. Most people start with Terraform + Ansible.
 ### Default Architecture (2 Validators + 1 RPC)
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Validator 1   │    │   Validator 2   │    │    RPC Node     │
-│                 │    │                 │    │                 │
-│  - avalanchego  │◄──►│  - avalanchego  │◄──►│  - avalanchego  │
-│  - Prometheus   │    │                 │    │                 │
-│  - Grafana      │    │                 │    │  Blockscout ──► │
-│  - Blockscout   │    │                 │    │   (connects)    │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-     monitoring              validator            RPC queries
+                              ┌──────────────────────────────────────────┐
+                              │              Avalanche Network           │
+                              │         (Fuji Testnet / Mainnet)         │
+                              └─────────────────────┬────────────────────┘
+                                                    │
+                          ┌─────────────────────────┼─────────────────────────┐
+                          │                         │                         │
+                          ▼                         ▼                         ▼
+              ┌───────────────────┐    ┌───────────────────┐    ┌───────────────────┐
+              │   Validator 1     │    │   Validator 2     │    │    RPC Node       │
+              │   ─────────────   │    │   ─────────────   │    │   ─────────────   │
+              │                   │    │                   │    │                   │
+              │  ┌─────────────┐  │    │  ┌─────────────┐  │    │  ┌─────────────┐  │
+              │  │ AvalancheGo │  │◄──►│  │ AvalancheGo │  │◄──►│  │ AvalancheGo │  │
+              │  │   :9651     │  │P2P │  │   :9651     │  │P2P │  │ :9650/:9651 │  │
+              │  └─────────────┘  │    │  └─────────────┘  │    │  └─────────────┘  │
+              │                   │    │                   │    │        │          │
+              │  ┌─────────────┐  │    │                   │    │        ▼          │
+              │  │ Prometheus  │──┼────┼───────────────────┼────┼─► Scrapes all     │
+              │  │   :9090     │  │    │                   │    │   node metrics    │
+              │  └─────────────┘  │    │                   │    │                   │
+              │        │         │    │                   │    │  ┌─────────────┐  │
+              │        ▼         │    │                   │    │  │ Blockscout  │  │
+              │  ┌─────────────┐  │    │                   │    │  │ :4000/:4001 │  │
+              │  │  Grafana    │  │    │                   │    │  │   :8050     │  │
+              │  │   :3000     │  │    │                   │    │  └─────────────┘  │
+              │  └─────────────┘  │    │                   │    │                   │
+              └───────────────────┘    └───────────────────┘    └───────────────────┘
+                   Monitoring              Consensus                 Public API
+                                                                         │
+                          ┌──────────────────────────────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────────────────────────────────────────┐
+              │                      External Access                      │
+              │  • RPC API:     http://<rpc-ip>:9650/ext/bc/<chain>/rpc  │
+              │  • WebSocket:   ws://<rpc-ip>:9650/ext/bc/<chain>/ws     │
+              │  • Blockscout:  http://<rpc-ip>:4001 (explorer)          │
+              │  • Grafana:     http://<validator-1>:3000 (dashboards)   │
+              └───────────────────────────────────────────────────────────┘
 ```
 
-- **Validators**: Produce blocks, validate transactions
-- **RPC Node**: Handle queries, Blockscout indexing (keeps validator load low)
-- **Monitoring**: Grafana dashboards for all nodes, Blockscout explorer
+**Node Roles:**
+- **Validators** (2+): Produce blocks, validate transactions. Only expose P2P port (9651) publicly.
+- **RPC Node** (1+): Handles external queries & Blockscout indexing. Keeps validator load low.
+- **Monitoring**: Prometheus scrapes all nodes; Grafana dashboards on validator-1.
 
 ---
 
@@ -383,26 +415,26 @@ The monitoring host is the first validator by default. Grafana dashboards show:
 
 ## Deploy Blockscout Block Explorer
 
-After your L1 is running, deploy Blockscout to explore transactions. Blockscout connects to the **RPC node** (not validators) for indexing.
+After your L1 is running, deploy Blockscout to explore transactions. Blockscout runs on the **RPC node** alongside the chain data it indexes.
 
 ```bash
 # Source your L1 config
 source l1.env
 
-# Get RPC node IP
-RPC_IP=$(cd terraform/aws && terraform output -json rpc_ips | jq -r '.[0]')
-
-# Deploy Blockscout (runs on monitoring host, connects to RPC)
+# Deploy Blockscout to RPC node
 cd ansible
 ansible-playbook playbooks/04-deploy-blockscout.yml \
   -i inventory/aws_hosts \
   -e "chain_id=$CHAIN_ID" \
-  -e "l1_rpc_url=http://$RPC_IP:9650/ext/bc/$CHAIN_ID/rpc"
+  -e "evm_chain_id=99999" \
+  -e "l1_name=MyL1" \
+  -e "coin_symbol=TOKEN"
 ```
 
 Blockscout will be available at:
-- **Frontend**: http://\<monitoring-ip\>:4001
-- **API**: http://\<monitoring-ip\>:4000/api
+- **Frontend**: http://\<rpc-ip\>:4001
+- **API**: http://\<rpc-ip\>:4000/api
+- **Stats**: http://\<rpc-ip\>:8050/api
 
 ```bash
 # Get the Blockscout URL
@@ -410,9 +442,9 @@ cd terraform/aws && terraform output blockscout_url
 ```
 
 **Architecture:**
-- Blockscout runs on the monitoring host (first validator)
-- Connects to RPC node for chain data (keeps validator load low)
-- Initial indexing may take time depending on chain history
+- Blockscout runs on the RPC node (co-located with the data it indexes)
+- Uses `host.docker.internal` to connect to local AvalancheGo RPC
+- Stats service provides chart data for the frontend
 
 ---
 
