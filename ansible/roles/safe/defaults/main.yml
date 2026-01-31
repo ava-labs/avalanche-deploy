@@ -1,0 +1,65 @@
+---
+# Safe Multisig Infrastructure - Default Configuration
+
+# Service ports
+safe_http_port: 8080
+safe_txs_port: 8001
+safe_cfg_port: 8002
+safe_cgw_port: 8003
+safe_ui_port: 3000
+
+# RPC configuration (uses host.docker.internal to reach avalanchego on host)
+safe_rpc_url: "http://host.docker.internal:9650/ext/bc/{{ chain_id }}/rpc"
+
+# Chain configuration
+chain_name: "Avalanche L1"
+chain_short_name: "AVAX-L1"
+native_currency_name: "AVAX"
+native_currency_symbol: "AVAX"
+native_currency_decimals: 18
+
+# Docker image versions (Safe Global official images)
+safe_txs_version: "v4.26.1"
+safe_cfg_version: "v2.73.0"
+safe_cgw_version: "v3.43.0"
+safe_ui_version: "v1.31.0"
+
+# Database configuration
+safe_txs_db_name: "safe_txs"
+safe_cfg_db_name: "safe_cfg"
+safe_cgw_db_name: "safe_cgw"
+safe_db_user: "safe"
+safe_db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+
+# Redis configuration
+safe_redis_url: "redis://redis:6379/0"
+
+# RabbitMQ configuration
+safe_rabbitmq_user: "safe"
+safe_rabbitmq_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+
+# Safe contract addresses (canonical CREATE2 addresses from @safe-global/safe-deployments)
+safe_contracts:
+  # Core contracts
+  safe_l2_singleton: "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762"
+  proxy_factory: "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67"
+
+  # Utility contracts
+  multi_send: "0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526"
+  multi_send_call_only: "0x9641d764fc13c8B624c04430C7356C1C7C8102e2"
+  fallback_handler: "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99"
+  create_call: "0x9b35Af71d77eaf8d7e40252370304687390A1A52"
+  sign_message_lib: "0xd53cd0aB83D845Ac265BE939c57F53AD838012c9"
+  simulate_tx_accessor: "0x3d4BA2E0884aa488718476ca2FB8Efc291A46199"
+
+# Installation paths
+safe_install_dir: "/opt/safe"
+safe_data_dir: "/opt/safe/data"
+safe_logs_dir: "/var/log/safe"
+
+# Worker configuration
+safe_txs_worker_count: 2
+
+# Secret key for Django (auto-generated if not provided)
+safe_txs_secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
+safe_cfg_secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"

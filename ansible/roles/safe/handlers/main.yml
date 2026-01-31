@@ -1,0 +1,13 @@
+---
+# Handlers for Safe services
+
+- name: Restart safe services
+  ansible.builtin.systemd:
+    name: safe
+    state: restarted
+    daemon_reload: yes
+
+- name: Reload nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: reloaded

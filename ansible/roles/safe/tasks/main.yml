@@ -1,0 +1,208 @@
+---
+# Safe Multisig Infrastructure Installation Tasks
+
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - chain_id is defined
+      - evm_chain_id is defined
+    fail_msg: "chain_id and evm_chain_id must be defined"
+
+- name: Check if Docker is installed
+  ansible.builtin.command: docker --version
+  register: docker_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Docker (if not present)
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose
+    state: present
+    update_cache: yes
+  when: docker_check.rc != 0
+
+- name: Install nginx and pip
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - python3-pip
+    state: present
+    update_cache: yes
+
+- name: Ensure Docker service is running
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Create Safe directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ safe_install_dir }}"
+    - "{{ safe_data_dir }}"
+    - "{{ safe_data_dir }}/postgres-txs"
+    - "{{ safe_data_dir }}/postgres-cfg"
+    - "{{ safe_data_dir }}/postgres-cgw"
+    - "{{ safe_data_dir }}/redis"
+    - "{{ safe_data_dir }}/rabbitmq"
+    - "{{ safe_logs_dir }}"
+    - "{{ safe_install_dir }}/nginx"
+    - "{{ safe_install_dir }}/init"
+
+- name: Generate DB password file
+  ansible.builtin.copy:
+    content: "{{ safe_db_password }}"
+    dest: "{{ safe_install_dir }}/.db_password"
+    mode: '0600'
+
+- name: Generate RabbitMQ password file
+  ansible.builtin.copy:
+    content: "{{ safe_rabbitmq_password }}"
+    dest: "{{ safe_install_dir }}/.rabbitmq_password"
+    mode: '0600'
+
+- name: Template docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ safe_install_dir }}/docker-compose.yml"
+    mode: '0644'
+  notify: Restart safe services
+
+- name: Template Transaction Service environment
+  ansible.builtin.template:
+    src: txs.env.j2
+    dest: "{{ safe_install_dir }}/txs.env"
+    mode: '0600'
+  notify: Restart safe services
+
+- name: Template Config Service environment
+  ansible.builtin.template:
+    src: cfg.env.j2
+    dest: "{{ safe_install_dir }}/cfg.env"
+    mode: '0600'
+  notify: Restart safe services
+
+- name: Template Client Gateway environment
+  ansible.builtin.template:
+    src: cgw.env.j2
+    dest: "{{ safe_install_dir }}/cgw.env"
+    mode: '0600'
+  notify: Restart safe services
+
+- name: Template UI environment
+  ansible.builtin.template:
+    src: ui.env.j2
+    dest: "{{ safe_install_dir }}/ui.env"
+    mode: '0600'
+  notify: Restart safe services
+
+- name: Template nginx configuration
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "{{ safe_install_dir }}/nginx/safe.conf"
+    mode: '0644'
+  notify: Reload nginx
+
+- name: Copy contract initialization script
+  ansible.builtin.copy:
+    src: init-contracts.py
+    dest: "{{ safe_install_dir }}/init/init-contracts.py"
+    mode: '0755'
+
+- name: Template systemd service
+  ansible.builtin.template:
+    src: safe.service.j2
+    dest: /etc/systemd/system/safe.service
+    mode: '0644'
+  notify: Restart safe services
+
+- name: Enable nginx site
+  ansible.builtin.file:
+    src: "{{ safe_install_dir }}/nginx/safe.conf"
+    dest: /etc/nginx/sites-enabled/safe.conf
+    state: link
+  notify: Reload nginx
+
+- name: Remove default nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload nginx
+
+- name: Start Safe services
+  ansible.builtin.systemd:
+    name: safe
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: Ensure nginx is running
+  ansible.builtin.systemd:
+    name: nginx
+    state: started
+    enabled: yes
+
+- name: Wait for Transaction Service to be ready
+  ansible.builtin.uri:
+    url: "http://localhost:{{ safe_txs_port }}/api/v1/about/"
+    method: GET
+    status_code: 200
+  register: txs_health
+  until: txs_health.status == 200
+  retries: 30
+  delay: 10
+
+- name: Wait for Config Service to be ready
+  ansible.builtin.uri:
+    url: "http://localhost:{{ safe_cfg_port }}/api/v1/about/"
+    method: GET
+    status_code: 200
+  register: cfg_health
+  until: cfg_health.status == 200
+  retries: 30
+  delay: 10
+
+- name: Wait for Client Gateway to be ready
+  ansible.builtin.uri:
+    url: "http://localhost:{{ safe_cgw_port }}/health"
+    method: GET
+    status_code: 200
+  register: cgw_health
+  until: cgw_health.status == 200
+  retries: 30
+  delay: 10
+
+- name: Run contract initialization
+  ansible.builtin.command:
+    cmd: >
+      docker exec safe-txs-web python /init/init-contracts.py
+      --chain-id {{ evm_chain_id }}
+      --safe-singleton {{ safe_contracts.safe_l2_singleton }}
+      --proxy-factory {{ safe_contracts.proxy_factory }}
+      --multi-send {{ safe_contracts.multi_send }}
+      --multi-send-call-only {{ safe_contracts.multi_send_call_only }}
+      --fallback-handler {{ safe_contracts.fallback_handler }}
+      --create-call {{ safe_contracts.create_call }}
+      --sign-message-lib {{ safe_contracts.sign_message_lib }}
+      --simulate-tx-accessor {{ safe_contracts.simulate_tx_accessor }}
+  register: init_result
+  changed_when: "'Created' in init_result.stdout"
+  failed_when: init_result.rc != 0
+
+- name: Display Safe URLs
+  ansible.builtin.debug:
+    msg: |
+      Safe Multisig Infrastructure Deployed Successfully!
+
+      Web UI:              http://{{ ansible_host }}:{{ safe_http_port }}/
+      Transaction Service: http://{{ ansible_host }}:{{ safe_http_port }}/txs/api/v1/about/
+      Config Service:      http://{{ ansible_host }}:{{ safe_http_port }}/cfg/api/v1/about/
+      Client Gateway:      http://{{ ansible_host }}:{{ safe_http_port }}/cgw/health
+
+      Chain ID: {{ evm_chain_id }}
+      RPC URL:  {{ safe_rpc_url }}

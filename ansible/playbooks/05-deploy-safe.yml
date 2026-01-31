@@ -1,0 +1,89 @@
+---
+# Deploy Safe Multisig Infrastructure
+# Usage: ansible-playbook playbooks/05-deploy-safe.yml -e "chain_id=<CHAIN_ID> evm_chain_id=<EVM_CHAIN_ID>"
+
+- name: Deploy Safe Multisig Infrastructure
+  hosts: rpc
+  become: yes
+  vars:
+    # These must be provided via -e or group_vars
+    # chain_id: "<Avalanche chain ID from l1.env>"
+    # evm_chain_id: "<EVM chain ID from genesis.json>"
+
+  pre_tasks:
+    - name: Verify chain_id is provided
+      ansible.builtin.fail:
+        msg: "chain_id must be provided. Use -e 'chain_id=<value>'"
+      when: chain_id is not defined
+
+    - name: Verify evm_chain_id is provided
+      ansible.builtin.fail:
+        msg: "evm_chain_id must be provided. Use -e 'evm_chain_id=<value>'"
+      when: evm_chain_id is not defined
+
+    - name: Check if avalanchego is running
+      ansible.builtin.command: systemctl is-active avalanchego
+      register: avalanchego_status
+      changed_when: false
+      failed_when: false
+
+    - name: Warn if avalanchego is not running
+      ansible.builtin.debug:
+        msg: "WARNING: avalanchego is not running. Safe services will not be able to connect to the RPC."
+      when: avalanchego_status.rc != 0
+
+  roles:
+    - role: safe
+
+  post_tasks:
+    - name: Verify Transaction Service health
+      ansible.builtin.uri:
+        url: "http://localhost:{{ safe_txs_port }}/api/v1/about/"
+        method: GET
+      register: txs_about
+      failed_when: false
+
+    - name: Verify Config Service health
+      ansible.builtin.uri:
+        url: "http://localhost:{{ safe_cfg_port }}/api/v1/about/"
+        method: GET
+      register: cfg_about
+      failed_when: false
+
+    - name: Verify Client Gateway health
+      ansible.builtin.uri:
+        url: "http://localhost:{{ safe_cgw_port }}/health"
+        method: GET
+      register: cgw_health
+      failed_when: false
+
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg: |
+          ============================================
+          Safe Multisig Infrastructure Deployment
+          ============================================
+
+          Status:
+            Transaction Service: {{ 'OK' if txs_about.status == 200 else 'FAILED' }}
+            Config Service:      {{ 'OK' if cfg_about.status == 200 else 'FAILED' }}
+            Client Gateway:      {{ 'OK' if cgw_health.status == 200 else 'FAILED' }}
+
+          URLs:
+            Web UI:              http://{{ ansible_host }}:{{ safe_http_port }}/
+            Transaction API:     http://{{ ansible_host }}:{{ safe_http_port }}/txs/api/v1/
+            Config API:          http://{{ ansible_host }}:{{ safe_http_port }}/cfg/api/v1/
+            Gateway API:         http://{{ ansible_host }}:{{ safe_http_port }}/cgw/
+
+          Chain Configuration:
+            Avalanche Chain ID:  {{ chain_id }}
+            EVM Chain ID:        {{ evm_chain_id }}
+            RPC URL:             {{ safe_rpc_url }}
+
+          Contract Addresses (v1.4.1):
+            Safe L2 Singleton:   {{ safe_contracts.safe_l2_singleton }}
+            Proxy Factory:       {{ safe_contracts.proxy_factory }}
+            MultiSend:           {{ safe_contracts.multi_send }}
+            Fallback Handler:    {{ safe_contracts.fallback_handler }}
+
+          ============================================

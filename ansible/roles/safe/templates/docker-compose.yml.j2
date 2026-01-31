@@ -1,0 +1,178 @@
+version: '3.8'
+
+services:
+  # PostgreSQL databases
+  postgres-txs:
+    image: postgres:14-alpine
+    container_name: safe-postgres-txs
+    environment:
+      POSTGRES_DB: {{ safe_txs_db_name }}
+      POSTGRES_USER: {{ safe_db_user }}
+      POSTGRES_PASSWORD: {{ safe_db_password }}
+    volumes:
+      - {{ safe_data_dir }}/postgres-txs:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ safe_db_user }} -d {{ safe_txs_db_name }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  postgres-cfg:
+    image: postgres:14-alpine
+    container_name: safe-postgres-cfg
+    environment:
+      POSTGRES_DB: {{ safe_cfg_db_name }}
+      POSTGRES_USER: {{ safe_db_user }}
+      POSTGRES_PASSWORD: {{ safe_db_password }}
+    volumes:
+      - {{ safe_data_dir }}/postgres-cfg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ safe_db_user }} -d {{ safe_cfg_db_name }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  postgres-cgw:
+    image: postgres:14-alpine
+    container_name: safe-postgres-cgw
+    environment:
+      POSTGRES_DB: {{ safe_cgw_db_name }}
+      POSTGRES_USER: {{ safe_db_user }}
+      POSTGRES_PASSWORD: {{ safe_db_password }}
+    volumes:
+      - {{ safe_data_dir }}/postgres-cgw:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ safe_db_user }} -d {{ safe_cgw_db_name }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis cache
+  redis:
+    image: redis:7-alpine
+    container_name: safe-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - {{ safe_data_dir }}/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # RabbitMQ message queue
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: safe-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: {{ safe_rabbitmq_user }}
+      RABBITMQ_DEFAULT_PASS: {{ safe_rabbitmq_password }}
+    volumes:
+      - {{ safe_data_dir }}/rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    restart: unless-stopped
+
+  # Transaction Service - Web
+  txs-web:
+    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}
+    container_name: safe-txs-web
+    env_file:
+      - {{ safe_install_dir }}/txs.env
+    depends_on:
+      postgres-txs:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - {{ safe_install_dir }}/init:/init:ro
+    ports:
+      - "{{ safe_txs_port }}:8000"
+    command: docker/web/run_web.sh
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # Transaction Service - Worker (Celery)
+  txs-worker:
+    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}
+    container_name: safe-txs-worker
+    env_file:
+      - {{ safe_install_dir }}/txs.env
+    depends_on:
+      - txs-web
+    command: docker/web/celery/worker/run.sh
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # Transaction Service - Scheduler (Celery Beat)
+  txs-scheduler:
+    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}
+    container_name: safe-txs-scheduler
+    env_file:
+      - {{ safe_install_dir }}/txs.env
+    depends_on:
+      - txs-web
+    command: docker/web/celery/scheduler/run.sh
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # Config Service
+  cfg:
+    image: safeglobal/safe-config-service:{{ safe_cfg_version }}
+    container_name: safe-cfg
+    env_file:
+      - {{ safe_install_dir }}/cfg.env
+    depends_on:
+      postgres-cfg:
+        condition: service_healthy
+    ports:
+      - "{{ safe_cfg_port }}:8000"
+    command: docker/web/run_web.sh
+    restart: unless-stopped
+
+  # Client Gateway
+  cgw:
+    image: safeglobal/safe-client-gateway:{{ safe_cgw_version }}
+    container_name: safe-cgw
+    env_file:
+      - {{ safe_install_dir }}/cgw.env
+    depends_on:
+      postgres-cgw:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      txs-web:
+        condition: service_started
+      cfg:
+        condition: service_started
+    ports:
+      - "{{ safe_cgw_port }}:3000"
+    restart: unless-stopped
+
+  # Safe Wallet Web UI
+  ui:
+    image: safeglobal/safe-wallet-web:{{ safe_ui_version }}
+    container_name: safe-ui
+    env_file:
+      - {{ safe_install_dir }}/ui.env
+    depends_on:
+      - cgw
+    ports:
+      - "{{ safe_ui_port }}:3000"
+    restart: unless-stopped
+
+networks:
+  default:
+    name: safe-network

@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup infra deploy status create-l1 destroy clean logs
+.PHONY: setup infra deploy status create-l1 safe safe-genesis destroy clean logs
 
 # Default cloud provider
 CLOUD ?= aws
@@ -76,6 +76,21 @@ create-l1:
 	@echo "Done! Binary at tools/create-l1/create-l1"
 
 #
+# Safe Multisig
+#
+safe:
+	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make safe CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
+	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make safe CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
+	@cd ansible && ansible-playbook playbooks/05-deploy-safe.yml \
+		-e "chain_id=$(CHAIN_ID)" \
+		-e "evm_chain_id=$(EVM_CHAIN_ID)"
+
+safe-genesis:
+	@echo "Merging Safe contracts into genesis.json..."
+	@./shared/safe/merge-genesis.sh genesis.json
+	@echo "Done! Safe contracts added to genesis.json"
+
+#
 # Cleanup
 #
 destroy:
@@ -96,12 +111,16 @@ help:
 	@echo "Avalanche L1 Deploy"
 	@echo ""
 	@echo "Quick start:"
-	@echo "  make setup      Install dependencies (terraform, ansible, aws-cli)"
-	@echo "  make infra      Create cloud infrastructure"
-	@echo "  make deploy     Deploy avalanchego to nodes"
-	@echo "  make status     Check node sync status"
-	@echo "  make create-l1  Build the create-l1 tool"
-	@echo "  make destroy    Tear down infrastructure (stops billing!)"
+	@echo "  make setup        Install dependencies (terraform, ansible, aws-cli)"
+	@echo "  make infra        Create cloud infrastructure"
+	@echo "  make deploy       Deploy avalanchego to nodes"
+	@echo "  make status       Check node sync status"
+	@echo "  make create-l1    Build the create-l1 tool"
+	@echo "  make destroy      Tear down infrastructure (stops billing!)"
+	@echo ""
+	@echo "Safe Multisig:"
+	@echo "  make safe-genesis Merge Safe contracts into genesis.json (run before create-l1)"
+	@echo "  make safe         Deploy Safe infrastructure (run after L1 creation)"
 	@echo ""
 	@echo "Options:"
 	@echo "  CLOUD=aws|gcp|azure  (default: aws)"
@@ -110,3 +129,4 @@ help:
 	@echo "Example:"
 	@echo "  make infra CLOUD=gcp"
 	@echo "  make deploy NETWORK=mainnet"
+	@echo "  make safe CHAIN_ID=xxx EVM_CHAIN_ID=99999"
