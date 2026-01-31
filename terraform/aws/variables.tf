@@ -124,6 +124,12 @@ variable "enable_public_blockscout" {
   default     = true
 }
 
+variable "enable_public_safe" {
+  description = "Allow public access to Safe multisig UI"
+  type        = bool
+  default     = true
+}
+
 #
 # Monitoring Configuration
 #

@@ -175,7 +175,14 @@ func run() error {
 	funded, balance := checkGenesisFunding(genesisBytes, ethAddress)
 
 	kc = secp256k1fx.NewKeychain(key)
-	wallet, err := primary.MakePWallet(ctx, nodeURIs[0], kc, primary.WalletConfig{})
+
+	// Use public API for wallet/transactions since validator nodes may not be connected yet
+	walletURI := rpcEndpoint
+	if walletURI == "" {
+		walletURI = nodeURIs[0]
+	}
+	fmt.Printf("  Using RPC endpoint: %s\n", walletURI)
+	wallet, err := primary.MakePWallet(ctx, walletURI, kc, primary.WalletConfig{})
 	if err != nil {
 		return fmt.Errorf("failed to create wallet: %w", err)
 	}
@@ -201,6 +208,7 @@ func run() error {
 		Threshold: 1,
 		Addrs:     []ids.ShortID{ownerAddress},
 	}
+	fmt.Println("  Building and issuing CreateSubnetTx...")
 	subnetTx, err := wallet.IssueCreateSubnetTx(owner)
 	if err != nil {
 		return fmt.Errorf("failed to create subnet: %w", err)
@@ -208,8 +216,8 @@ func run() error {
 	subnetID := subnetTx.ID()
 	fmt.Printf("  Subnet ID: %s\n", subnetID)
 
-	// Re-sync wallet with subnet
-	wallet, err = primary.MakePWallet(ctx, nodeURIs[0], kc, primary.WalletConfig{
+	// Re-sync wallet with subnet (use public API)
+	wallet, err = primary.MakePWallet(ctx, walletURI, kc, primary.WalletConfig{
 		SubnetIDs: []ids.ID{subnetID},
 	})
 	if err != nil {

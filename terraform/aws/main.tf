@@ -206,6 +206,15 @@ resource "aws_security_group" "rpc" {
     cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
   }
 
+  # Safe Multisig UI - configurable (runs on RPC node)
+  ingress {
+    description = "Safe UI"
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = var.enable_public_safe ? ["0.0.0.0/0"] : [local.operator_cidr]
+  }
+
   # Metrics scraping from within VPC (for Prometheus on monitoring node)
   ingress {
     description = "Metrics scraping from VPC"
