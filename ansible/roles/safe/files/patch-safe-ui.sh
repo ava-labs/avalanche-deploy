@@ -149,4 +149,35 @@ fi
 rm -f "${APP_JS}.bak"
 
 echo ""
-echo "Patch complete - Safe UI now supports chain $CHAIN_ID"
+echo "Contract patches complete."
+
+# Patch Gateway URL in all JS files
+# Replace the default Safe Global gateway with our local /cgw path
+echo ""
+echo "Patching Gateway URL..."
+
+DEFAULT_GATEWAY="https://safe-client.safe.global"
+LOCAL_GATEWAY="/cgw"
+
+# Find all JS files and replace the gateway URL
+JS_FILES=$(find /tmp/safe-ui-patched -name "*.js" -type f 2>/dev/null)
+GATEWAY_PATCHED=0
+
+for js_file in $JS_FILES; do
+    if grep -q "$DEFAULT_GATEWAY" "$js_file" 2>/dev/null; then
+        sed -i.tmp "s|$DEFAULT_GATEWAY|$LOCAL_GATEWAY|g" "$js_file"
+        rm -f "${js_file}.tmp"
+        GATEWAY_PATCHED=$((GATEWAY_PATCHED + 1))
+    fi
+done
+
+echo "  Patched gateway URL in $GATEWAY_PATCHED files"
+
+# Verify gateway patch
+REMAINING=$(grep -r "$DEFAULT_GATEWAY" /tmp/safe-ui-patched 2>/dev/null | wc -l | tr -d ' ')
+if [ "$REMAINING" -gt 0 ]; then
+    echo "  Warning: $REMAINING references to default gateway remain"
+fi
+
+echo ""
+echo "Patch complete - Safe UI now supports chain $CHAIN_ID with local gateway"
