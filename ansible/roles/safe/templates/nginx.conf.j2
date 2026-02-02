@@ -28,14 +28,14 @@ upstream blockscout {
 # HTTP -> HTTPS redirect
 server {
     listen {{ safe_http_port }};
-    server_name {{ safe_domain | default('_') }};
+    server_name {{ safe_domain if safe_domain else '_' }};
     return 301 https://$host$request_uri;
 }
 
 # HTTPS server (required for wallet connection - Web Crypto API needs secure context)
 server {
     listen 443 ssl;
-    server_name {{ safe_domain | default('_') }};
+    server_name {{ safe_domain if safe_domain else '_' }};
 
     # SSL certificate (self-signed, generated during deployment)
     ssl_certificate /etc/nginx/ssl/safe.crt;

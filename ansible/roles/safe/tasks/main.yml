@@ -569,23 +569,27 @@
   failed_when: cfg_init.rc != 0 and 'already exists' not in cfg_init.stdout
 
 # Auto-configure contracts in Transaction Service database
+# Must run via manage.py shell to inherit Django environment
 - name: Initialize contracts in Transaction Service
-  ansible.builtin.command:
-    cmd: >
-      docker exec safe-txs-web python /init/init-contracts.py
-      --chain-id "{{ evm_chain_id }}"
-      --safe-singleton "{{ safe_contracts.safe_singleton }}"
-      --proxy-factory "{{ safe_contracts.proxy_factory }}"
-      --multi-send "{{ safe_contracts.multi_send }}"
-      --multi-send-call-only "{{ safe_contracts.multi_send_call_only }}"
-      --fallback-handler "{{ safe_contracts.fallback_handler }}"
-      --create-call "{{ safe_contracts.create_call }}"
-      --sign-message-lib "{{ safe_contracts.sign_message_lib }}"
-      --simulate-tx-accessor "{{ safe_contracts.simulate_tx_accessor }}"
-      --l2 "{{ safe_use_l2 | lower }}"
+  ansible.builtin.shell:
+    cmd: |
+      docker exec safe-txs-web python manage.py shell -c "
+      exec(open('/init/init-contracts.py').read())
+      main(
+          '{{ safe_contracts.safe_singleton }}',
+          '{{ safe_contracts.proxy_factory }}',
+          '{{ safe_contracts.multi_send }}',
+          '{{ safe_contracts.multi_send_call_only }}',
+          '{{ safe_contracts.fallback_handler }}',
+          '{{ safe_contracts.create_call }}',
+          '{{ safe_contracts.sign_message_lib }}',
+          '{{ safe_contracts.simulate_tx_accessor }}',
+          {{ safe_use_l2 | lower }}
+      )
+      "
   register: txs_init
-  changed_when: "'Registering' in txs_init.stdout"
-  failed_when: false
+  changed_when: "'Created' in txs_init.stdout"
+  failed_when: txs_init.rc != 0
 
 # Validation - ensure chain and contracts are properly registered
 - name: Verify chain registered in Config Service
@@ -633,15 +637,7 @@
         Config Service:      http://{{ ansible_host }}:{{ safe_cfg_port }}/api/v1/about/
         Client Gateway:      http://{{ ansible_host }}:{{ safe_cgw_port }}/health
 
-{% if safe_use_letsencrypt %}
-      SSL: Let's Encrypt certificate for {{ safe_domain }}
-           Auto-renewal configured via cron (daily at 3am)
-{% else %}
-      NOTE: Uses self-signed SSL certificate - browser will show security warning.
-            Accept the certificate to access the Safe UI with wallet connection support.
-
-            For production, set safe_use_letsencrypt=true and configure safe_domain.
-{% endif %}
+      SSL: {{ "Let's Encrypt certificate for " ~ safe_domain ~ " (auto-renewal configured)" if safe_use_letsencrypt else "Self-signed certificate - browser will show security warning. Accept to access Safe UI." }}
 
       Chain ID: {{ evm_chain_id }}
       RPC (direct): http://{{ ansible_host }}:9650/ext/bc/{{ chain_id }}/rpc
