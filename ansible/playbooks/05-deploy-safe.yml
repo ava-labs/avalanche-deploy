@@ -81,7 +81,7 @@
             RPC URL:             {{ safe_rpc_url }}
 
           Contract Addresses (v1.4.1):
-            Safe L2 Singleton:   {{ safe_contracts.safe_l2_singleton }}
+            Safe Singleton:      {{ safe_contracts.safe_singleton }}
             Proxy Factory:       {{ safe_contracts.proxy_factory }}
             MultiSend:           {{ safe_contracts.multi_send }}
             Fallback Handler:    {{ safe_contracts.fallback_handler }}

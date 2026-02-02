@@ -96,7 +96,7 @@ services:
     volumes:
       - {{ safe_install_dir }}/init:/init:ro
     ports:
-      - "{{ safe_txs_port }}:8000"
+      - "{{ safe_txs_port }}:8888"
     command: docker/web/run_web.sh
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -137,6 +137,8 @@ services:
     depends_on:
       postgres-cfg:
         condition: service_healthy
+    volumes:
+      - {{ safe_install_dir }}/init:/init:ro
     ports:
       - "{{ safe_cfg_port }}:8000"
     command: docker/web/run_web.sh
@@ -158,19 +160,17 @@ services:
       cfg:
         condition: service_started
     ports:
-      - "{{ safe_cgw_port }}:3000"
+      - "{{ safe_cgw_port }}:3666"
     restart: unless-stopped
 
-  # Safe Wallet Web UI
+  # Safe Wallet Web UI (patched for custom chain ID)
   ui:
-    image: safeglobal/safe-wallet-web:{{ safe_ui_version }}
+    image: safe-ui-patched:{{ evm_chain_id }}
     container_name: safe-ui
-    env_file:
-      - {{ safe_install_dir }}/ui.env
     depends_on:
       - cgw
     ports:
-      - "{{ safe_ui_port }}:3000"
+      - "{{ safe_ui_port }}:8080"
     restart: unless-stopped
 
 networks:

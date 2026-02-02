@@ -81,20 +81,46 @@ The EVM chain ID should match the `chainId` field in your `genesis.json`.
 
 ## Accessing Safe
 
-After deployment, access the Safe UI at:
+After deployment, access the Safe UI via **HTTPS** (required for wallet connections):
 
 ```
-http://<rpc-node-ip>:8080/
+https://<rpc-node-ip>/
 ```
+
+### SSL Options
+
+**Option 1: Self-signed certificate (default)**
+
+A self-signed SSL certificate is auto-generated. Accept the browser security warning to proceed.
+Works with IP addresses.
+
+**Option 2: Let's Encrypt (recommended for production)**
+
+For production deployments with a domain name, use Let's Encrypt for trusted SSL:
+
+```bash
+make safe CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999 \
+  -e "safe_use_letsencrypt=true" \
+  -e "safe_domain=safe.yourdomain.com" \
+  -e "safe_letsencrypt_email=admin@yourdomain.com"
+```
+
+Requirements:
+- Domain pointing to your RPC node's public IP
+- Port 80 open for ACME challenge (temporary, during cert issuance)
+- Port 443 open for HTTPS
+
+Auto-renewal is configured via cron (daily at 3am).
 
 ### API Endpoints
 
 | Service | URL |
 |---------|-----|
-| Web UI | `http://<ip>:8080/` |
-| Transaction Service API | `http://<ip>:8080/txs/api/v1/` |
-| Config Service API | `http://<ip>:8080/cfg/api/v1/` |
-| Client Gateway | `http://<ip>:8080/cgw/` |
+| Web UI | `https://<ip>/` |
+| Transaction Service API | `https://<ip>/txs/api/v1/` |
+| Config Service API | `https://<ip>/cfg/api/v1/` |
+| Client Gateway | `https://<ip>/cgw/` |
+| RPC (via HTTPS proxy) | `https://<ip>/rpc` |
 
 ### Health Checks
 
@@ -215,10 +241,19 @@ docker-compose up -d
 
 ## Security Considerations
 
-1. **Firewall**: Only expose port 8080 to trusted networks
-2. **HTTPS**: Use a reverse proxy (nginx, Caddy) with SSL in production
-3. **Database passwords**: Auto-generated and stored in `/opt/safe/.db_password`
-4. **RPC access**: Transaction Service connects to local RPC via `host.docker.internal`
+1. **Firewall**: Only expose ports 80/443 to the internet (for ACME/HTTPS)
+2. **HTTPS**:
+   - Self-signed cert works for testing (browser warning)
+   - Use `safe_use_letsencrypt=true` for production with trusted SSL
+3. **Secrets**: Auto-generated and stored in `/opt/safe/`:
+   - `.db_password` - PostgreSQL password
+   - `.rabbitmq_password` - RabbitMQ password
+   - `.txs_secret_key` - Transaction Service Django secret
+   - `.cfg_secret_key` - Config Service Django secret
+   - `.webhook_token` - CGW/Config Service webhook auth
+4. **Security Headers**: nginx configured with HSTS, X-Frame-Options, X-Content-Type-Options
+5. **RPC access**: Transaction Service connects to local RPC via `host.docker.internal`
+6. **Input validation**: All contract addresses and chain IDs are validated
 
 ## Contract Addresses
 

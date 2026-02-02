@@ -215,6 +215,24 @@ resource "aws_security_group" "rpc" {
     cidr_blocks = var.enable_public_safe ? ["0.0.0.0/0"] : [local.operator_cidr]
   }
 
+  # Safe Client Gateway - configurable (runs on RPC node, needed by UI)
+  ingress {
+    description = "Safe Client Gateway"
+    from_port   = 8003
+    to_port     = 8003
+    protocol    = "tcp"
+    cidr_blocks = var.enable_public_safe ? ["0.0.0.0/0"] : [local.operator_cidr]
+  }
+
+  # Safe HTTPS - required for wallet connection (Web Crypto API needs secure context)
+  ingress {
+    description = "Safe HTTPS"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = var.enable_public_safe ? ["0.0.0.0/0"] : [local.operator_cidr]
+  }
+
   # Metrics scraping from within VPC (for Prometheus on monitoring node)
   ingress {
     description = "Metrics scraping from VPC"

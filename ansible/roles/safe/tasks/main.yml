@@ -8,6 +8,114 @@
       - evm_chain_id is defined
     fail_msg: "chain_id and evm_chain_id must be defined"
 
+# Password generation - ensure consistency across all templates
+- name: Check for existing DB password
+  ansible.builtin.stat:
+    path: "{{ safe_install_dir }}/.db_password"
+  register: db_password_file
+
+- name: Read existing DB password
+  ansible.builtin.slurp:
+    src: "{{ safe_install_dir }}/.db_password"
+  register: existing_db_password
+  when: db_password_file.stat.exists
+
+- name: Generate new DB password
+  ansible.builtin.set_fact:
+    safe_db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+  when: not db_password_file.stat.exists
+
+- name: Use existing DB password
+  ansible.builtin.set_fact:
+    safe_db_password: "{{ existing_db_password.content | b64decode | trim }}"
+  when: db_password_file.stat.exists
+
+- name: Check for existing RabbitMQ password
+  ansible.builtin.stat:
+    path: "{{ safe_install_dir }}/.rabbitmq_password"
+  register: rabbitmq_password_file
+
+- name: Read existing RabbitMQ password
+  ansible.builtin.slurp:
+    src: "{{ safe_install_dir }}/.rabbitmq_password"
+  register: existing_rabbitmq_password
+  when: rabbitmq_password_file.stat.exists
+
+- name: Generate new RabbitMQ password
+  ansible.builtin.set_fact:
+    safe_rabbitmq_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+  when: not rabbitmq_password_file.stat.exists
+
+- name: Use existing RabbitMQ password
+  ansible.builtin.set_fact:
+    safe_rabbitmq_password: "{{ existing_rabbitmq_password.content | b64decode | trim }}"
+  when: rabbitmq_password_file.stat.exists
+
+# Django secret key generation - critical for session security
+- name: Check for existing TXS secret key
+  ansible.builtin.stat:
+    path: "{{ safe_install_dir }}/.txs_secret_key"
+  register: txs_secret_file
+
+- name: Read existing TXS secret key
+  ansible.builtin.slurp:
+    src: "{{ safe_install_dir }}/.txs_secret_key"
+  register: existing_txs_secret
+  when: txs_secret_file.stat.exists
+
+- name: Generate new TXS secret key
+  ansible.builtin.set_fact:
+    safe_txs_secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
+  when: not txs_secret_file.stat.exists and (safe_txs_secret_key == "" or safe_txs_secret_key is not defined)
+
+- name: Use existing TXS secret key
+  ansible.builtin.set_fact:
+    safe_txs_secret_key: "{{ existing_txs_secret.content | b64decode | trim }}"
+  when: txs_secret_file.stat.exists
+
+- name: Check for existing CFG secret key
+  ansible.builtin.stat:
+    path: "{{ safe_install_dir }}/.cfg_secret_key"
+  register: cfg_secret_file
+
+- name: Read existing CFG secret key
+  ansible.builtin.slurp:
+    src: "{{ safe_install_dir }}/.cfg_secret_key"
+  register: existing_cfg_secret
+  when: cfg_secret_file.stat.exists
+
+- name: Generate new CFG secret key
+  ansible.builtin.set_fact:
+    safe_cfg_secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
+  when: not cfg_secret_file.stat.exists and (safe_cfg_secret_key == "" or safe_cfg_secret_key is not defined)
+
+- name: Use existing CFG secret key
+  ansible.builtin.set_fact:
+    safe_cfg_secret_key: "{{ existing_cfg_secret.content | b64decode | trim }}"
+  when: cfg_secret_file.stat.exists
+
+# Webhook token generation for CGW <-> Config Service
+- name: Check for existing webhook token
+  ansible.builtin.stat:
+    path: "{{ safe_install_dir }}/.webhook_token"
+  register: webhook_token_file
+
+- name: Read existing webhook token
+  ansible.builtin.slurp:
+    src: "{{ safe_install_dir }}/.webhook_token"
+  register: existing_webhook_token
+  when: webhook_token_file.stat.exists
+
+- name: Generate new webhook token
+  ansible.builtin.set_fact:
+    safe_webhook_token: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+  when: not webhook_token_file.stat.exists and (safe_webhook_token == "" or safe_webhook_token is not defined)
+
+- name: Use existing webhook token
+  ansible.builtin.set_fact:
+    safe_webhook_token: "{{ existing_webhook_token.content | b64decode | trim }}"
+  when: webhook_token_file.stat.exists
+
 - name: Check if Docker is installed
   ansible.builtin.command: docker --version
   register: docker_check
@@ -66,6 +174,24 @@
     dest: "{{ safe_install_dir }}/.rabbitmq_password"
     mode: '0600'
 
+- name: Save TXS secret key
+  ansible.builtin.copy:
+    content: "{{ safe_txs_secret_key }}"
+    dest: "{{ safe_install_dir }}/.txs_secret_key"
+    mode: '0600'
+
+- name: Save CFG secret key
+  ansible.builtin.copy:
+    content: "{{ safe_cfg_secret_key }}"
+    dest: "{{ safe_install_dir }}/.cfg_secret_key"
+    mode: '0600'
+
+- name: Save webhook token
+  ansible.builtin.copy:
+    content: "{{ safe_webhook_token }}"
+    dest: "{{ safe_install_dir }}/.webhook_token"
+    mode: '0600'
+
 - name: Template docker-compose.yml
   ansible.builtin.template:
     src: docker-compose.yml.j2
@@ -101,6 +227,174 @@
     mode: '0600'
   notify: Restart safe services
 
+# Build patched Safe UI Docker image for custom chain ID support
+- name: Copy Safe UI patch script
+  ansible.builtin.copy:
+    src: patch-safe-ui.sh
+    dest: "{{ safe_install_dir }}/patch-safe-ui.sh"
+    mode: '0755'
+
+- name: Check if patched Safe UI image exists
+  ansible.builtin.command:
+    cmd: docker images -q safe-ui-patched:{{ evm_chain_id }}
+  register: patched_ui_check
+  changed_when: false
+  failed_when: false
+
+- name: Build patched Safe UI image
+  ansible.builtin.shell: |
+    set -e
+    # Clean up any previous attempts
+    rm -rf /tmp/safe-ui-patched
+    docker rm -f safe-ui-build 2>/dev/null || true
+
+    # Pull the official image
+    docker pull safeglobal/safe-wallet-web:{{ safe_ui_version }}
+
+    # Build static files inside the container (v1.31.0+ builds at runtime, no pre-built /app/out)
+    # Set NEXT_PUBLIC_GATEWAY_URL_PRODUCTION to our gateway
+    echo "Building Safe UI static files (this may take a few minutes)..."
+    docker run --name safe-ui-build \
+      -e NEXT_PUBLIC_GATEWAY_URL_PRODUCTION=https://{{ ansible_host }}/cgw \
+      --entrypoint="" \
+      safeglobal/safe-wallet-web:{{ safe_ui_version }} \
+      yarn build
+
+    # Extract the built files
+    docker cp safe-ui-build:/app/out /tmp/safe-ui-patched
+    docker rm safe-ui-build
+
+    # Patch the JS for our chain ID
+    {{ safe_install_dir }}/patch-safe-ui.sh \
+      {{ evm_chain_id }} \
+      {{ safe_contracts.safe_singleton }} \
+      {{ safe_contracts.proxy_factory }} \
+      {{ safe_contracts.multi_send }} \
+      {{ safe_contracts.multi_send_call_only }} \
+      {{ safe_contracts.fallback_handler }} \
+      {{ safe_contracts.create_call }} \
+      {{ safe_contracts.sign_message_lib }} \
+      {{ safe_contracts.simulate_tx_accessor }}
+
+    # Build nginx image with patched files
+    cat > /tmp/Dockerfile.safe-ui << 'EOF'
+    FROM nginx:alpine
+    COPY safe-ui-patched /usr/share/nginx/html
+    RUN echo 'server { listen 8080; root /usr/share/nginx/html; index index.html; location / { try_files $uri $uri.html $uri/ /index.html; } location /_next { alias /usr/share/nginx/html/_next; expires 1y; add_header Cache-Control "public, immutable"; } }' > /etc/nginx/conf.d/default.conf
+    EXPOSE 8080
+    CMD ["nginx", "-g", "daemon off;"]
+    EOF
+
+    cd /tmp && docker build -f Dockerfile.safe-ui -t safe-ui-patched:{{ evm_chain_id }} .
+    rm -rf /tmp/safe-ui-patched /tmp/Dockerfile.safe-ui
+  args:
+    executable: /bin/bash
+  when: patched_ui_check.stdout == ""
+  register: build_ui
+  timeout: 600
+
+- name: Create SSL directory
+  ansible.builtin.file:
+    path: /etc/nginx/ssl
+    state: directory
+    mode: '0700'
+
+# --- Let's Encrypt SSL (when safe_use_letsencrypt is true) ---
+
+- name: Validate Let's Encrypt configuration
+  ansible.builtin.assert:
+    that:
+      - safe_domain != ""
+      - safe_letsencrypt_email != ""
+    fail_msg: "safe_domain and safe_letsencrypt_email are required when safe_use_letsencrypt is true"
+  when: safe_use_letsencrypt | bool
+
+- name: Install certbot
+  ansible.builtin.apt:
+    name:
+      - certbot
+      - python3-certbot-nginx
+    state: present
+    update_cache: yes
+  when: safe_use_letsencrypt | bool
+
+- name: Check if Let's Encrypt certificate exists
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ safe_domain }}/fullchain.pem"
+  register: letsencrypt_cert
+  when: safe_use_letsencrypt | bool
+
+- name: Stop nginx for initial certificate request
+  ansible.builtin.systemd:
+    name: nginx
+    state: stopped
+  when:
+    - safe_use_letsencrypt | bool
+    - not letsencrypt_cert.stat.exists | default(true)
+  failed_when: false
+
+- name: Obtain Let's Encrypt certificate
+  ansible.builtin.command:
+    cmd: >
+      certbot certonly --standalone
+      --non-interactive
+      --agree-tos
+      --email {{ safe_letsencrypt_email }}
+      --domain {{ safe_domain }}
+  when:
+    - safe_use_letsencrypt | bool
+    - not letsencrypt_cert.stat.exists | default(true)
+  register: certbot_result
+
+- name: Create symlinks for Let's Encrypt certificates
+  ansible.builtin.file:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    state: link
+    force: yes
+  loop:
+    - { src: "/etc/letsencrypt/live/{{ safe_domain }}/fullchain.pem", dest: "/etc/nginx/ssl/safe.crt" }
+    - { src: "/etc/letsencrypt/live/{{ safe_domain }}/privkey.pem", dest: "/etc/nginx/ssl/safe.key" }
+  when: safe_use_letsencrypt | bool
+  notify: Reload nginx
+
+- name: Setup certbot auto-renewal cron job
+  ansible.builtin.cron:
+    name: "Certbot renewal"
+    minute: "0"
+    hour: "3"
+    job: "certbot renew --quiet --post-hook 'systemctl reload nginx'"
+    user: root
+  when: safe_use_letsencrypt | bool
+
+# --- Self-signed SSL (when safe_use_letsencrypt is false) ---
+
+- name: Check if self-signed SSL certificate exists
+  ansible.builtin.stat:
+    path: /etc/nginx/ssl/safe.crt
+  register: ssl_cert
+  when: not (safe_use_letsencrypt | bool)
+
+- name: Generate self-signed SSL certificate
+  ansible.builtin.command:
+    cmd: >
+      openssl req -x509 -nodes -days 365 -newkey rsa:2048
+      -keyout /etc/nginx/ssl/safe.key
+      -out /etc/nginx/ssl/safe.crt
+      -subj "/C=US/ST=State/L=City/O=Organization/CN={{ safe_domain | default(ansible_host) }}"
+  when:
+    - not (safe_use_letsencrypt | bool)
+    - not ssl_cert.stat.exists | default(true)
+  notify: Reload nginx
+
+- name: Set SSL key permissions
+  ansible.builtin.file:
+    path: /etc/nginx/ssl/safe.key
+    mode: '0600'
+  when:
+    - not (safe_use_letsencrypt | bool)
+    - not ssl_cert.stat.exists | default(true)
+
 - name: Template nginx configuration
   ansible.builtin.template:
     src: nginx.conf.j2
@@ -112,6 +406,12 @@
   ansible.builtin.copy:
     src: init-contracts.py
     dest: "{{ safe_install_dir }}/init/init-contracts.py"
+    mode: '0755'
+
+- name: Copy config service initialization script
+  ansible.builtin.copy:
+    src: init-cfg-chain.py
+    dest: "{{ safe_install_dir }}/init/init-cfg-chain.py"
     mode: '0755'
 
 - name: Template systemd service
@@ -147,6 +447,73 @@
     state: started
     enabled: yes
 
+- name: Wait for PostgreSQL (TXS) to be healthy
+  ansible.builtin.command:
+    cmd: docker exec safe-postgres-txs pg_isready -U {{ safe_db_user }} -d {{ safe_txs_db_name }}
+  register: pg_txs_ready
+  until: pg_txs_ready.rc == 0
+  retries: 30
+  delay: 5
+  changed_when: false
+
+- name: Wait for PostgreSQL (CFG) to be healthy
+  ansible.builtin.command:
+    cmd: docker exec safe-postgres-cfg pg_isready -U {{ safe_db_user }} -d {{ safe_cfg_db_name }}
+  register: pg_cfg_ready
+  until: pg_cfg_ready.rc == 0
+  retries: 30
+  delay: 5
+  changed_when: false
+
+- name: Stop TXS web container for migrations
+  ansible.builtin.command:
+    cmd: docker stop safe-txs-web
+  failed_when: false
+  changed_when: false
+
+- name: Run Transaction Service database migrations
+  ansible.builtin.command:
+    cmd: >
+      docker run --rm
+      --network safe-network
+      --add-host=host.docker.internal:host-gateway
+      --env-file {{ safe_install_dir }}/txs.env
+      safeglobal/safe-transaction-service:{{ safe_txs_version }}
+      python manage.py migrate --noinput
+  register: txs_migrate
+  changed_when: "'Applying' in txs_migrate.stdout"
+  retries: 3
+  delay: 10
+
+- name: Stop CFG container for migrations
+  ansible.builtin.command:
+    cmd: docker stop safe-cfg
+  failed_when: false
+  changed_when: false
+
+- name: Run Config Service database migrations
+  ansible.builtin.command:
+    cmd: >
+      docker run --rm
+      --network safe-network
+      --env-file {{ safe_install_dir }}/cfg.env
+      -e DOCKER_NGINX_VOLUME_ROOT=/nginx
+      -e GUNICORN_BIND_SOCKET=/dev/null
+      -e GUNICORN_BIND_PORT=8000
+      safeglobal/safe-config-service:{{ safe_cfg_version }}
+      python manage.py migrate --noinput
+  register: cfg_migrate
+  changed_when: "'Applying' in cfg_migrate.stdout"
+  failed_when: "cfg_migrate.rc != 0 and 'No migrations to apply' not in cfg_migrate.stdout"
+  retries: 3
+  delay: 10
+
+- name: Restart all Safe services after migrations
+  ansible.builtin.systemd:
+    name: safe
+    state: restarted
+  changed_when: true
+
 - name: Wait for Transaction Service to be ready
   ansible.builtin.uri:
     url: "http://localhost:{{ safe_txs_port }}/api/v1/about/"
@@ -177,32 +544,104 @@
   retries: 30
   delay: 10
 
-- name: Run contract initialization
+# Set host variable for URLs (use domain if configured, otherwise IP)
+- name: Set safe_host for URL configuration
+  ansible.builtin.set_fact:
+    safe_host: "{{ safe_domain if safe_domain else ansible_host }}"
+
+# Auto-configure chain in Config Service database
+- name: Initialize chain in Config Service
+  ansible.builtin.command:
+    cmd: >
+      docker exec safe-cfg python /init/init-cfg-chain.py
+      --chain-id "{{ evm_chain_id }}"
+      --chain-name "{{ chain_name }}"
+      --short-name "{{ chain_short_name }}"
+      --rpc-url "https://{{ safe_host }}/rpc"
+      --block-explorer-url "https://{{ safe_host }}/explorer"
+      --currency-name "{{ native_currency_name }}"
+      --currency-symbol "{{ native_currency_symbol }}"
+      --txs-url "http://safe-txs-web:8888"
+      --l2 "{{ safe_use_l2 | lower }}"
+      --gas-price "{{ safe_gas_price_wei }}"
+  register: cfg_init
+  changed_when: "'Created chain' in cfg_init.stdout"
+  failed_when: cfg_init.rc != 0 and 'already exists' not in cfg_init.stdout
+
+# Auto-configure contracts in Transaction Service database
+- name: Initialize contracts in Transaction Service
   ansible.builtin.command:
     cmd: >
       docker exec safe-txs-web python /init/init-contracts.py
-      --chain-id {{ evm_chain_id }}
-      --safe-singleton {{ safe_contracts.safe_l2_singleton }}
-      --proxy-factory {{ safe_contracts.proxy_factory }}
-      --multi-send {{ safe_contracts.multi_send }}
-      --multi-send-call-only {{ safe_contracts.multi_send_call_only }}
-      --fallback-handler {{ safe_contracts.fallback_handler }}
-      --create-call {{ safe_contracts.create_call }}
-      --sign-message-lib {{ safe_contracts.sign_message_lib }}
-      --simulate-tx-accessor {{ safe_contracts.simulate_tx_accessor }}
-  register: init_result
-  changed_when: "'Created' in init_result.stdout"
-  failed_when: init_result.rc != 0
+      --chain-id "{{ evm_chain_id }}"
+      --safe-singleton "{{ safe_contracts.safe_singleton }}"
+      --proxy-factory "{{ safe_contracts.proxy_factory }}"
+      --multi-send "{{ safe_contracts.multi_send }}"
+      --multi-send-call-only "{{ safe_contracts.multi_send_call_only }}"
+      --fallback-handler "{{ safe_contracts.fallback_handler }}"
+      --create-call "{{ safe_contracts.create_call }}"
+      --sign-message-lib "{{ safe_contracts.sign_message_lib }}"
+      --simulate-tx-accessor "{{ safe_contracts.simulate_tx_accessor }}"
+      --l2 "{{ safe_use_l2 | lower }}"
+  register: txs_init
+  changed_when: "'Registering' in txs_init.stdout"
+  failed_when: false
+
+# Validation - ensure chain and contracts are properly registered
+- name: Verify chain registered in Config Service
+  ansible.builtin.uri:
+    url: "http://localhost:{{ safe_cfg_port }}/api/v1/chains/{{ evm_chain_id }}/"
+    method: GET
+    status_code: 200
+  register: chain_check
+  retries: 3
+  delay: 5
+  until: chain_check.status == 200
+
+- name: Verify contracts registered in Transaction Service
+  ansible.builtin.uri:
+    url: "http://localhost:{{ safe_txs_port }}/api/v1/about/singletons/"
+    method: GET
+    status_code: 200
+  register: singletons_check
+  retries: 3
+  delay: 5
+  until: singletons_check.status == 200
+
+- name: Check if Safe singleton is registered
+  ansible.builtin.assert:
+    that:
+      - "safe_contracts.safe_singleton | lower in (singletons_check.json | map(attribute='address') | list | map('lower') | list)"
+    fail_msg: "Safe singleton {{ safe_contracts.safe_singleton }} not found in registered singletons"
+    success_msg: "Safe singleton registered successfully"
+
+- name: Set safe_host variable
+  ansible.builtin.set_fact:
+    safe_host: "{{ safe_domain if safe_domain else ansible_host }}"
 
 - name: Display Safe URLs
   ansible.builtin.debug:
     msg: |
       Safe Multisig Infrastructure Deployed Successfully!
 
-      Web UI:              http://{{ ansible_host }}:{{ safe_http_port }}/
-      Transaction Service: http://{{ ansible_host }}:{{ safe_http_port }}/txs/api/v1/about/
-      Config Service:      http://{{ ansible_host }}:{{ safe_http_port }}/cfg/api/v1/about/
-      Client Gateway:      http://{{ ansible_host }}:{{ safe_http_port }}/cgw/health
+      Web UI (HTTPS):      https://{{ safe_host }}/
+      Block Explorer:      https://{{ safe_host }}/explorer/
+      RPC (HTTPS):         https://{{ safe_host }}/rpc
+
+      Internal Services (for debugging):
+        Transaction Service: http://{{ ansible_host }}:{{ safe_txs_port }}/api/v1/about/
+        Config Service:      http://{{ ansible_host }}:{{ safe_cfg_port }}/api/v1/about/
+        Client Gateway:      http://{{ ansible_host }}:{{ safe_cgw_port }}/health
+
+{% if safe_use_letsencrypt %}
+      SSL: Let's Encrypt certificate for {{ safe_domain }}
+           Auto-renewal configured via cron (daily at 3am)
+{% else %}
+      NOTE: Uses self-signed SSL certificate - browser will show security warning.
+            Accept the certificate to access the Safe UI with wallet connection support.
+
+            For production, set safe_use_letsencrypt=true and configure safe_domain.
+{% endif %}
 
       Chain ID: {{ evm_chain_id }}
-      RPC URL:  {{ safe_rpc_url }}
+      RPC (direct): http://{{ ansible_host }}:9650/ext/bc/{{ chain_id }}/rpc

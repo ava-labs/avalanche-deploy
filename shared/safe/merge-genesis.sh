@@ -1,11 +1,11 @@
 #!/bin/bash
 # Merge Safe v1.4.1 contracts into genesis.json
-# Usage: ./merge-genesis.sh [genesis.json path]
+# Usage: ./merge-genesis.sh <genesis.json>
 
 set -e
 
+GENESIS_FILE="${1:-genesis.json}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GENESIS_FILE="${1:-$SCRIPT_DIR/../../genesis.json}"
 CONTRACTS_FILE="$SCRIPT_DIR/genesis-contracts.json"
 
 if [ ! -f "$GENESIS_FILE" ]; then
@@ -24,33 +24,26 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
-echo "Merging Safe v1.4.1 contracts into $GENESIS_FILE..."
+# Backup original
+cp "$GENESIS_FILE" "${GENESIS_FILE}.bak"
+echo "Backed up original to ${GENESIS_FILE}.bak"
 
-# Extract contracts and merge into genesis alloc
-TEMP_FILE=$(mktemp)
-jq -s '
-  .[0] as $genesis |
-  .[1].contracts as $contracts |
-  $genesis | .alloc += ($contracts | to_entries | map({
-    key: .key,
-    value: {
-      balance: .value.balance,
-      code: .value.code
-    }
-  }) | from_entries)
-' "$GENESIS_FILE" "$CONTRACTS_FILE" > "$TEMP_FILE"
+# Merge the contracts into alloc
+echo "Merging Safe contracts into $GENESIS_FILE..."
 
-# Validate the output
-if ! jq empty "$TEMP_FILE" 2>/dev/null; then
-    echo "Error: Failed to create valid JSON"
-    rm -f "$TEMP_FILE"
-    exit 1
-fi
+# Read existing alloc and merge with Safe contracts
+jq -s '.[0].alloc = (.[0].alloc + .[1]) | .[0]' "$GENESIS_FILE" "$CONTRACTS_FILE" > "${GENESIS_FILE}.tmp"
+mv "${GENESIS_FILE}.tmp" "$GENESIS_FILE"
 
-# Replace original file
-mv "$TEMP_FILE" "$GENESIS_FILE"
-
-echo "Successfully merged the following Safe contracts:"
-jq -r '.contracts | to_entries[] | "  \(.key): \(.value.name)"' "$CONTRACTS_FILE"
 echo ""
-echo "Genesis file updated: $GENESIS_FILE"
+echo "Safe v1.4.1 contracts added:"
+echo "  Safe L2 Singleton:        0x29fcB43b46531BcA003ddC8FCB67FFE91900C762"
+echo "  SafeProxyFactory:         0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67"
+echo "  MultiSend:                0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526"
+echo "  MultiSendCallOnly:        0x9641d764fc13c8B624c04430C7356C1C7C8102e2"
+echo "  CompatibilityFallback:    0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99"
+echo "  CreateCall:               0x9b35Af71d77eaf8d7e40252370304687390A1A52"
+echo "  SignMessageLib:           0xd53cd0aB83D845Ac265BE939c57F53AD838012c9"
+echo "  SimulateTxAccessor:       0x3d4BA2E0884aa488718476ca2FB8Efc291A46199"
+echo ""
+echo "Done! Contracts merged into $GENESIS_FILE"

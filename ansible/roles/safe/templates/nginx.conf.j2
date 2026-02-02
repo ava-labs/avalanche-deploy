@@ -17,9 +17,50 @@ upstream safe-cfg {
     server 127.0.0.1:{{ safe_cfg_port }};
 }
 
+upstream avalanche-rpc {
+    server 127.0.0.1:9650;
+}
+
+upstream blockscout {
+    server 127.0.0.1:4001;
+}
+
+# HTTP -> HTTPS redirect
 server {
     listen {{ safe_http_port }};
-    server_name _;
+    server_name {{ safe_domain | default('_') }};
+    return 301 https://$host$request_uri;
+}
+
+# HTTPS server (required for wallet connection - Web Crypto API needs secure context)
+server {
+    listen 443 ssl;
+    server_name {{ safe_domain | default('_') }};
+
+    # SSL certificate (self-signed, generated during deployment)
+    ssl_certificate /etc/nginx/ssl/safe.crt;
+    ssl_certificate_key /etc/nginx/ssl/safe.key;
+
+    # SSL settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # URL rewriting for HTTPS compatibility
+    # The Safe UI has gateway URLs baked into the JS at build time.
+    # We use sub_filter to rewrite HTTP URLs to relative /cgw path to avoid mixed content blocking.
+    sub_filter_once off;
+    sub_filter_types application/javascript;
+    sub_filter 'http://{{ ansible_host }}:{{ safe_cgw_port }}' '/cgw';
 
     # Logging
     access_log /var/log/nginx/safe_access.log;
@@ -29,8 +70,15 @@ server {
     client_max_body_size 10M;
 
     # Client Gateway API
+    # Some Safe UI endpoints don't include chain ID - rewrite them to include our chain
     location /cgw/ {
+        # Rewrite endpoints that don't include chain ID to include it
+        rewrite ^/cgw/v1/owners/(.*)/safes$ /v1/chains/{{ evm_chain_id }}/owners/$1/safes break;
+        rewrite ^/cgw/v1/safes/(0x[a-fA-F0-9]+)$ /v1/chains/{{ evm_chain_id }}/safes/$1 break;
+        rewrite ^/cgw/v1/safes/(0x[a-fA-F0-9]+)/(.*)$ /v1/chains/{{ evm_chain_id }}/safes/$1/$2 break;
+        # Default rewrite for all other cgw paths
         rewrite ^/cgw/(.*) /$1 break;
+
         proxy_pass http://safe-cgw;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -69,6 +117,30 @@ server {
         add_header Content-Type text/plain;
     }
 
+    # RPC proxy for HTTPS (avoids mixed content blocking)
+    location /rpc {
+        proxy_pass http://avalanche-rpc/ext/bc/{{ chain_id }}/rpc;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Content-Type application/json;
+    }
+
+    # Blockscout block explorer proxy (HTTPS)
+    location /explorer/ {
+        proxy_pass http://blockscout/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket support for live updates
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
     # Web UI (default)
     location / {
         proxy_pass http://safe-ui;
@@ -76,6 +148,8 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        # Disable compression to allow sub_filter to work
+        proxy_set_header Accept-Encoding "";
 
         # Next.js hot reload support
         proxy_http_version 1.1;

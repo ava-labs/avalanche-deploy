@@ -29,19 +29,27 @@ safe_txs_db_name: "safe_txs"
 safe_cfg_db_name: "safe_cfg"
 safe_cgw_db_name: "safe_cgw"
 safe_db_user: "safe"
-safe_db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+# Password will be set in tasks via set_fact to ensure consistency
+safe_db_password: ""
 
 # Redis configuration
 safe_redis_url: "redis://redis:6379/0"
 
 # RabbitMQ configuration
 safe_rabbitmq_user: "safe"
-safe_rabbitmq_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+# Password will be set in tasks via set_fact to ensure consistency
+safe_rabbitmq_password: ""
 
-# Safe contract addresses (canonical CREATE2 addresses from @safe-global/safe-deployments)
+# Safe contract addresses - canonical CREATE2 addresses from @safe-global/safe-deployments v1.4.1
+# These are pre-deployed in genesis.json via shared/safe/genesis-contracts.json
+#
+# To use custom addresses (e.g., for non-L2 Safe), override these in your playbook:
+#   safe_contracts:
+#     safe_singleton: "0xYourAddress..."
+#
 safe_contracts:
-  # Core contracts
-  safe_l2_singleton: "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762"
+  # Core contracts - L2 Safe singleton (canonical address from genesis)
+  safe_singleton: "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762"
   proxy_factory: "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67"
 
   # Utility contracts
@@ -52,6 +60,23 @@ safe_contracts:
   sign_message_lib: "0xd53cd0aB83D845Ac265BE939c57F53AD838012c9"
   simulate_tx_accessor: "0x3d4BA2E0884aa488718476ca2FB8Efc291A46199"
 
+# Whether chain uses L2 Safe (set to true for L2/custom chains, false for mainnet-like L1s)
+# L2 Safe is recommended for Avalanche L1s as it's gas-optimized and emits better events
+# This affects which Safe singleton the Transaction Service uses (ETH_L2_NETWORK env var)
+safe_use_l2: true
+
+# SSL Configuration
+# Set to true to use Let's Encrypt certificates (requires valid domain pointing to this server)
+# Set to false to use self-signed certificates (default, works with IP addresses)
+safe_use_letsencrypt: false
+
+# Domain name for Let's Encrypt certificate (required if safe_use_letsencrypt is true)
+# Example: "safe.mydomain.com"
+safe_domain: ""
+
+# Email for Let's Encrypt certificate expiry notifications
+safe_letsencrypt_email: ""
+
 # Installation paths
 safe_install_dir: "/opt/safe"
 safe_data_dir: "/opt/safe/data"
@@ -60,6 +85,15 @@ safe_logs_dir: "/var/log/safe"
 # Worker configuration
 safe_txs_worker_count: 2
 
-# Secret key for Django (auto-generated if not provided)
-safe_txs_secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
-safe_cfg_secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
+# Secret keys for Django - generated automatically if not set
+# These will be auto-generated in tasks/main.yml and persisted
+safe_txs_secret_key: ""
+safe_cfg_secret_key: ""
+
+# Webhook auth token for CGW <-> Config Service communication
+# Auto-generated if not set
+safe_webhook_token: ""
+
+# Gas price configuration (in wei) - set to match your L1's base fee
+# Default 25 gwei, but Avalanche L1s may use different values
+safe_gas_price_wei: 25000000000
