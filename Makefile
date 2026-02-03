@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis destroy clean logs
+.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs
 
 # Default cloud provider
 CLOUD ?= aws
@@ -52,6 +52,10 @@ configure-l1:
 	@cd ansible && ansible-playbook playbooks/02-configure-l1.yml \
 		-e subnet_id=$(SUBNET_ID) \
 		-e chain_id=$(CHAIN_ID)
+
+reset-l1:
+	@echo "Resetting L1 chain data on all nodes..."
+	@cd ansible && ansible-playbook playbooks/00-reset-l1.yml
 
 monitoring:
 	@cd ansible && ansible-playbook playbooks/03-setup-monitoring.yml

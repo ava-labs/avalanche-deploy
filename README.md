@@ -234,6 +234,7 @@ See [SAFE.md](SAFE.md) for deploying Gnosis Safe infrastructure.
 | `make safe` | Deploy Safe infrastructure (EXPERIMENTAL) |
 | `make safe-genesis` | Merge Safe contracts into genesis (EXPERIMENTAL) |
 | `make reset-genesis` | Reset genesis.json to clean state |
+| `make reset-l1` | Wipe L1 chain data for redeployment |
 | `make logs` | View avalanchego logs |
 | `make destroy` | Tear down infrastructure |
 
