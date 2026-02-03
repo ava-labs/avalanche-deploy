@@ -32,11 +32,9 @@
     "petersburgBlock": 0,
     "subnetEVMTimestamp": 0,
     "durangoTimestamp": 0,
-    "etnaTimestamp": 0,
     "warpConfig": {
-      "blockTimestamp": 0,
-      "quorumNumerator": 67,
-      "requirePrimaryNetworkSigners": true
+      "blockTimestamp": 1,
+      "quorumNumerator": 67
     }
   },
   "difficulty": "0x0",

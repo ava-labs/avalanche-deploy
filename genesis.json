@@ -4,6 +4,9 @@
   "alloc": {
     "8db97C7cEcE249c2b98bDC0226Cc4C2A57BF52FC": {
       "balance": "0x295BE96E64066972000000"
+    },
+    "70037a944a0e1b372774b92d2f2abee80d9f2b91": {
+      "balance": "0x295BE96E64066972000000"
     }
   },
   "coinbase": "0x0000000000000000000000000000000000000000",
@@ -32,11 +35,9 @@
     "petersburgBlock": 0,
     "subnetEVMTimestamp": 0,
     "durangoTimestamp": 0,
-    "etnaTimestamp": 0,
     "warpConfig": {
-      "blockTimestamp": 0,
-      "quorumNumerator": 67,
-      "requirePrimaryNetworkSigners": true
+      "blockTimestamp": 1,
+      "quorumNumerator": 67
     }
   },
   "difficulty": "0x0",
