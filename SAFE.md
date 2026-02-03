@@ -1,5 +1,15 @@
 # Safe Multisig Infrastructure
 
+> **⚠️ EXPERIMENTAL: This feature is not production-ready.**
+>
+> Safe Multisig support is experimental and has known issues:
+> - Transaction indexing may be slow or incomplete
+> - Docker containers may require manual restarts
+> - HTTPS certificate management can be unreliable
+> - Safe contracts must be manually merged into genesis before L1 creation
+>
+> Use at your own risk. Contributions welcome!
+
 This guide explains how to deploy Safe (formerly Gnosis Safe) multisig infrastructure on your Avalanche L1.
 
 ## Overview
@@ -22,10 +32,17 @@ Safe is a smart contract wallet that requires multiple signatures to execute tra
 
 ### Step 1: Add Safe Contracts to Genesis
 
+> **Note:** Safe contracts are NOT included in genesis.json by default. You must explicitly merge them before creating your L1.
+
 Before creating your L1, merge Safe contracts into your genesis file:
 
 ```bash
 make safe-genesis
+```
+
+To reset genesis.json back to clean state (removes Safe contracts):
+```bash
+make reset-genesis
 ```
 
 This adds 8 Safe v1.4.1 contracts at canonical CREATE2 addresses:

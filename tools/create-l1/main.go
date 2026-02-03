@@ -13,7 +13,6 @@ import (
 
 	"github.com/ava-labs/avalanchego/api/info"
 	"github.com/ava-labs/avalanchego/ids"
-	"github.com/ava-labs/avalanchego/utils/cb58"
 	"github.com/ava-labs/avalanchego/utils/constants"
 	"github.com/ava-labs/avalanchego/utils/crypto/secp256k1"
 	"github.com/ava-labs/avalanchego/utils/units"
@@ -22,6 +21,11 @@ import (
 	"github.com/ava-labs/avalanchego/vms/secp256k1fx"
 	"github.com/ava-labs/avalanchego/wallet/subnet/primary"
 	"golang.org/x/crypto/sha3"
+
+	// Use pchain-cli libraries for common functionality
+	"github.com/ava-labs/avalanche-deploy/tools/pchain-cli/pkg/network"
+	"github.com/ava-labs/avalanche-deploy/tools/pchain-cli/pkg/pchain"
+	pkgwallet "github.com/ava-labs/avalanche-deploy/tools/pchain-cli/pkg/wallet"
 )
 
 // Config holds the deployment configuration
@@ -34,7 +38,7 @@ type Config struct {
 }
 
 var (
-	network                string
+	networkName            string
 	privateKey             string
 	privateKeyFile         string
 	configFile             string
@@ -57,7 +61,7 @@ var (
 )
 
 func main() {
-	flag.StringVar(&network, "network", "fuji", "Network: fuji or mainnet")
+	flag.StringVar(&networkName, "network", "fuji", "Network: fuji or mainnet")
 	flag.StringVar(&privateKey, "private-key", "", "Private key (PrivateKey-... or 0x... format)")
 	flag.StringVar(&privateKeyFile, "private-key-file", "", "File containing private key")
 	flag.BoolVar(&useLedger, "ledger", false, "Use Ledger hardware wallet for signing")
@@ -121,10 +125,10 @@ func run() error {
 	}
 
 	// Get network configuration
-	networkID, rpcEndpoint := getNetworkConfig(network)
+	networkID, rpcEndpoint := getNetworkConfig(networkName)
 
 	fmt.Println("=== Create Avalanche L1 ===")
-	fmt.Printf("Network:    %s (ID: %d)\n", network, networkID)
+	fmt.Printf("Network:    %s (ID: %d)\n", networkName, networkID)
 	fmt.Printf("Chain Name: %s\n", chainName)
 	fmt.Printf("Validators: %d\n", len(ips))
 	for i, ip := range ips {
@@ -516,7 +520,7 @@ func run() error {
 
 			fmt.Println("  Fetching aggregated signature from Glacier API...")
 			var err error
-			signedMessage, err = WaitForAggregatedSignature(ctx, network, conversionTxID.String(), apiKey, 30)
+			signedMessage, err = WaitForAggregatedSignature(ctx, networkName, conversionTxID.String(), apiKey, 30)
 			if err != nil {
 				fmt.Printf("  Warning: failed to get signature from Glacier: %v\n", err)
 				fmt.Println("  You can manually initialize later using the conversion tx hash")
@@ -573,16 +577,18 @@ POA_MANAGER=%s
 
 SUBNET_ID=%s
 CHAIN_ID=%s
+CHAIN_NAME=%s
 NETWORK=%s
 %s
 # RPC Endpoints
 %s
 `,
 		time.Now().Format(time.RFC3339),
-		network,
+		networkName,
 		subnetID,
 		chainID,
-		network,
+		chainName,
+		networkName,
 		vmSection,
 		buildRPCEndpoints(ips, chainID),
 	)
@@ -598,7 +604,7 @@ NETWORK=%s
 	fmt.Println()
 	fmt.Printf("Subnet ID: %s\n", subnetID)
 	fmt.Printf("Chain ID:  %s\n", chainID)
-	fmt.Printf("Network:   %s\n", network)
+	fmt.Printf("Network:   %s\n", networkName)
 	if vmDeployment != nil {
 		fmt.Println()
 		fmt.Println("Validator Manager:")
@@ -615,7 +621,7 @@ NETWORK=%s
 	}
 
 	// Print explorer link if applicable
-	if network == "fuji" {
+	if networkName == "fuji" {
 		fmt.Println()
 		fmt.Printf("Explorer: https://subnets-test.avax.network/c-chain/%s\n", chainID)
 	}
@@ -702,41 +708,13 @@ func loadPrivateKey() (*secp256k1.PrivateKey, error) {
 		}
 	}
 
-	var keyBytes []byte
-	var err error
-
-	// Check format and parse accordingly
-	if strings.HasPrefix(keyStr, "0x") || strings.HasPrefix(keyStr, "0X") {
-		// Hex format (0x...)
-		keyBytes, err = hexToBytes(strings.TrimPrefix(strings.TrimPrefix(keyStr, "0x"), "0X"))
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode hex private key: %w", err)
-		}
-	} else if strings.HasPrefix(keyStr, "PrivateKey-") {
-		// Avalanche CB58 format (PrivateKey-...)
-		keyStr = strings.TrimPrefix(keyStr, "PrivateKey-")
-		keyBytes, err = cb58.Decode(keyStr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode CB58 private key: %w", err)
-		}
-	} else {
-		// Try CB58 without prefix
-		keyBytes, err = cb58.Decode(keyStr)
-		if err != nil {
-			// Try hex without prefix
-			keyBytes, err = hexToBytes(keyStr)
-			if err != nil {
-				return nil, fmt.Errorf("failed to decode private key (tried CB58 and hex): %w", err)
-			}
-		}
-	}
-
-	key, err := secp256k1.ToPrivateKey(keyBytes)
+	// Use pchain-cli wallet package for key parsing
+	keyBytes, err := pkgwallet.ParsePrivateKey(keyStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse private key: %w", err)
+		return nil, err
 	}
 
-	return key, nil
+	return pkgwallet.ToPrivateKey(keyBytes)
 }
 
 func hexToBytes(hexStr string) ([]byte, error) {
@@ -781,16 +759,9 @@ func parseValidatorIPs() ([]string, error) {
 	return ips, nil
 }
 
-func getNetworkConfig(network string) (uint32, string) {
-	switch network {
-	case "mainnet":
-		return 1, "https://api.avax.network"
-	case "fuji":
-		return 5, "https://api.avax-test.network"
-	default:
-		// Default to fuji
-		return 5, "https://api.avax-test.network"
-	}
+func getNetworkConfig(networkName string) (uint32, string) {
+	// Use pchain-cli network package for configuration
+	return network.GetNetworkIDAndRPC(networkName)
 }
 
 func buildRPCEndpoints(ips []string, chainID ids.ID) string {
@@ -816,15 +787,8 @@ func parseFloat64(s string) (float64, error) {
 // validateChainName checks that the chain name contains only alphanumeric characters
 // Avalanche P-Chain rejects chain names with hyphens, spaces, or special characters
 func validateChainName(name string) error {
-	if name == "" {
-		return fmt.Errorf("chain name cannot be empty")
-	}
-	for _, c := range name {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
-			return fmt.Errorf("invalid chain name %q: must contain only alphanumeric characters (a-z, A-Z, 0-9). Got invalid character %q", name, string(c))
-		}
-	}
-	return nil
+	// Use pchain-cli pchain package for validation
+	return pchain.ValidateChainName(name)
 }
 
 func findGenesisFile() (string, error) {

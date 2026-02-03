@@ -1,17 +1,15 @@
-module github.com/ava-labs/avalanche-deploy/tools/create-l1
+module github.com/ava-labs/avalanche-deploy/tools/pchain-cli
 
 go 1.24.11
 
 toolchain go1.24.12
 
 require (
-	github.com/ava-labs/avalanche-deploy/tools/pchain-cli v0.0.0
 	github.com/ava-labs/avalanchego v1.14.1
 	github.com/ava-labs/ledger-avalanche-go v1.1.0
+	github.com/spf13/cobra v1.9.1
 	golang.org/x/crypto v0.45.0
 )
-
-replace github.com/ava-labs/avalanche-deploy/tools/pchain-cli => ../pchain-cli
 
 require (
 	connectrpc.com/connect v1.18.1 // indirect
@@ -59,6 +57,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.1 // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/holiman/uint256 v1.2.4 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
@@ -77,6 +76,7 @@ require (
 	github.com/rs/cors v1.7.0 // indirect
 	github.com/shirou/gopsutil v3.21.11+incompatible // indirect
 	github.com/spf13/cast v1.9.2 // indirect
+	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/supranational/blst v0.3.14 // indirect
 	github.com/syndtr/goleveldb v1.0.1-0.20220614013038-64ee5596c38a // indirect
 	github.com/tklauser/go-sysconf v0.3.15 // indirect

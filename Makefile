@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup infra deploy status create-l1 safe safe-genesis destroy clean logs
+.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis destroy clean logs
 
 # Default cloud provider
 CLOUD ?= aws
@@ -76,6 +76,18 @@ create-l1:
 	@echo "Done! Binary at tools/create-l1/create-l1"
 
 #
+# Blockscout Block Explorer
+#
+deploy-blockscout:
+	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make deploy-blockscout CHAIN_ID=xxx EVM_CHAIN_ID=yyy [CHAIN_NAME=name]"; exit 1; fi
+	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make deploy-blockscout CHAIN_ID=xxx EVM_CHAIN_ID=yyy [CHAIN_NAME=name]"; exit 1; fi
+	@echo "Deploying Blockscout block explorer..."
+	@cd ansible && ansible-playbook playbooks/04-deploy-blockscout.yml \
+		-e "chain_id=$(CHAIN_ID)" \
+		-e "evm_chain_id=$(EVM_CHAIN_ID)" \
+		-e "l1_name=$(or $(CHAIN_NAME),Avalanche L1)"
+
+#
 # Safe Multisig
 #
 safe:
@@ -86,9 +98,15 @@ safe:
 		-e "evm_chain_id=$(EVM_CHAIN_ID)"
 
 safe-genesis:
-	@echo "Merging Safe contracts into genesis.json..."
+	@echo "=============================================="
+	@echo "  EXPERIMENTAL: Safe Multisig Genesis Merge"
+	@echo "=============================================="
 	@./shared/safe/merge-genesis.sh genesis.json
-	@echo "Done! Safe contracts added to genesis.json"
+
+reset-genesis:
+	@echo "Resetting genesis.json to clean state..."
+	@cp shared/genesis-templates/genesis-clean.json genesis.json
+	@echo "Done! genesis.json reset (Safe contracts removed)"
 
 #
 # Cleanup
@@ -118,9 +136,13 @@ help:
 	@echo "  make create-l1    Build the create-l1 tool"
 	@echo "  make destroy      Tear down infrastructure (stops billing!)"
 	@echo ""
-	@echo "Safe Multisig:"
-	@echo "  make safe-genesis Merge Safe contracts into genesis.json (run before create-l1)"
-	@echo "  make safe         Deploy Safe infrastructure (run after L1 creation)"
+	@echo "Block Explorer:"
+	@echo "  make deploy-blockscout  Deploy Blockscout (uses CHAIN_NAME from l1.env)"
+	@echo ""
+	@echo "Safe Multisig (EXPERIMENTAL):"
+	@echo "  make safe-genesis Merge Safe contracts into genesis.json (EXPERIMENTAL)"
+	@echo "  make safe         Deploy Safe infrastructure (EXPERIMENTAL)"
+	@echo "  make reset-genesis Reset genesis.json to clean state (no Safe contracts)"
 	@echo ""
 	@echo "Options:"
 	@echo "  CLOUD=aws|gcp|azure  (default: aws)"

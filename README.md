@@ -21,7 +21,9 @@ make destroy    # tear down (stops billing!)
 
 **Optional Add-ons:**
 - **Blockscout** - Block explorer for your L1
-- **Safe Multisig** - Gnosis Safe infrastructure (see [SAFE.md](SAFE.md))
+- **Safe Multisig** `[EXPERIMENTAL]` - Gnosis Safe infrastructure (see [SAFE.md](SAFE.md))
+
+> **Warning:** Safe Multisig support is experimental and not production-ready. Known issues include transaction indexing delays, Docker container restarts, and HTTPS certificate management. Use at your own risk.
 
 ## Architecture
 
@@ -143,11 +145,15 @@ make monitoring
 
 ```bash
 source l1.env
-make deploy-blockscout CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999
+make deploy-blockscout CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999 CHAIN_NAME=$CHAIN_NAME
 # Access: http://<rpc-ip>:4001
 ```
 
-## Optional: Safe Multisig
+The `CHAIN_NAME` parameter sets the network name displayed in Blockscout. If not provided, it defaults to "Avalanche L1".
+
+## Optional: Safe Multisig `[EXPERIMENTAL]`
+
+> **Warning:** Safe is experimental and not production-ready.
 
 See [SAFE.md](SAFE.md) for deploying Gnosis Safe infrastructure.
 
@@ -219,6 +225,9 @@ See [SAFE.md](SAFE.md) for deploying Gnosis Safe infrastructure.
 | `make configure-l1` | Configure nodes for L1 |
 | `make monitoring` | Deploy Prometheus + Grafana |
 | `make deploy-blockscout` | Deploy block explorer |
+| `make safe` | Deploy Safe infrastructure (EXPERIMENTAL) |
+| `make safe-genesis` | Merge Safe contracts into genesis (EXPERIMENTAL) |
+| `make reset-genesis` | Reset genesis.json to clean state |
 | `make logs` | View avalanchego logs |
 | `make destroy` | Tear down infrastructure |
 
@@ -279,6 +288,7 @@ Supported formats:
 
 ## Links
 
+- [Avalanche Builders Hub - Avalanche Deploy Docs](https://build.avax.network/docs/tooling/avalanche-deploy)
 - [Avalanche Docs](https://docs.avax.network/)
 - [Builder Console](https://build.avax.network/) - Generate genesis configs
 - [Fuji Faucet](https://faucet.avax.network/) - Get test AVAX
