@@ -1,30 +1,25 @@
 # Terraform
-*.tfstate
-*.tfstate.backup
-*.tfstate.lock.info
 .terraform/
-.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
 terraform.tfvars
-tfplan
-*.tfplan
+.terraform.lock.hcl
 
-# Ansible
-ansible/inventory/*_hosts
-ansible/node_ids.txt
-
-# Generated
-l1.env
-*.env.local
+# Environment files
 .env
-*-creds.sh
-.aws-creds*
-e2e-deploy.sh
-notes/terraform-outputs.json
+*.env
+!*.env.j2
+l1.env
 
-# Tools
+# Generated files
+*.bak
+*.broken
+node_ids.txt
+
+# Binaries
 tools/create-l1/create-l1
 
-# OS
+# OS files
 .DS_Store
 Thumbs.db
 
@@ -34,8 +29,10 @@ Thumbs.db
 *.swp
 *.swo
 
-# AI Assistant
-CLAUDE.md
+# Ansible
+*.retry
 
-# Internal
-notes/
+# Secrets (never commit these)
+*.pem
+*.key
+!*.key.pub

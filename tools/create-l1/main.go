@@ -47,8 +47,6 @@ var (
 	genesisFile            string
 	chainName              string
 	balanceAVAX            float64
-	useLedger              bool
-	ledgerIndex            uint
 	deployValidatorManager bool
 	managerType            string
 	contractsPath          string
@@ -64,8 +62,6 @@ func main() {
 	flag.StringVar(&networkName, "network", "fuji", "Network: fuji or mainnet")
 	flag.StringVar(&privateKey, "private-key", "", "Private key (PrivateKey-... or 0x... format)")
 	flag.StringVar(&privateKeyFile, "private-key-file", "", "File containing private key")
-	flag.BoolVar(&useLedger, "ledger", false, "Use Ledger hardware wallet for signing")
-	flag.UintVar(&ledgerIndex, "ledger-index", 0, "Ledger address index (default 0)")
 	flag.StringVar(&configFile, "config", "", "Config file (YAML/JSON)")
 	flag.StringVar(&outputFile, "output", "l1.env", "Output file for subnet/chain IDs")
 	flag.StringVar(&validatorIPs, "validators", "", "Comma-separated validator IPs")
@@ -90,11 +86,6 @@ func main() {
 }
 
 func run() error {
-	// Validate flags
-	if useLedger && (privateKey != "" || privateKeyFile != "") {
-		return fmt.Errorf("cannot use --ledger with --private-key or --private-key-file")
-	}
-
 	// Validate chain name (must be alphanumeric only)
 	if err := validateChainName(chainName); err != nil {
 		return err
@@ -144,29 +135,10 @@ func run() error {
 		nodeURIs[i] = fmt.Sprintf("http://%s:9650", ip)
 	}
 
-	// Initialize keychain and wallet based on mode
+	// Initialize keychain and wallet
 	var kc *secp256k1fx.Keychain
 	var ownerAddress ids.ShortID
-	var ledgerKC *LedgerKeychain
 
-	if useLedger {
-		// Ledger mode
-		fmt.Println("[1/4] Connecting to Ledger...")
-		ledgerKC, err = NewLedgerKeychain(uint32(ledgerIndex))
-		if err != nil {
-			return fmt.Errorf("failed to initialize Ledger: %w", err)
-		}
-		defer ledgerKC.Close()
-
-		ownerAddress = ledgerKC.GetAddress()
-
-		// For Ledger, we need to use a different wallet approach
-		// The standard avalanchego wallet expects private keys, but Ledger never exposes them
-		// We use the tooling SDK's wallet which has native Ledger support
-		return runWithLedger(ctx, ledgerKC, ips, nodeURIs, genesisBytes, networkID, rpcEndpoint)
-	}
-
-	// Standard private key mode
 	fmt.Println("[1/4] Creating wallet...")
 	key, err := loadPrivateKey()
 	if err != nil {
@@ -629,58 +601,6 @@ NETWORK=%s
 	_ = rpcEndpoint // Silence unused variable for now
 
 	return nil
-}
-
-// runWithLedger handles L1 creation using a Ledger hardware wallet
-// This requires different wallet handling since Ledger never exposes private keys
-func runWithLedger(ctx context.Context, ledgerKC *LedgerKeychain, ips []string, nodeURIs []string, genesisBytes []byte, networkID uint32, rpcEndpoint string) error {
-	ownerAddress := ledgerKC.GetAddress()
-
-	fmt.Printf("  Address: %s\n", ownerAddress)
-	fmt.Printf("  Required balance: ~%.2f AVAX per validator\n", balanceAVAX)
-	fmt.Println()
-
-	// For Ledger support, we need to use the avalanche-tooling-sdk-go
-	// which provides a wallet that can delegate signing to the Ledger device.
-	//
-	// The standard avalanchego wallet uses kc.Get(addr) to retrieve private keys,
-	// which doesn't work with Ledger since private keys never leave the device.
-	//
-	// Full Ledger transaction signing requires:
-	// 1. Building the unsigned transaction
-	// 2. Sending it to the Ledger for signing
-	// 3. Collecting the signature and building the signed transaction
-	//
-	// This is implemented in avalanche-tooling-sdk-go/wallet
-
-	fmt.Println("=== Ledger Mode ===")
-	fmt.Println()
-	fmt.Printf("Ledger Address: %s\n", ownerAddress)
-	fmt.Printf("Address Index:  %d\n", ledgerIndex)
-	fmt.Println()
-
-	// For now, we provide guidance on using Ledger with avalanche-cli
-	// Full native Ledger signing will be added in a future update
-	fmt.Println("To create an L1 with Ledger using avalanche-cli:")
-	fmt.Println()
-	fmt.Println("  1. Install avalanche-cli: curl -sSfL https://raw.githubusercontent.com/ava-labs/avalanche-cli/main/scripts/install.sh | sh")
-	fmt.Println("  2. Create blockchain: avalanche blockchain create <name>")
-	fmt.Println("  3. Deploy with Ledger: avalanche blockchain deploy <name> --ledger")
-	fmt.Println()
-	fmt.Println("Alternatively, fund this address and re-run without --ledger:")
-	fmt.Printf("  P-Chain Address: P-%s\n", ownerAddress)
-	fmt.Println()
-
-	// TODO: Implement full Ledger signing using avalanche-tooling-sdk-go
-	// This requires adding the dependency and using their Ledger-aware wallet:
-	//
-	// import "github.com/ava-labs/avalanche-tooling-sdk-go/wallet"
-	//
-	// ledgerDevice := ledger.New()
-	// w, err := wallet.NewFromLedger(ledgerDevice, network)
-	// Then use w.P() for P-Chain transactions
-
-	return fmt.Errorf("full Ledger transaction signing coming soon. Use avalanche-cli for now, or fund address %s and use private key mode", ownerAddress)
 }
 
 func loadPrivateKey() (*secp256k1.PrivateKey, error) {
