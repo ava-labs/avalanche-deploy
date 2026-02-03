@@ -5,13 +5,11 @@ go 1.24.11
 toolchain go1.24.12
 
 require (
-	github.com/ava-labs/avalanche-deploy/tools/pchain-cli v0.0.0
 	github.com/ava-labs/avalanchego v1.14.1
 	github.com/ava-labs/ledger-avalanche-go v1.1.0
+	github.com/ava-labs/platform-cli v0.0.0-20260203193144-ae0ae8c1b5fe
 	golang.org/x/crypto v0.45.0
 )
-
-replace github.com/ava-labs/avalanche-deploy/tools/pchain-cli => ../pchain-cli
 
 require (
 	connectrpc.com/connect v1.18.1 // indirect
