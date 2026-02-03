@@ -62,6 +62,12 @@ External Access:
 brew install terraform ansible awscli jq go
 ```
 
+**Go private dependency setup** (required for building `create-l1`):
+```bash
+go env -w GOPRIVATE=github.com/ava-labs/platform-cli
+git config --global url."git@github.com:".insteadOf "https://github.com/"
+```
+
 ### 1. Configure AWS & SSH
 
 ```bash
