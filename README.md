@@ -27,42 +27,57 @@ make destroy    # tear down (stops billing!)
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              VPC (10.0.0.0/16)                                  │
-│                                                                                 │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │                    Avalanche Network (Fuji/Mainnet)                     │   │
-│  │                                   │                                     │   │
-│  │         ┌─────────────────────────┼─────────────────────────┐          │   │
-│  │         │                         │                         │          │   │
-│  │         ▼                         ▼                         ▼          │   │
-│  │   ┌───────────┐            ┌───────────┐            ┌───────────┐     │   │
-│  │   │ Validator │◄─── P2P ──►│ Validator │◄─── P2P ──►│    RPC    │     │   │
-│  │   │     1     │    :9651   │     2     │    :9651   │   Node    │     │   │
-│  │   │  10.0.0.x │            │  10.0.1.x │            │  10.0.0.x │     │   │
-│  │   └─────┬─────┘            └─────┬─────┘            └─────┬─────┘     │   │
-│  │         │                        │                        │           │   │
-│  │         │          metrics :9650/:9100 (VPC only)         │           │   │
-│  │         └────────────────────────┼────────────────────────┘           │   │
-│  │                                  │                                    │   │
-│  │                                  ▼                                    │   │
-│  │                          ┌─────────────┐                              │   │
-│  │                          │  Monitoring │                              │   │
-│  │                          │  10.0.0.x   │                              │   │
-│  │                          │ ─────────── │                              │   │
-│  │                          │ Prometheus  │                              │   │
-│  │                          │ Grafana     │                              │   │
-│  │                          └─────────────┘                              │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                 │
-└─────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Internet
+        Users([Users / dApps])
+        PrimaryNetwork([Avalanche Primary Network])
+    end
 
-4 EC2 Instances Total:
-  • 2 Validators  - Block production, consensus (validators-sg)
-  • 1 RPC Node    - External queries, Blockscout (rpc-sg)
-  • 1 Monitoring  - Prometheus, Grafana (monitoring-sg)
+    subgraph VPC["AWS VPC (10.0.0.0/16)"]
+        subgraph ValidatorsSG["validators-sg"]
+            V1[Validator 1<br/>avalanchego<br/>:9651 P2P]
+            V2[Validator 2<br/>avalanchego<br/>:9651 P2P]
+        end
+
+        subgraph RPCSG["rpc-sg"]
+            RPC[RPC Node<br/>avalanchego<br/>:9650 API]
+            Blockscout[Blockscout<br/>:4001 Explorer]
+        end
+
+        subgraph MonitoringSG["monitoring-sg"]
+            Prometheus[Prometheus<br/>:9090]
+            Grafana[Grafana<br/>:3000]
+        end
+    end
+
+    PrimaryNetwork <-->|P2P :9651| V1
+    PrimaryNetwork <-->|P2P :9651| V2
+    PrimaryNetwork <-->|P2P :9651| RPC
+
+    V1 <-->|P2P :9651| V2
+    V1 <-->|P2P :9651| RPC
+    V2 <-->|P2P :9651| RPC
+
+    Users -->|RPC :9650| RPC
+    Users -->|Explorer :4001| Blockscout
+    Users -->|Dashboard :3000| Grafana
+
+    Blockscout -.->|queries| RPC
+
+    V1 -.->|metrics :9650/:9100| Prometheus
+    V2 -.->|metrics :9650/:9100| Prometheus
+    RPC -.->|metrics :9650/:9100| Prometheus
+    Prometheus -.-> Grafana
 ```
+
+**4 EC2 Instances:**
+| Instance | Security Group | Purpose |
+|----------|---------------|---------|
+| Validator 1 | validators-sg | Block production, consensus |
+| Validator 2 | validators-sg | Block production, consensus |
+| RPC Node | rpc-sg | API queries, Blockscout explorer |
+| Monitoring | monitoring-sg | Prometheus, Grafana dashboards |
 
 ### Security Groups & Ports
 
