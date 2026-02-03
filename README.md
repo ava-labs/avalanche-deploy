@@ -120,11 +120,7 @@ Grafana:    http://<monitoring-ip>:3000 (admin/admin)
 brew install terraform ansible awscli jq go
 ```
 
-**Go private dependency setup** (required for building `create-l1`):
-```bash
-go env -w GOPRIVATE=github.com/ava-labs/platform-cli
-git config --global url."git@github.com:".insteadOf "https://github.com/"
-```
+> **Note:** Building `create-l1` requires access to `github.com/ava-labs/platform-cli` (private repo).
 
 ### 1. Configure AWS & SSH
 
@@ -251,29 +247,15 @@ See [SAFE.md](SAFE.md) for deploying Gnosis Safe infrastructure.
 | `validator-chain-config.json` | Validator settings (pruning on, fast sync) |
 | `rpc-chain-config.json` | RPC settings (archive mode, debug APIs) |
 
-### Genesis Example
+### Genesis Configuration
 
-```json
-{
-  "config": {
-    "chainId": 99999,
-    "feeConfig": {
-      "gasLimit": 15000000,
-      "targetBlockRate": 2,
-      "minBaseFee": 25000000000
-    },
-    "warpConfig": {
-      "blockTimestamp": 0,
-      "quorumNumerator": 67
-    }
-  },
-  "alloc": {
-    "0xYourAddress": {
-      "balance": "0x52B7D2DCC80CD2E4000000"
-    }
-  }
-}
-```
+Use the **[Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain)** to generate your `genesis.json` with a visual interface, or edit manually.
+
+Key settings:
+- `chainId` - Unique EVM chain ID ([check availability](https://chainlist.org/))
+- `feeConfig` - Gas limits and base fees
+- `warpConfig` - Cross-chain messaging (Avalanche Interchain Messaging)
+- `alloc` - Pre-funded addresses
 
 ---
 
@@ -298,23 +280,16 @@ See [SAFE.md](SAFE.md) for deploying Gnosis Safe infrastructure.
 
 ---
 
-## Getting a Private Key
+## Getting a Funded P-Chain Address
 
-You need a funded P-Chain address on Fuji.
+You need AVAX on the P-Chain (Fuji testnet) to create an L1.
 
-**Option 1: Core Wallet**
-1. Install [Core Wallet](https://core.app/)
-2. Switch to Fuji testnet
-3. Get AVAX from [faucet](https://faucet.avax.network/)
-4. Export private key
+1. Install [Core Wallet](https://core.app/) and switch to Fuji testnet
+2. Get test AVAX from the **[Builder Hub Faucet](https://build.avax.network/tools/faucet)**
+3. Cross-chain transfer to P-Chain (Core Wallet → Portfolio → Cross-Chain)
+4. Export your private key from Core Wallet
 
-**Option 2: Avalanche CLI**
-```bash
-avalanche key create mykey
-avalanche key export mykey
-```
-
-Supported formats:
+Supported key formats:
 - `PrivateKey-ewoqjP7PxY4yr3iLTp...`
 - `0x56289e99c94b6912bfc12adc...`
 
@@ -353,8 +328,11 @@ Supported formats:
 
 ## Links
 
-- [Avalanche Builders Hub - Avalanche Deploy Docs](https://build.avax.network/docs/tooling/avalanche-deploy)
+**Builder Hub Tools:**
+- [Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain) - Generate genesis.json
+- [Fuji Faucet](https://build.avax.network/tools/faucet) - Get test AVAX
+
+**Documentation:**
+- [Avalanche Deploy Docs](https://build.avax.network/docs/tooling/avalanche-deploy)
 - [Avalanche Docs](https://docs.avax.network/)
-- [Builder Console](https://build.avax.network/) - Generate genesis configs
-- [Fuji Faucet](https://faucet.avax.network/) - Get test AVAX
 - [Chain List](https://chainlist.org/) - Check chain ID availability
