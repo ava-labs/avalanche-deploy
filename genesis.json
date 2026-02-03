@@ -34,12 +34,7 @@
     "muirGlacierBlock": 0,
     "petersburgBlock": 0,
     "subnetEVMTimestamp": 0,
-    "durangoTimestamp": 0,
-    "warpConfig": {
-      "blockTimestamp": 1,
-      "quorumNumerator": 67,
-      "requirePrimaryNetworkSigners": true
-    }
+    "durangoTimestamp": 0
   },
   "difficulty": "0x0",
   "extraData": "0x",
