@@ -37,7 +37,8 @@
     "durangoTimestamp": 0,
     "warpConfig": {
       "blockTimestamp": 1,
-      "quorumNumerator": 67
+      "quorumNumerator": 67,
+      "requirePrimaryNetworkSigners": true
     }
   },
   "difficulty": "0x0",
