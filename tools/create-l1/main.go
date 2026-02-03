@@ -22,10 +22,10 @@ import (
 	"github.com/ava-labs/avalanchego/wallet/subnet/primary"
 	"golang.org/x/crypto/sha3"
 
-	// Use pchain-cli libraries for common functionality
-	"github.com/ava-labs/avalanche-deploy/tools/pchain-cli/pkg/network"
-	"github.com/ava-labs/avalanche-deploy/tools/pchain-cli/pkg/pchain"
-	pkgwallet "github.com/ava-labs/avalanche-deploy/tools/pchain-cli/pkg/wallet"
+	// Use platform-cli libraries for common functionality
+	"github.com/ava-labs/platform-cli/pkg/network"
+	"github.com/ava-labs/platform-cli/pkg/pchain"
+	pkgwallet "github.com/ava-labs/platform-cli/pkg/wallet"
 )
 
 // Config holds the deployment configuration
@@ -708,7 +708,7 @@ func loadPrivateKey() (*secp256k1.PrivateKey, error) {
 		}
 	}
 
-	// Use pchain-cli wallet package for key parsing
+	// Use platform-cli wallet package for key parsing
 	keyBytes, err := pkgwallet.ParsePrivateKey(keyStr)
 	if err != nil {
 		return nil, err
@@ -760,7 +760,7 @@ func parseValidatorIPs() ([]string, error) {
 }
 
 func getNetworkConfig(networkName string) (uint32, string) {
-	// Use pchain-cli network package for configuration
+	// Use platform-cli network package for configuration
 	return network.GetNetworkIDAndRPC(networkName)
 }
 
@@ -787,7 +787,7 @@ func parseFloat64(s string) (float64, error) {
 // validateChainName checks that the chain name contains only alphanumeric characters
 // Avalanche P-Chain rejects chain names with hyphens, spaces, or special characters
 func validateChainName(name string) error {
-	// Use pchain-cli pchain package for validation
+	// Use platform-cli pchain package for validation
 	return pchain.ValidateChainName(name)
 }
 
