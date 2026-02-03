@@ -71,17 +71,17 @@ EOT
 resource "local_file" "ansible_inventory" {
   content  = <<-EOT
 [validators]
-%{for i, ip in aws_instance.validators[*].public_ip~}
-validator-${i + 1} ansible_host=${ip} ansible_user=ubuntu node_type=validator
+%{for i, inst in aws_instance.validators~}
+validator-${i + 1} ansible_host=${inst.public_ip} private_ip=${inst.private_ip} ansible_user=ubuntu node_type=validator
 %{endfor~}
 
 [rpc]
-%{for i, ip in aws_instance.rpc[*].public_ip~}
-rpc-${i + 1} ansible_host=${ip} ansible_user=ubuntu node_type=rpc
+%{for i, inst in aws_instance.rpc~}
+rpc-${i + 1} ansible_host=${inst.public_ip} private_ip=${inst.private_ip} ansible_user=ubuntu node_type=rpc
 %{endfor~}
 
 [monitoring]
-monitoring-1 ansible_host=${aws_instance.monitoring.public_ip} ansible_user=ubuntu
+monitoring-1 ansible_host=${aws_instance.monitoring.public_ip} private_ip=${aws_instance.monitoring.private_ip} ansible_user=ubuntu
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'

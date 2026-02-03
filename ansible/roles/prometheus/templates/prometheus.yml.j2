@@ -7,13 +7,13 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:{{ prometheus_port }}']
 
+  # Avalanche metrics (port 9650)
   - job_name: 'avalanche-validators'
     metrics_path: '/ext/metrics'
     static_configs:
       - targets:
 {% for host in groups['validators'] %}
-          # Use private IP for internal VPC communication (requires security group to allow port 9650 from VPC CIDR)
-          - '{{ hostvars[host]['ansible_default_ipv4']['address'] | default(hostvars[host]['ansible_host']) }}:9650'
+          - '{{ hostvars[host]['private_ip'] | default(hostvars[host]['ansible_host']) }}:9650'
 {% endfor %}
 
   - job_name: 'avalanche-rpc'
@@ -21,6 +21,20 @@ scrape_configs:
     static_configs:
       - targets:
 {% for host in groups['rpc'] %}
-          # Use private IP for internal VPC communication
-          - '{{ hostvars[host]['ansible_default_ipv4']['address'] | default(hostvars[host]['ansible_host']) }}:9650'
+          - '{{ hostvars[host]['private_ip'] | default(hostvars[host]['ansible_host']) }}:9650'
+{% endfor %}
+
+  # Node exporter system metrics (port 9100)
+  - job_name: 'node-validators'
+    static_configs:
+      - targets:
+{% for host in groups['validators'] %}
+          - '{{ hostvars[host]['private_ip'] | default(hostvars[host]['ansible_host']) }}:9100'
+{% endfor %}
+
+  - job_name: 'node-rpc'
+    static_configs:
+      - targets:
+{% for host in groups['rpc'] %}
+          - '{{ hostvars[host]['private_ip'] | default(hostvars[host]['ansible_host']) }}:9100'
 {% endfor %}

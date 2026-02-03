@@ -28,30 +28,73 @@ make destroy    # tear down (stops billing!)
 ## Architecture
 
 ```
-                         Avalanche Network (Fuji/Mainnet)
-                                    │
-          ┌─────────────────────────┼─────────────────────────┐
-          │                         │                         │
-          ▼                         ▼                         ▼
-    ┌───────────┐            ┌───────────┐            ┌───────────┐
-    │ Validator │◄──── P2P ──►│ Validator │◄─── P2P ──►│    RPC    │
-    │     1     │             │     2     │            │   Node    │
-    │   :9651   │             │   :9651   │            │:9650/:9651│
-    └─────┬─────┘             └─────┬─────┘            └─────┬─────┘
-          │                         │                        │
-          └─────────────────────────┴────────────────────────┘
-                                    │ metrics
-                                    ▼
-                             ┌─────────────┐
-                             │  Monitoring │
-                             │  Prometheus │
-                             │ Grafana:3000│
-                             └─────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              VPC (10.0.0.0/16)                                  │
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │                    Avalanche Network (Fuji/Mainnet)                     │   │
+│  │                                   │                                     │   │
+│  │         ┌─────────────────────────┼─────────────────────────┐          │   │
+│  │         │                         │                         │          │   │
+│  │         ▼                         ▼                         ▼          │   │
+│  │   ┌───────────┐            ┌───────────┐            ┌───────────┐     │   │
+│  │   │ Validator │◄─── P2P ──►│ Validator │◄─── P2P ──►│    RPC    │     │   │
+│  │   │     1     │    :9651   │     2     │    :9651   │   Node    │     │   │
+│  │   │  10.0.0.x │            │  10.0.1.x │            │  10.0.0.x │     │   │
+│  │   └─────┬─────┘            └─────┬─────┘            └─────┬─────┘     │   │
+│  │         │                        │                        │           │   │
+│  │         │          metrics :9650/:9100 (VPC only)         │           │   │
+│  │         └────────────────────────┼────────────────────────┘           │   │
+│  │                                  │                                    │   │
+│  │                                  ▼                                    │   │
+│  │                          ┌─────────────┐                              │   │
+│  │                          │  Monitoring │                              │   │
+│  │                          │  10.0.0.x   │                              │   │
+│  │                          │ ─────────── │                              │   │
+│  │                          │ Prometheus  │                              │   │
+│  │                          │ Grafana     │                              │   │
+│  │                          └─────────────┘                              │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
 
-External Access:
-  • RPC API:    http://<rpc-ip>:9650/ext/bc/<chain>/rpc
-  • Blockscout: http://<rpc-ip>:4001
-  • Grafana:    http://<monitoring-ip>:3000
+4 EC2 Instances Total:
+  • 2 Validators  - Block production, consensus (validators-sg)
+  • 1 RPC Node    - External queries, Blockscout (rpc-sg)
+  • 1 Monitoring  - Prometheus, Grafana (monitoring-sg)
+```
+
+### Security Groups & Ports
+
+**Validators (validators-sg)**
+| Port | Source | Purpose |
+|------|--------|---------|
+| 22 | Operator IP | SSH |
+| 9650 | VPC only | API & metrics (not public) |
+| 9651 | 0.0.0.0/0 | P2P consensus |
+| 9100 | VPC only | Node exporter |
+
+**RPC Node (rpc-sg)**
+| Port | Source | Purpose |
+|------|--------|---------|
+| 22 | Operator IP | SSH |
+| 9650 | Configurable | RPC API (can be public) |
+| 9651 | 0.0.0.0/0 | P2P sync |
+| 9100 | VPC only | Node exporter |
+| 4000-4001 | Configurable | Blockscout |
+
+**Monitoring (monitoring-sg)**
+| Port | Source | Purpose |
+|------|--------|---------|
+| 22 | Operator IP | SSH |
+| 3000 | Configurable | Grafana |
+| 9090 | VPC only | Prometheus |
+
+### External Access
+```
+RPC API:    http://<rpc-ip>:9650/ext/bc/<chain>/rpc
+Blockscout: http://<rpc-ip>:4001
+Grafana:    http://<monitoring-ip>:3000 (admin/admin)
 ```
 
 ## Quick Start (AWS)

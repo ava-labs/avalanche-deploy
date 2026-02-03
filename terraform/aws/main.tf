@@ -125,11 +125,20 @@ resource "aws_security_group" "validators" {
     self        = true
   }
 
-  # Metrics scraping from within VPC (for Prometheus on validator-1 to reach other nodes)
+  # Avalanche metrics scraping from within VPC
   ingress {
-    description = "Metrics scraping from VPC"
+    description = "Avalanche metrics from VPC"
     from_port   = 9650
     to_port     = 9650
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # Node exporter metrics from within VPC
+  ingress {
+    description = "Node exporter metrics from VPC"
+    from_port   = 9100
+    to_port     = 9100
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
   }
@@ -233,11 +242,20 @@ resource "aws_security_group" "rpc" {
     cidr_blocks = var.enable_public_safe ? ["0.0.0.0/0"] : [local.operator_cidr]
   }
 
-  # Metrics scraping from within VPC (for Prometheus on monitoring node)
+  # Avalanche metrics scraping from within VPC
   ingress {
-    description = "Metrics scraping from VPC"
+    description = "Avalanche metrics from VPC"
     from_port   = 9650
     to_port     = 9650
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # Node exporter metrics from within VPC
+  ingress {
+    description = "Node exporter metrics from VPC"
+    from_port   = 9100
+    to_port     = 9100
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
   }
