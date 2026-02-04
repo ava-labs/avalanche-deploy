@@ -14,7 +14,8 @@ erpc_port: 4000
 erpc_admin_port: 4001
 
 # Metrics port (Prometheus format)
-erpc_metrics_port: 9090
+# Note: 9090 is used by Prometheus, so using 9091
+erpc_metrics_port: 9091
 
 # Cache configuration
 erpc_cache_max_items: 100000
