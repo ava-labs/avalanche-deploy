@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "primary-network-validator.fullname" . }}
+  labels:
+    {{- include "primary-network-validator.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "primary-network-validator.fullname" . }}
+  replicas: {{ .Values.primary_validator_replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "primary-network-validator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "primary-network-validator.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.primary_validator_affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.primary_validator_nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.primary_validator_tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "primary-network-validator.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.primary_validator_securityContext | nindent 8 }}
+      containers:
+        - name: avalanchego
+          image: "{{ .Values.primary_validator_image.repository }}:{{ .Values.primary_validator_image.tag }}"
+          imagePullPolicy: {{ .Values.primary_validator_image.pullPolicy }}
+          args:
+            - --network-id={{ include "primary-network-validator.networkId" . }}
+            - --http-host=0.0.0.0
+            - --http-port={{ .Values.primary_validator_config.httpPort }}
+            - --staking-port={{ .Values.primary_validator_config.stakingPort }}
+            - --log-level={{ .Values.primary_validator_config.logLevel }}
+            - --api-admin-enabled={{ .Values.primary_validator_config.apiAdminEnabled }}
+            - --api-info-enabled={{ .Values.primary_validator_config.apiInfoEnabled }}
+            - --api-health-enabled={{ .Values.primary_validator_config.apiHealthEnabled }}
+            - --index-enabled={{ .Values.primary_validator_config.indexEnabled }}
+            - --db-dir=/data/db
+          ports:
+            - name: http
+              containerPort: {{ .Values.primary_validator_config.httpPort }}
+              protocol: TCP
+            - name: staking
+              containerPort: {{ .Values.primary_validator_config.stakingPort }}
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.primary_validator_livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.primary_validator_readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.primary_validator_resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  {{- if .Values.primary_validator_persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          {{- toYaml .Values.primary_validator_persistence.accessModes | nindent 10 }}
+        {{- if .Values.primary_validator_persistence.storageClass }}
+        storageClassName: {{ .Values.primary_validator_persistence.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.primary_validator_persistence.size }}
+  {{- end }}

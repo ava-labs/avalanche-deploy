@@ -22,6 +22,112 @@
     "links": [],
     "panels": [
         {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "id": 100,
+            "panels": [],
+            "title": "P-Chain",
+            "type": "row"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "smooth",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "showValues": false,
+                        "spanNulls": true,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": 0
+                            }
+                        ]
+                    },
+                    "unit": "short"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 0,
+                "y": 1
+            },
+            "id": 1,
+            "options": {
+                "legend": {
+                    "calcs": ["lastNotNull"],
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "showLegend": true
+                },
+                "tooltip": {
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "12.4.0",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "editorMode": "code",
+                    "expr": "max by (instance) (avalanche_snowman_last_accepted_height{job=~\"primary-network-.*\",chain=\"P\"})",
+                    "legendFormat": "{{instance}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "P-Chain Height",
+            "type": "timeseries"
+        },
+        {
             "datasource": {
                 "type": "prometheus",
                 "uid": "prometheus"
@@ -88,121 +194,18 @@
             "gridPos": {
                 "h": 8,
                 "w": 8,
-                "x": 0,
-                "y": 0
-            },
-            "id": 1,
-            "options": {
-                "legend": {
-                    "calcs": ["min", "max", "mean", "p95", "lastNotNull"],
-                    "displayMode": "table",
-                    "placement": "bottom",
-                    "show": false,
-                    "showLegend": false
-                },
-                "tooltip": {
-                    "hideZeros": false,
-                    "mode": "single",
-                    "sort": "none"
-                }
-            },
-            "description": "FIXED: Previous metric used avalanche_handler_messages{op=\"query_failed\"} which does not exist. Now uses avalanche_snowman_polls_successful and avalanche_snowman_polls_failed.",
-            "pluginVersion": "12.4.0",
-            "targets": [
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
-                    },
-                    "editorMode": "code",
-                    "expr": "(\n  max by (instance) (\n    increase(avalanche_snowman_polls_successful{job=~\"l1-.*\"}[5m])\n  )\n  /\n  (\n    max by (instance) (\n      increase(avalanche_snowman_polls_successful{job=~\"l1-.*\"}[5m])\n    )\n    +\n    max by (instance) (\n      increase(avalanche_snowman_polls_failed{job=~\"l1-.*\"}[5m])\n    )\n  )\n) * 100",
-                    "legendFormat": "{{instance}}",
-                    "rawQuery": false,
-                    "refId": "A"
-                }
-            ],
-            "title": "Percentage of Successful Polls",
-            "type": "timeseries"
-        },
-        {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-            },
-            "fieldConfig": {
-                "defaults": {
-                    "color": {
-                        "mode": "palette-classic"
-                    },
-                    "custom": {
-                        "axisBorderShow": false,
-                        "axisCenteredZero": false,
-                        "axisColorMode": "text",
-                        "axisLabel": "",
-                        "axisPlacement": "auto",
-                        "barAlignment": 0,
-                        "barWidthFactor": 0.6,
-                        "drawStyle": "line",
-                        "fillOpacity": 0,
-                        "gradientMode": "none",
-                        "hideFrom": {
-                            "legend": false,
-                            "tooltip": false,
-                            "viz": false
-                        },
-                        "insertNulls": false,
-                        "lineInterpolation": "smooth",
-                        "lineWidth": 1,
-                        "pointSize": 5,
-                        "scaleDistribution": {
-                            "type": "linear"
-                        },
-                        "showPoints": "auto",
-                        "showValues": false,
-                        "spanNulls": true,
-                        "stacking": {
-                            "group": "A",
-                            "mode": "none"
-                        },
-                        "thresholdsStyle": {
-                            "mode": "off"
-                        }
-                    },
-                    "mappings": [],
-                    "thresholds": {
-                        "mode": "absolute",
-                        "steps": [
-                            {
-                                "color": "green",
-                                "value": 0
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
-                            }
-                        ]
-                    },
-                    "unit": "short"
-                },
-                "overrides": []
-            },
-            "gridPos": {
-                "h": 8,
-                "w": 8,
                 "x": 8,
-                "y": 0
+                "y": 1
             },
             "id": 2,
             "options": {
                 "legend": {
-                    "calcs": ["min", "max", "mean", "p95", "lastNotNull"],
+                    "calcs": ["lastNotNull"],
                     "displayMode": "table",
                     "placement": "bottom",
-                    "show": false,
-                    "showLegend": false
+                    "showLegend": true
                 },
                 "tooltip": {
-                    "hideZeros": false,
                     "mode": "single",
                     "sort": "none"
                 }
@@ -215,13 +218,12 @@
                         "uid": "prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "max by (instance) (\n  avg_over_time(\n    avalanche_benchlist_benched_weight{job=~\"l1-.*\"}[5m]\n  )\n)",
+                    "expr": "(\n  max by (instance) (\n    increase(avalanche_snowman_polls_successful{job=~\"primary-network-.*\",chain=\"P\"}[5m])\n  )\n  /\n  (\n    max by (instance) (\n      increase(avalanche_snowman_polls_successful{job=~\"primary-network-.*\",chain=\"P\"}[5m])\n    )\n    +\n    max by (instance) (\n      increase(avalanche_snowman_polls_failed{job=~\"primary-network-.*\",chain=\"P\"}[5m])\n    )\n  )\n) * 100",
                     "legendFormat": "{{instance}}",
-                    "rawQuery": false,
                     "refId": "A"
                 }
             ],
-            "title": "Stake Benched",
+            "title": "P-Chain Poll Success Rate",
             "type": "timeseries"
         },
         {
@@ -275,14 +277,10 @@
                             {
                                 "color": "green",
                                 "value": 0
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
                             }
                         ]
                     },
-                    "unit": "s"
+                    "unit": "short"
                 },
                 "overrides": []
             },
@@ -290,19 +288,17 @@
                 "h": 8,
                 "w": 8,
                 "x": 16,
-                "y": 0
+                "y": 1
             },
             "id": 3,
             "options": {
                 "legend": {
-                    "calcs": ["min", "max", "mean", "p95", "lastNotNull"],
+                    "calcs": ["lastNotNull"],
                     "displayMode": "table",
                     "placement": "bottom",
-                    "show": false,
-                    "showLegend": false
+                    "showLegend": true
                 },
                 "tooltip": {
-                    "hideZeros": false,
                     "mode": "single",
                     "sort": "none"
                 }
@@ -315,15 +311,26 @@
                         "uid": "prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "max by (instance) (\n  increase(\n    avalanche_snowman_blks_accepted_sum{job=~\"l1-.*\"}[5m]\n  )\n)/max by (instance) (\n  increase(\n    avalanche_snowman_blks_accepted_count{job=~\"l1-.*\"}[5m]\n  )\n)/1000000000",
+                    "expr": "max by (instance) (avalanche_benchlist_benched_weight{job=~\"primary-network-.*\",chain=\"P\"})",
                     "legendFormat": "{{instance}}",
-                    "range": true,
-                    "rawQuery": false,
-                    "refId": "query1"
+                    "refId": "A"
                 }
             ],
-            "title": "Average Block Accept Latency (s)",
+            "title": "P-Chain Benched Stake",
             "type": "timeseries"
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 9
+            },
+            "id": 101,
+            "panels": [],
+            "title": "C-Chain",
+            "type": "row"
         },
         {
             "datasource": {
@@ -376,10 +383,6 @@
                             {
                                 "color": "green",
                                 "value": 0
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
                             }
                         ]
                     },
@@ -391,19 +394,17 @@
                 "h": 8,
                 "w": 8,
                 "x": 0,
-                "y": 8
+                "y": 10
             },
             "id": 4,
             "options": {
                 "legend": {
-                    "calcs": ["min", "max", "mean", "p95", "lastNotNull"],
+                    "calcs": ["lastNotNull"],
                     "displayMode": "table",
                     "placement": "bottom",
-                    "show": false,
-                    "showLegend": false
+                    "showLegend": true
                 },
                 "tooltip": {
-                    "hideZeros": false,
                     "mode": "single",
                     "sort": "none"
                 }
@@ -416,13 +417,12 @@
                         "uid": "prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "max by (instance) (\n  avg_over_time(\n    avalanche_snowman_last_accepted_height{job=~\"l1-.*\"}[5m]\n  )\n)",
+                    "expr": "max by (instance) (avalanche_snowman_last_accepted_height{job=~\"primary-network-.*\",chain=\"C\"})",
                     "legendFormat": "{{instance}}",
-                    "rawQuery": false,
                     "refId": "A"
                 }
             ],
-            "title": "Last Accepted Height",
+            "title": "C-Chain Height",
             "type": "timeseries"
         },
         {
@@ -441,32 +441,42 @@
                         "axisColorMode": "text",
                         "axisLabel": "",
                         "axisPlacement": "auto",
-                        "fillOpacity": 80,
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 0,
                         "gradientMode": "none",
                         "hideFrom": {
                             "legend": false,
                             "tooltip": false,
                             "viz": false
                         },
+                        "insertNulls": false,
+                        "lineInterpolation": "smooth",
                         "lineWidth": 1,
+                        "pointSize": 5,
                         "scaleDistribution": {
                             "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "showValues": false,
+                        "spanNulls": true,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
                         },
                         "thresholdsStyle": {
                             "mode": "off"
                         }
                     },
                     "mappings": [],
+                    "min": 0,
                     "thresholds": {
                         "mode": "absolute",
                         "steps": [
                             {
                                 "color": "green",
                                 "value": 0
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
                             }
                         ]
                     },
@@ -478,30 +488,20 @@
                 "h": 8,
                 "w": 8,
                 "x": 8,
-                "y": 8
+                "y": 10
             },
             "id": 5,
             "options": {
-                "barRadius": 0,
-                "barWidth": 0.97,
-                "fullHighlight": false,
-                "groupWidth": 0.7,
                 "legend": {
-                    "calcs": [],
-                    "displayMode": "list",
+                    "calcs": ["lastNotNull"],
+                    "displayMode": "table",
                     "placement": "bottom",
-                    "showLegend": false
+                    "showLegend": true
                 },
-                "orientation": "auto",
-                "showValue": "auto",
-                "stacking": "normal",
                 "tooltip": {
-                    "hideZeros": false,
                     "mode": "single",
                     "sort": "none"
-                },
-                "xTickLabelRotation": 0,
-                "xTickLabelSpacing": 100
+                }
             },
             "pluginVersion": "12.4.0",
             "targets": [
@@ -511,14 +511,13 @@
                         "uid": "prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "max by (instance) (\n  increase(\n    avalanche_snowman_blks_rejected_count{job=~\"l1-.*\"}[5m]\n  )\n)",
+                    "expr": "max by (instance) (\n  rate(avalanche_coreth_chain_txs_processed{job=~\"primary-network-.*\"}[5m])\n)",
                     "legendFormat": "{{instance}}",
-                    "rawQuery": false,
-                    "refId": "query1"
+                    "refId": "A"
                 }
             ],
-            "title": "Rejected Blocks",
-            "type": "barchart"
+            "title": "C-Chain TPS",
+            "type": "timeseries"
         },
         {
             "datasource": {
@@ -571,10 +570,6 @@
                             {
                                 "color": "green",
                                 "value": 0
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
                             }
                         ]
                     },
@@ -586,19 +581,17 @@
                 "h": 8,
                 "w": 8,
                 "x": 16,
-                "y": 8
+                "y": 10
             },
             "id": 6,
             "options": {
                 "legend": {
-                    "calcs": ["min", "max", "mean", "p95", "lastNotNull"],
+                    "calcs": ["lastNotNull"],
                     "displayMode": "table",
                     "placement": "bottom",
-                    "show": false,
-                    "showLegend": false
+                    "showLegend": true
                 },
                 "tooltip": {
-                    "hideZeros": false,
                     "mode": "single",
                     "sort": "none"
                 }
@@ -611,81 +604,26 @@
                         "uid": "prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "max by (instance) (\n  increase(\n    avalanche_handler_messages{job=~\"l1-.*\",op=\"get_state_summary_frontier_failed\"}[5m]\n  )\n)",
+                    "expr": "avg by (instance) (\n  increase(\n    avalanche_coreth_block_gas_used_processed{job=~\"primary-network-.*\"}[5m]\n  )\n)/avg by (instance) (\n  increase(\n    avalanche_coreth_block_inserts_count{job=~\"primary-network-.*\"}[5m]\n  )\n)",
                     "legendFormat": "{{instance}}",
-                    "rawQuery": false,
-                    "refId": "query1"
-                },
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
-                    },
-                    "editorMode": "code",
-                    "expr": "max by (instance) (\n  increase(\n    avalanche_handler_messages{job=~\"l1-.*\",op=\"get_accepted_state_summary_failed\"}[5m]\n  )\n)",
-                    "legendFormat": "{{instance}}",
-                    "rawQuery": false,
-                    "refId": "query2"
-                },
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
-                    },
-                    "editorMode": "code",
-                    "expr": "max by (instance) (\n  increase(\n    avalanche_handler_messages{job=~\"l1-.*\",op=\"get_accepted_frontier_failed\"}[5m]\n  )\n)",
-                    "legendFormat": "{{instance}}",
-                    "rawQuery": false,
-                    "refId": "query3"
-                },
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
-                    },
-                    "editorMode": "code",
-                    "expr": "max by (instance) (\n  increase(\n    avalanche_handler_messages{job=~\"l1-.*\",op=\"get_accepted_failed\"}[5m]\n  )\n)",
-                    "legendFormat": "{{instance}}",
-                    "rawQuery": false,
-                    "refId": "query4"
-                },
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
-                    },
-                    "editorMode": "code",
-                    "expr": "max by (instance) (\n  increase(\n    avalanche_handler_messages{job=~\"l1-.*\",op=\"get_ancestors_failed\"}[5m]\n  )\n)",
-                    "legendFormat": "{{instance}}",
-                    "rawQuery": false,
-                    "refId": "query5"
-                },
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
-                    },
-                    "editorMode": "code",
-                    "expr": "max by (instance) (\n  increase(\n    avalanche_handler_messages{job=~\"l1-.*\",op=\"get_failed\"}[5m]\n  )\n)",
-                    "legendFormat": "{{instance}}",
-                    "rawQuery": false,
-                    "refId": "query6"
-                },
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
-                    },
-                    "editorMode": "code",
-                    "expr": "max by (instance) (\n  increase(\n    avalanche_snowman_polls_failed{job=~\"l1-.*\"}[5m]\n  )\n)",
-                    "legendFormat": "polls_failed {{instance}}",
-                    "rawQuery": false,
-                    "refId": "query7"
+                    "refId": "A"
                 }
             ],
-            "description": "FIXED query7: Previous metric used avalanche_handler_messages{op=\"query_failed\"} which does not exist. Now uses avalanche_snowman_polls_failed.",
-            "title": "Requests Failed",
+            "title": "C-Chain Gas Per Block",
             "type": "timeseries"
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 18
+            },
+            "id": 102,
+            "panels": [],
+            "title": "System",
+            "type": "row"
         },
         {
             "datasource": {
@@ -738,14 +676,10 @@
                             {
                                 "color": "green",
                                 "value": 0
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
                             }
                         ]
                     },
-                    "unit": "ms"
+                    "unit": "bytes"
                 },
                 "overrides": []
             },
@@ -753,19 +687,17 @@
                 "h": 8,
                 "w": 8,
                 "x": 0,
-                "y": 16
+                "y": 19
             },
             "id": 7,
             "options": {
                 "legend": {
-                    "calcs": ["min", "max", "mean", "p95", "lastNotNull"],
+                    "calcs": ["lastNotNull"],
                     "displayMode": "table",
                     "placement": "bottom",
-                    "show": false,
-                    "showLegend": false
+                    "showLegend": true
                 },
                 "tooltip": {
-                    "hideZeros": false,
                     "mode": "single",
                     "sort": "none"
                 }
@@ -778,13 +710,12 @@
                         "uid": "prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "(\n    (\n        max by (instance) (\n          increase(\n            avalanche_meterchainvm_verify_sum{job=~\"l1-.*\"}[5m]\n          )\n        )\n      +\n        max by (instance) (\n          increase(\n            avalanche_meterchainvm_verify_err_sum{job=~\"l1-.*\"}[5m]\n          )\n        )\n    )\n  /\n    (\n        max by (instance) (\n          increase(\n            avalanche_meterchainvm_verify_count{job=~\"l1-.*\"}[5m]\n          )\n        )\n      +\n        max by (instance) (\n          increase(\n            avalanche_meterchainvm_verify_err_count{job=~\"l1-.*\"}[5m]\n          )\n        )\n    )\n)\n/\n1e+06",
+                    "expr": "max by (instance) (go_memstats_alloc_bytes{job=~\"primary-network-.*\"})",
                     "legendFormat": "{{instance}}",
-                    "rawQuery": false,
                     "refId": "A"
                 }
             ],
-            "title": "Average Verification Time (ms)",
+            "title": "Memory Usage",
             "type": "timeseries"
         },
         {
@@ -838,10 +769,6 @@
                             {
                                 "color": "green",
                                 "value": 0
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
                             }
                         ]
                     },
@@ -853,19 +780,17 @@
                 "h": 8,
                 "w": 8,
                 "x": 8,
-                "y": 16
+                "y": 19
             },
             "id": 8,
             "options": {
                 "legend": {
-                    "calcs": ["min", "max", "mean", "p95", "lastNotNull"],
+                    "calcs": ["lastNotNull"],
                     "displayMode": "table",
                     "placement": "bottom",
-                    "show": false,
-                    "showLegend": false
+                    "showLegend": true
                 },
                 "tooltip": {
-                    "hideZeros": false,
                     "mode": "single",
                     "sort": "none"
                 }
@@ -878,13 +803,12 @@
                         "uid": "prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "max by (instance) (\n  increase(\n    avalanche_meterchainvm_verify_err_count{job=~\"l1-.*\"}[5m]\n  )\n)",
+                    "expr": "max by (instance) (go_goroutines{job=~\"primary-network-.*\"})",
                     "legendFormat": "{{instance}}",
-                    "rawQuery": false,
-                    "refId": "query1"
+                    "refId": "A"
                 }
             ],
-            "title": "Block Verifications Failed",
+            "title": "Goroutines",
             "type": "timeseries"
         },
         {
@@ -938,10 +862,6 @@
                             {
                                 "color": "green",
                                 "value": 0
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
                             }
                         ]
                     },
@@ -953,19 +873,17 @@
                 "h": 8,
                 "w": 8,
                 "x": 16,
-                "y": 16
+                "y": 19
             },
             "id": 9,
             "options": {
                 "legend": {
-                    "calcs": ["min", "max", "mean", "p95", "lastNotNull"],
+                    "calcs": ["lastNotNull"],
                     "displayMode": "table",
                     "placement": "bottom",
-                    "show": false,
-                    "showLegend": false
+                    "showLegend": true
                 },
                 "tooltip": {
-                    "hideZeros": false,
                     "mode": "single",
                     "sort": "none"
                 }
@@ -978,425 +896,18 @@
                         "uid": "prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "avg by (instance) (\n  increase(\n    avalanche_subnetevm_vm_eth_chain_block_gas_used_processed{job=~\"l1-.*\"}[5m]\n  )\n)/avg by (instance) (\n  increase(\n    avalanche_subnetevm_vm_eth_chain_block_inserts_count{job=~\"l1-.*\"}[5m]\n  )\n)",
+                    "expr": "max by (instance) (avalanche_network_peers{job=~\"primary-network-.*\"})",
                     "legendFormat": "{{instance}}",
-                    "range": true,
-                    "rawQuery": false,
-                    "refId": "query1"
-                }
-            ],
-            "title": "Gas Per Block",
-            "type": "timeseries"
-        },
-        {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-            },
-            "fieldConfig": {
-                "defaults": {
-                    "color": {
-                        "mode": "palette-classic"
-                    },
-                    "custom": {
-                        "axisBorderShow": false,
-                        "axisCenteredZero": false,
-                        "axisColorMode": "text",
-                        "axisLabel": "",
-                        "axisPlacement": "auto",
-                        "barAlignment": 0,
-                        "barWidthFactor": 0.6,
-                        "drawStyle": "line",
-                        "fillOpacity": 0,
-                        "gradientMode": "none",
-                        "hideFrom": {
-                            "legend": false,
-                            "tooltip": false,
-                            "viz": false
-                        },
-                        "insertNulls": false,
-                        "lineInterpolation": "smooth",
-                        "lineWidth": 1,
-                        "pointSize": 5,
-                        "scaleDistribution": {
-                            "type": "linear"
-                        },
-                        "showPoints": "auto",
-                        "showValues": false,
-                        "spanNulls": true,
-                        "stacking": {
-                            "group": "A",
-                            "mode": "none"
-                        },
-                        "thresholdsStyle": {
-                            "mode": "off"
-                        }
-                    },
-                    "mappings": [],
-                    "thresholds": {
-                        "mode": "absolute",
-                        "steps": [
-                            {
-                                "color": "green",
-                                "value": 0
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
-                            }
-                        ]
-                    }
-                },
-                "overrides": []
-            },
-            "gridPos": {
-                "h": 8,
-                "w": 8,
-                "x": 0,
-                "y": 24
-            },
-            "id": 10,
-            "options": {
-                "legend": {
-                    "calcs": ["min", "max", "mean", "p95", "lastNotNull"],
-                    "displayMode": "table",
-                    "placement": "bottom",
-                    "show": false,
-                    "showLegend": false
-                },
-                "tooltip": {
-                    "hideZeros": false,
-                    "mode": "single",
-                    "sort": "none"
-                }
-            },
-            "description": "Execution efficiency: nanoseconds of block verification time per unit of gas processed. Lower is better. Calculated as rate(verify_time) / rate(gas_processed). High values indicate slow block execution.",
-            "pluginVersion": "12.4.0",
-            "targets": [
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
-                    },
-                    "editorMode": "code",
-                    "expr": "sum by (instance) (\n  rate(avalanche_meterchainvm_verify_sum{job=~\"l1-.*\"}[5m])/rate(avalanche_subnetevm_vm_eth_chain_block_gas_used_processed{job=~\"l1-.*\"}[5m])\n)",
-                    "legendFormat": "{{instance}}",
-                    "range": true,
-                    "rawQuery": false,
                     "refId": "A"
                 }
             ],
-            "title": "Nanoseconds Per Gas",
-            "type": "timeseries"
-        },
-        {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-            },
-            "fieldConfig": {
-                "defaults": {
-                    "color": {
-                        "mode": "palette-classic"
-                    },
-                    "custom": {
-                        "axisBorderShow": false,
-                        "axisCenteredZero": false,
-                        "axisColorMode": "text",
-                        "axisLabel": "",
-                        "axisPlacement": "auto",
-                        "barAlignment": 0,
-                        "barWidthFactor": 0.6,
-                        "drawStyle": "line",
-                        "fillOpacity": 0,
-                        "gradientMode": "none",
-                        "hideFrom": {
-                            "legend": false,
-                            "tooltip": false,
-                            "viz": false
-                        },
-                        "insertNulls": false,
-                        "lineInterpolation": "smooth",
-                        "lineWidth": 1,
-                        "pointSize": 5,
-                        "scaleDistribution": {
-                            "type": "linear"
-                        },
-                        "showPoints": "auto",
-                        "showValues": false,
-                        "spanNulls": true,
-                        "stacking": {
-                            "group": "A",
-                            "mode": "none"
-                        },
-                        "thresholdsStyle": {
-                            "mode": "off"
-                        }
-                    },
-                    "mappings": [],
-                    "thresholds": {
-                        "mode": "absolute",
-                        "steps": [
-                            {
-                                "color": "green",
-                                "value": 0
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
-                            }
-                        ]
-                    },
-                    "unit": "short"
-                },
-                "overrides": []
-            },
-            "gridPos": {
-                "h": 8,
-                "w": 8,
-                "x": 8,
-                "y": 24
-            },
-            "id": 11,
-            "options": {
-                "legend": {
-                    "calcs": ["min", "max", "mean", "p95", "lastNotNull"],
-                    "displayMode": "table",
-                    "placement": "bottom",
-                    "show": false,
-                    "showLegend": false
-                },
-                "tooltip": {
-                    "hideZeros": false,
-                    "mode": "single",
-                    "sort": "none"
-                }
-            },
-            "pluginVersion": "12.4.0",
-            "targets": [
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
-                    },
-                    "editorMode": "code",
-                    "expr": "sum by (instance) (\n  avg_over_time(\n    avalanche_subnetevm_vm_eth_txpool_queued{job=~\"l1-.*\"}[5m]\n  )\n)",
-                    "legendFormat": "{{instance}}",
-                    "rawQuery": false,
-                    "refId": "A"
-                }
-            ],
-            "title": "Queued Transactions",
-            "type": "timeseries"
-        },
-        {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-            },
-            "fieldConfig": {
-                "defaults": {
-                    "color": {
-                        "mode": "palette-classic"
-                    },
-                    "custom": {
-                        "axisBorderShow": false,
-                        "axisCenteredZero": false,
-                        "axisColorMode": "text",
-                        "axisLabel": "",
-                        "axisPlacement": "auto",
-                        "barAlignment": 0,
-                        "barWidthFactor": 0.6,
-                        "drawStyle": "line",
-                        "fillOpacity": 0,
-                        "gradientMode": "none",
-                        "hideFrom": {
-                            "legend": false,
-                            "tooltip": false,
-                            "viz": false
-                        },
-                        "insertNulls": false,
-                        "lineInterpolation": "smooth",
-                        "lineWidth": 1,
-                        "pointSize": 5,
-                        "scaleDistribution": {
-                            "type": "linear"
-                        },
-                        "showPoints": "auto",
-                        "showValues": false,
-                        "spanNulls": true,
-                        "stacking": {
-                            "group": "A",
-                            "mode": "none"
-                        },
-                        "thresholdsStyle": {
-                            "mode": "off"
-                        }
-                    },
-                    "mappings": [],
-                    "min": 0,
-                    "thresholds": {
-                        "mode": "absolute",
-                        "steps": [
-                            {
-                                "color": "green",
-                                "value": 0
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
-                            }
-                        ]
-                    },
-                    "unit": "short"
-                },
-                "overrides": []
-            },
-            "gridPos": {
-                "h": 8,
-                "w": 8,
-                "x": 16,
-                "y": 24
-            },
-            "id": 12,
-            "options": {
-                "legend": {
-                    "calcs": ["min", "max", "mean", "p95", "lastNotNull"],
-                    "displayMode": "table",
-                    "placement": "bottom",
-                    "show": false,
-                    "showLegend": false
-                },
-                "tooltip": {
-                    "hideZeros": false,
-                    "mode": "single",
-                    "sort": "none"
-                }
-            },
-            "pluginVersion": "12.4.0",
-            "targets": [
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
-                    },
-                    "editorMode": "code",
-                    "expr": "max by (instance) (\n  rate(\n    avalanche_subnetevm_vm_eth_chain_txs_processed{job=~\"l1-.*\"}[5m]\n  )\n)",
-                    "legendFormat": "{{instance}}",
-                    "range": true,
-                    "rawQuery": false,
-                    "refId": "A"
-                }
-            ],
-            "title": "TPS",
-            "type": "timeseries"
-        },
-        {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-            },
-            "fieldConfig": {
-                "defaults": {
-                    "color": {
-                        "mode": "palette-classic"
-                    },
-                    "custom": {
-                        "axisBorderShow": false,
-                        "axisCenteredZero": false,
-                        "axisColorMode": "text",
-                        "axisLabel": "",
-                        "axisPlacement": "auto",
-                        "barAlignment": 0,
-                        "barWidthFactor": 0.6,
-                        "drawStyle": "line",
-                        "fillOpacity": 0,
-                        "gradientMode": "none",
-                        "hideFrom": {
-                            "legend": false,
-                            "tooltip": false,
-                            "viz": false
-                        },
-                        "insertNulls": false,
-                        "lineInterpolation": "smooth",
-                        "lineWidth": 1,
-                        "pointSize": 5,
-                        "scaleDistribution": {
-                            "type": "linear"
-                        },
-                        "showPoints": "auto",
-                        "showValues": false,
-                        "spanNulls": true,
-                        "stacking": {
-                            "group": "A",
-                            "mode": "none"
-                        },
-                        "thresholdsStyle": {
-                            "mode": "off"
-                        }
-                    },
-                    "mappings": [],
-                    "min": 0,
-                    "thresholds": {
-                        "mode": "absolute",
-                        "steps": [
-                            {
-                                "color": "green",
-                                "value": 0
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
-                            }
-                        ]
-                    },
-                    "unit": "ms"
-                },
-                "overrides": []
-            },
-            "gridPos": {
-                "h": 8,
-                "w": 8,
-                "x": 0,
-                "y": 32
-            },
-            "id": 13,
-            "options": {
-                "legend": {
-                    "calcs": ["min", "max", "mean", "p95", "lastNotNull"],
-                    "displayMode": "table",
-                    "placement": "bottom",
-                    "show": false,
-                    "showLegend": false
-                },
-                "tooltip": {
-                    "hideZeros": false,
-                    "mode": "single",
-                    "sort": "none"
-                }
-            },
-            "pluginVersion": "12.4.0",
-            "targets": [
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
-                    },
-                    "editorMode": "code",
-                    "expr": "(60 / (increase(avalanche_snowman_blks_accepted_count{job=~\"l1-.*\"}[1m]) > 0)) * 1000",
-                    "legendFormat": "{{instance}}",
-                    "range": true,
-                    "rawQuery": false,
-                    "refId": "A"
-                }
-            ],
-            "title": "Block Interval (ms)",
+            "title": "Connected Peers",
             "type": "timeseries"
         }
     ],
     "refresh": "5s",
     "schemaVersion": 39,
-    "tags": [],
+    "tags": ["primary-network", "avalanche"],
     "templating": {
         "list": []
     },
@@ -1406,7 +917,7 @@
     },
     "timepicker": {},
     "timezone": "browser",
-    "title": "Avalanche Benchmark",
-    "uid": "avalanche-benchmark",
+    "title": "Primary Network",
+    "uid": "primary-network",
     "version": 1
 }

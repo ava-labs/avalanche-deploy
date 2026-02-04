@@ -1,37 +1,37 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "avalanche-validator.fullname" . }}
+  name: {{ include "l1-validator.fullname" . }}
   labels:
-    {{- include "avalanche-validator.labels" . | nindent 4 }}
+    {{- include "l1-validator.labels" . | nindent 4 }}
 spec:
-  type: {{ .Values.service.type }}
+  type: {{ .Values.l1_validator_service.type }}
   clusterIP: None  # Headless service for StatefulSet
   ports:
-    - port: {{ .Values.service.httpPort }}
+    - port: {{ .Values.l1_validator_service.httpPort }}
       targetPort: http
       protocol: TCP
       name: http
-    - port: {{ .Values.service.stakingPort }}
+    - port: {{ .Values.l1_validator_service.stakingPort }}
       targetPort: staking
       protocol: TCP
       name: staking
   selector:
-    {{- include "avalanche-validator.selectorLabels" . | nindent 4 }}
+    {{- include "l1-validator.selectorLabels" . | nindent 4 }}
 ---
 # Service for external P2P access
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "avalanche-validator.fullname" . }}-p2p
+  name: {{ include "l1-validator.fullname" . }}-p2p
   labels:
-    {{- include "avalanche-validator.labels" . | nindent 4 }}
+    {{- include "l1-validator.labels" . | nindent 4 }}
 spec:
   type: LoadBalancer
   ports:
-    - port: {{ .Values.service.stakingPort }}
+    - port: {{ .Values.l1_validator_service.stakingPort }}
       targetPort: staking
       protocol: TCP
       name: staking
   selector:
-    {{- include "avalanche-validator.selectorLabels" . | nindent 4 }}
+    {{- include "l1-validator.selectorLabels" . | nindent 4 }}

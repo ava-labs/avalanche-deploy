@@ -1,13 +1,13 @@
-{{- if .Values.podDisruptionBudget.enabled }}
+{{- if .Values.l1_validator_pdb.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "avalanche-validator.fullname" . }}
+  name: {{ include "l1-validator.fullname" . }}
   labels:
-    {{- include "avalanche-validator.labels" . | nindent 4 }}
+    {{- include "l1-validator.labels" . | nindent 4 }}
 spec:
-  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.l1_validator_pdb.minAvailable }}
   selector:
     matchLabels:
-      {{- include "avalanche-validator.selectorLabels" . | nindent 6 }}
+      {{- include "l1-validator.selectorLabels" . | nindent 6 }}
 {{- end }}

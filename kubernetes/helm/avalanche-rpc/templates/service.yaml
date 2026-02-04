@@ -1,19 +1,19 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "avalanche-rpc.fullname" . }}
+  name: {{ include "l1-rpc.fullname" . }}
   labels:
-    {{- include "avalanche-rpc.labels" . | nindent 4 }}
+    {{- include "l1-rpc.labels" . | nindent 4 }}
 spec:
-  type: {{ .Values.service.type }}
+  type: {{ .Values.l1_rpc_service.type }}
   ports:
-    - port: {{ .Values.service.httpPort }}
+    - port: {{ .Values.l1_rpc_service.httpPort }}
       targetPort: http
       protocol: TCP
       name: http
-    - port: {{ .Values.service.stakingPort }}
+    - port: {{ .Values.l1_rpc_service.stakingPort }}
       targetPort: staking
       protocol: TCP
       name: staking
   selector:
-    {{- include "avalanche-rpc.selectorLabels" . | nindent 4 }}
+    {{- include "l1-rpc.selectorLabels" . | nindent 4 }}

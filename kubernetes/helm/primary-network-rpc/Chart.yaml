@@ -1,0 +1,6 @@
+apiVersion: v2
+name: primary-network-rpc
+description: Avalanche Primary Network RPC Nodes (P-Chain, X-Chain, C-Chain)
+type: application
+version: 0.1.0
+appVersion: "1.14.1"

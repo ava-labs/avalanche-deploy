@@ -1,9 +1,9 @@
 apiVersion: v2
-name: avalanche-rpc
-description: Avalanche L1 RPC Nodes
+name: l1-rpc
+description: Avalanche L1 RPC Nodes (Subnet-EVM with Partial Sync)
 type: application
-version: 0.2.0
-appVersion: "1.14.1"
+version: 0.3.0
+appVersion: "1.14.1-v0.8.0"
 
 keywords:
   - avalanche
@@ -11,6 +11,8 @@ keywords:
   - rpc
   - l1
   - subnet
+  - subnet-evm
+  - partial-sync
 
 home: https://github.com/ava-labs/avalanche-deploy
 sources:

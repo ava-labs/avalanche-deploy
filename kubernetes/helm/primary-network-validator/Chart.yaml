@@ -1,0 +1,6 @@
+apiVersion: v2
+name: primary-network-validator
+description: Avalanche Primary Network Validator Nodes (P-Chain, X-Chain, C-Chain)
+type: application
+version: 0.1.0
+appVersion: "1.14.1"

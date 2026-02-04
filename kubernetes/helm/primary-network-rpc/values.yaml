@@ -1,22 +1,20 @@
-# L1 RPC - Subnet-EVM with Partial Sync
-# For Avalanche L1 (subnet) RPC access
+# Primary Network RPC - Standalone AvalancheGo
+# For P-Chain, X-Chain, and C-Chain RPC access
 
-# Number of L1 RPC replicas
-l1_rpc_replicas: 2
+# Number of RPC replicas
+primary_rpc_replicas: 2
 
 # Network: fuji or mainnet
 network: fuji
 
-# Subnet-EVM bundled image for L1
-l1_rpc_image:
-  # Uses bundled image with avalanchego + subnet-evm
-  # Tag format: v{avalanchego}-v{subnet-evm}
-  repository: avaplatform/subnet-evm_avalanchego
-  tag: "v1.14.1-v0.8.0"
+# Standalone AvalancheGo image (no subnet-evm)
+primary_rpc_image:
+  repository: avaplatform/avalanchego
+  tag: "v1.14.1"
   pullPolicy: IfNotPresent
 
-# Resource limits for L1 RPC (lower than validators)
-l1_rpc_resources:
+# Resource limits for Primary Network RPC (lower than validators)
+primary_rpc_resources:
   requests:
     cpu: "2"
     memory: "8Gi"
@@ -24,16 +22,16 @@ l1_rpc_resources:
     cpu: "4"
     memory: "16Gi"
 
-# Persistent storage (smaller than Primary Network due to partial sync)
-l1_rpc_persistence:
+# Persistent storage
+primary_rpc_persistence:
   enabled: true
   storageClass: ""
-  size: 500Gi
+  size: 1000Gi  # Primary Network needs more storage
   accessModes:
     - ReadWriteOnce
 
 # Node configuration
-l1_rpc_config:
+primary_rpc_config:
   httpPort: 9650
   stakingPort: 9651
   logLevel: info
@@ -41,49 +39,39 @@ l1_rpc_config:
   apiInfoEnabled: true
   apiHealthEnabled: true
   indexEnabled: true  # Enable indexing for RPC queries
-  # Partial sync for L1 - faster bootstrap, less storage
-  partialSyncPrimaryNetwork: "P-Chain"
 
 # Service configuration - LoadBalancer for external access
-l1_rpc_service:
+primary_rpc_service:
   type: LoadBalancer
   httpPort: 9650
   stakingPort: 9651
 
 # Horizontal pod autoscaler
-l1_rpc_autoscaling:
+primary_rpc_autoscaling:
   enabled: false
   minReplicas: 2
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
 
 # Node affinity - spread across zones
-l1_rpc_affinity:
+primary_rpc_affinity:
   podAntiAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:
       - weight: 100
         podAffinityTerm:
           labelSelector:
             matchLabels:
-              app.kubernetes.io/name: l1-rpc
+              app.kubernetes.io/name: primary-network-rpc
           topologyKey: topology.kubernetes.io/zone
 
 # Security context
-l1_rpc_securityContext:
+primary_rpc_securityContext:
   runAsNonRoot: true
   runAsUser: 1000
   fsGroup: 1000
 
-# L1 Configuration (set after create-l1)
-l1:
-  enabled: false
-  subnetId: ""
-  chainId: ""
-  bootstrapIds: ""
-  bootstrapIps: ""
-
 # Liveness probe
-l1_rpc_livenessProbe:
+primary_rpc_livenessProbe:
   exec:
     command:
       - /bin/sh
@@ -93,7 +81,7 @@ l1_rpc_livenessProbe:
   periodSeconds: 10
 
 # Readiness probe - check P-Chain bootstrap
-l1_rpc_readinessProbe:
+primary_rpc_readinessProbe:
   exec:
     command:
       - /bin/sh
@@ -103,12 +91,12 @@ l1_rpc_readinessProbe:
   periodSeconds: 10
 
 # Service account
-l1_rpc_serviceAccount:
+primary_rpc_serviceAccount:
   create: true
   name: ""
 
 # Node selector
-l1_rpc_nodeSelector: {}
+primary_rpc_nodeSelector: {}
 
 # Tolerations
-l1_rpc_tolerations: []
+primary_rpc_tolerations: []

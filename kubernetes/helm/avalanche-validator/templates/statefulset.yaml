@@ -1,51 +1,55 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "avalanche-validator.fullname" . }}
+  name: {{ include "l1-validator.fullname" . }}
   labels:
-    {{- include "avalanche-validator.labels" . | nindent 4 }}
+    {{- include "l1-validator.labels" . | nindent 4 }}
 spec:
-  serviceName: {{ include "avalanche-validator.fullname" . }}
-  replicas: {{ .Values.replicaCount }}
+  serviceName: {{ include "l1-validator.fullname" . }}
+  replicas: {{ .Values.l1_validator_replicas }}
   podManagementPolicy: Parallel
   selector:
     matchLabels:
-      {{- include "avalanche-validator.selectorLabels" . | nindent 6 }}
+      {{- include "l1-validator.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "avalanche-validator.selectorLabels" . | nindent 8 }}
+        {{- include "l1-validator.selectorLabels" . | nindent 8 }}
     spec:
-      {{- with .Values.affinity }}
+      {{- with .Values.l1_validator_affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.nodeSelector }}
+      {{- with .Values.l1_validator_nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.tolerations }}
+      {{- with .Values.l1_validator_tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "avalanche-validator.serviceAccountName" . }}
+      serviceAccountName: {{ include "l1-validator.serviceAccountName" . }}
       securityContext:
-        {{- toYaml .Values.securityContext | nindent 8 }}
+        {{- toYaml .Values.l1_validator_securityContext | nindent 8 }}
       containers:
         - name: avalanchego
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: "{{ .Values.l1_validator_image.repository }}:{{ .Values.l1_validator_image.tag }}"
+          imagePullPolicy: {{ .Values.l1_validator_image.pullPolicy }}
           args:
-            - --network-id={{ include "avalanche-validator.networkId" . }}
+            - --network-id={{ include "l1-validator.networkId" . }}
             - --http-host=0.0.0.0
-            - --http-port={{ .Values.config.httpPort }}
-            - --staking-port={{ .Values.config.stakingPort }}
-            - --log-level={{ .Values.config.logLevel }}
-            - --api-admin-enabled={{ .Values.config.apiAdminEnabled }}
-            - --api-info-enabled={{ .Values.config.apiInfoEnabled }}
-            - --api-health-enabled={{ .Values.config.apiHealthEnabled }}
-            - --index-enabled={{ .Values.config.indexEnabled }}
+            - --http-port={{ .Values.l1_validator_config.httpPort }}
+            - --staking-port={{ .Values.l1_validator_config.stakingPort }}
+            - --log-level={{ .Values.l1_validator_config.logLevel }}
+            - --api-admin-enabled={{ .Values.l1_validator_config.apiAdminEnabled }}
+            - --api-info-enabled={{ .Values.l1_validator_config.apiInfoEnabled }}
+            - --api-health-enabled={{ .Values.l1_validator_config.apiHealthEnabled }}
+            - --index-enabled={{ .Values.l1_validator_config.indexEnabled }}
             - --db-dir=/data/db
+            # Partial sync for L1 - only sync P-Chain from Primary Network
+            {{- if .Values.l1_validator_config.partialSyncPrimaryNetwork }}
+            - --partial-sync-primary-network={{ .Values.l1_validator_config.partialSyncPrimaryNetwork }}
+            {{- end }}
             {{- if .Values.l1.enabled }}
             - --track-subnets={{ .Values.l1.subnetId }}
             {{- if .Values.l1.bootstrapIds }}
@@ -55,31 +59,31 @@ spec:
             {{- end }}
           ports:
             - name: http
-              containerPort: {{ .Values.config.httpPort }}
+              containerPort: {{ .Values.l1_validator_config.httpPort }}
               protocol: TCP
             - name: staking
-              containerPort: {{ .Values.config.stakingPort }}
+              containerPort: {{ .Values.l1_validator_config.stakingPort }}
               protocol: TCP
           livenessProbe:
-            {{- toYaml .Values.livenessProbe | nindent 12 }}
+            {{- toYaml .Values.l1_validator_livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.readinessProbe | nindent 12 }}
+            {{- toYaml .Values.l1_validator_readinessProbe | nindent 12 }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml .Values.l1_validator_resources | nindent 12 }}
           volumeMounts:
             - name: data
               mountPath: /data
-  {{- if .Values.persistence.enabled }}
+  {{- if .Values.l1_validator_persistence.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: data
       spec:
         accessModes:
-          {{- toYaml .Values.persistence.accessModes | nindent 10 }}
-        {{- if .Values.persistence.storageClass }}
-        storageClassName: {{ .Values.persistence.storageClass }}
+          {{- toYaml .Values.l1_validator_persistence.accessModes | nindent 10 }}
+        {{- if .Values.l1_validator_persistence.storageClass }}
+        storageClassName: {{ .Values.l1_validator_persistence.storageClass }}
         {{- end }}
         resources:
           requests:
-            storage: {{ .Values.persistence.size }}
+            storage: {{ .Values.l1_validator_persistence.size }}
   {{- end }}

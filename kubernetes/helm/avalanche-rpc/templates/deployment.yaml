@@ -1,49 +1,53 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "avalanche-rpc.fullname" . }}
+  name: {{ include "l1-rpc.fullname" . }}
   labels:
-    {{- include "avalanche-rpc.labels" . | nindent 4 }}
+    {{- include "l1-rpc.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ .Values.l1_rpc_replicas }}
   selector:
     matchLabels:
-      {{- include "avalanche-rpc.selectorLabels" . | nindent 6 }}
+      {{- include "l1-rpc.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "avalanche-rpc.selectorLabels" . | nindent 8 }}
+        {{- include "l1-rpc.selectorLabels" . | nindent 8 }}
     spec:
-      {{- with .Values.affinity }}
+      {{- with .Values.l1_rpc_affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.nodeSelector }}
+      {{- with .Values.l1_rpc_nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.tolerations }}
+      {{- with .Values.l1_rpc_tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "avalanche-rpc.serviceAccountName" . }}
+      serviceAccountName: {{ include "l1-rpc.serviceAccountName" . }}
       securityContext:
-        {{- toYaml .Values.securityContext | nindent 8 }}
+        {{- toYaml .Values.l1_rpc_securityContext | nindent 8 }}
       containers:
         - name: avalanchego
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: "{{ .Values.l1_rpc_image.repository }}:{{ .Values.l1_rpc_image.tag }}"
+          imagePullPolicy: {{ .Values.l1_rpc_image.pullPolicy }}
           args:
-            - --network-id={{ include "avalanche-rpc.networkId" . }}
+            - --network-id={{ include "l1-rpc.networkId" . }}
             - --http-host=0.0.0.0
-            - --http-port={{ .Values.config.httpPort }}
-            - --staking-port={{ .Values.config.stakingPort }}
-            - --log-level={{ .Values.config.logLevel }}
-            - --api-admin-enabled={{ .Values.config.apiAdminEnabled }}
-            - --api-info-enabled={{ .Values.config.apiInfoEnabled }}
-            - --api-health-enabled={{ .Values.config.apiHealthEnabled }}
-            - --index-enabled={{ .Values.config.indexEnabled }}
+            - --http-port={{ .Values.l1_rpc_config.httpPort }}
+            - --staking-port={{ .Values.l1_rpc_config.stakingPort }}
+            - --log-level={{ .Values.l1_rpc_config.logLevel }}
+            - --api-admin-enabled={{ .Values.l1_rpc_config.apiAdminEnabled }}
+            - --api-info-enabled={{ .Values.l1_rpc_config.apiInfoEnabled }}
+            - --api-health-enabled={{ .Values.l1_rpc_config.apiHealthEnabled }}
+            - --index-enabled={{ .Values.l1_rpc_config.indexEnabled }}
             - --db-dir=/data/db
+            # Partial sync for L1 - only sync P-Chain from Primary Network
+            {{- if .Values.l1_rpc_config.partialSyncPrimaryNetwork }}
+            - --partial-sync-primary-network={{ .Values.l1_rpc_config.partialSyncPrimaryNetwork }}
+            {{- end }}
             {{- if .Values.l1.enabled }}
             - --track-subnets={{ .Values.l1.subnetId }}
             {{- if .Values.l1.bootstrapIds }}
@@ -53,25 +57,25 @@ spec:
             {{- end }}
           ports:
             - name: http
-              containerPort: {{ .Values.config.httpPort }}
+              containerPort: {{ .Values.l1_rpc_config.httpPort }}
               protocol: TCP
             - name: staking
-              containerPort: {{ .Values.config.stakingPort }}
+              containerPort: {{ .Values.l1_rpc_config.stakingPort }}
               protocol: TCP
           livenessProbe:
-            {{- toYaml .Values.livenessProbe | nindent 12 }}
+            {{- toYaml .Values.l1_rpc_livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.readinessProbe | nindent 12 }}
+            {{- toYaml .Values.l1_rpc_readinessProbe | nindent 12 }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml .Values.l1_rpc_resources | nindent 12 }}
           volumeMounts:
             - name: data
               mountPath: /data
       volumes:
         - name: data
-          {{- if .Values.persistence.enabled }}
+          {{- if .Values.l1_rpc_persistence.enabled }}
           persistentVolumeClaim:
-            claimName: {{ include "avalanche-rpc.fullname" . }}
+            claimName: {{ include "l1-rpc.fullname" . }}
           {{- else }}
           emptyDir: {}
           {{- end }}

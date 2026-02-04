@@ -1,0 +1,17 @@
+{{- if .Values.primary_rpc_persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "primary-network-rpc.fullname" . }}
+  labels:
+    {{- include "primary-network-rpc.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.primary_rpc_persistence.accessModes | nindent 4 }}
+  {{- if .Values.primary_rpc_persistence.storageClass }}
+  storageClassName: {{ .Values.primary_rpc_persistence.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.primary_rpc_persistence.size }}
+{{- end }}

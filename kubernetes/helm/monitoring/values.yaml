@@ -10,25 +10,53 @@ prometheus:
   serverFiles:
     prometheus.yml:
       scrape_configs:
-        - job_name: 'avalanche-validators'
+        # Primary Network Validators (standalone AvalancheGo)
+        - job_name: 'primary-network-validators'
           kubernetes_sd_configs:
             - role: pod
           relabel_configs:
             - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
               action: keep
-              regex: avalanche-validator
+              regex: primary-network-validator
             - source_labels: [__meta_kubernetes_pod_ip]
               target_label: __address__
               replacement: ${1}:9650
           metrics_path: '/ext/metrics'
 
-        - job_name: 'avalanche-rpc'
+        # Primary Network RPC (standalone AvalancheGo)
+        - job_name: 'primary-network-rpc'
           kubernetes_sd_configs:
             - role: pod
           relabel_configs:
             - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
               action: keep
-              regex: avalanche-rpc
+              regex: primary-network-rpc
+            - source_labels: [__meta_kubernetes_pod_ip]
+              target_label: __address__
+              replacement: ${1}:9650
+          metrics_path: '/ext/metrics'
+
+        # L1 Validators (Subnet-EVM with partial sync)
+        - job_name: 'l1-validators'
+          kubernetes_sd_configs:
+            - role: pod
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+              action: keep
+              regex: l1-validator
+            - source_labels: [__meta_kubernetes_pod_ip]
+              target_label: __address__
+              replacement: ${1}:9650
+          metrics_path: '/ext/metrics'
+
+        # L1 RPC (Subnet-EVM with partial sync)
+        - job_name: 'l1-rpc'
+          kubernetes_sd_configs:
+            - role: pod
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+              action: keep
+              regex: l1-rpc
             - source_labels: [__meta_kubernetes_pod_ip]
               target_label: __address__
               replacement: ${1}:9650

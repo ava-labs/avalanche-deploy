@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "primary-network-rpc.fullname" . }}
+  labels:
+    {{- include "primary-network-rpc.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.primary_rpc_replicas }}
+  selector:
+    matchLabels:
+      {{- include "primary-network-rpc.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "primary-network-rpc.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.primary_rpc_affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.primary_rpc_nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.primary_rpc_tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "primary-network-rpc.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.primary_rpc_securityContext | nindent 8 }}
+      containers:
+        - name: avalanchego
+          image: "{{ .Values.primary_rpc_image.repository }}:{{ .Values.primary_rpc_image.tag }}"
+          imagePullPolicy: {{ .Values.primary_rpc_image.pullPolicy }}
+          args:
+            - --network-id={{ include "primary-network-rpc.networkId" . }}
+            - --http-host=0.0.0.0
+            - --http-port={{ .Values.primary_rpc_config.httpPort }}
+            - --staking-port={{ .Values.primary_rpc_config.stakingPort }}
+            - --log-level={{ .Values.primary_rpc_config.logLevel }}
+            - --api-admin-enabled={{ .Values.primary_rpc_config.apiAdminEnabled }}
+            - --api-info-enabled={{ .Values.primary_rpc_config.apiInfoEnabled }}
+            - --api-health-enabled={{ .Values.primary_rpc_config.apiHealthEnabled }}
+            - --index-enabled={{ .Values.primary_rpc_config.indexEnabled }}
+            - --db-dir=/data/db
+          ports:
+            - name: http
+              containerPort: {{ .Values.primary_rpc_config.httpPort }}
+              protocol: TCP
+            - name: staking
+              containerPort: {{ .Values.primary_rpc_config.stakingPort }}
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.primary_rpc_livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.primary_rpc_readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.primary_rpc_resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          {{- if .Values.primary_rpc_persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "primary-network-rpc.fullname" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

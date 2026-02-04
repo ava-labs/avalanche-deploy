@@ -1,0 +1,22 @@
+{{- if .Values.primary_rpc_autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "primary-network-rpc.fullname" . }}
+  labels:
+    {{- include "primary-network-rpc.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "primary-network-rpc.fullname" . }}
+  minReplicas: {{ .Values.primary_rpc_autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.primary_rpc_autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.primary_rpc_autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

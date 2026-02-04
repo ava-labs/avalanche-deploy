@@ -1,6 +1,15 @@
 # Kubernetes Deployment
 
-Deploy Avalanche L1 validators and RPC nodes on Kubernetes.
+Deploy Avalanche Primary Network and L1 validators/RPC nodes on Kubernetes.
+
+## Architecture Overview
+
+This deployment supports two separate node types:
+
+| Component | Image | Purpose | Storage |
+|-----------|-------|---------|---------|
+| **Primary Network** | `avaplatform/avalanchego` | P-Chain, X-Chain, C-Chain validation | 1TB (full history) |
+| **L1 (Subnet)** | `avaplatform/subnet-evm_avalanchego` | L1/Subnet validation with partial sync | 500GB (partial sync) |
 
 ## Quick Start (Local Testing with kind)
 
@@ -11,9 +20,9 @@ brew install kind kubectl helm
 # Create local cluster
 ./scripts/create-kind-cluster.sh
 
-# Deploy validators
-helm install validators ./helm/avalanche-validator \
-  --set replicaCount=3 \
+# Deploy L1 validators (with partial sync)
+helm install l1-validators ./helm/avalanche-validator \
+  --set l1_validator_replicas=3 \
   --set network=fuji
 
 # Wait for sync
@@ -47,117 +56,195 @@ flowchart TB
     end
 
     subgraph K8s["Kubernetes Cluster"]
-        subgraph Validators["StatefulSet: validators"]
-            V0[validator-0<br/>:9651 P2P]
-            V1[validator-1<br/>:9651 P2P]
-            V2[validator-2<br/>:9651 P2P]
+        subgraph PrimaryVal["StatefulSet: primary-validators"]
+            PV0[primary-validator-0<br/>avalanchego<br/>Full Sync]
+            PV1[primary-validator-1<br/>avalanchego<br/>Full Sync]
         end
 
-        subgraph RPC["Deployment: rpc"]
-            R0[rpc-0<br/>:9650 API]
-            R1[rpc-1<br/>:9650 API]
+        subgraph PrimaryRPC["Deployment: primary-rpc"]
+            PR0[primary-rpc-0<br/>avalanchego]
         end
 
-        LB[LoadBalancer<br/>:9650]
+        subgraph L1Val["StatefulSet: l1-validators"]
+            V0[l1-validator-0<br/>subnet-evm<br/>Partial Sync]
+            V1[l1-validator-1<br/>subnet-evm<br/>Partial Sync]
+            V2[l1-validator-2<br/>subnet-evm<br/>Partial Sync]
+        end
+
+        subgraph L1RPC["Deployment: l1-rpc"]
+            R0[l1-rpc-0<br/>subnet-evm]
+            R1[l1-rpc-1<br/>subnet-evm]
+        end
+
+        LB_Primary[LoadBalancer<br/>Primary RPC :9650]
+        LB_L1[LoadBalancer<br/>L1 RPC :9650]
     end
 
+    PrimaryNetwork <-->|P2P :9651| PV0
+    PrimaryNetwork <-->|P2P :9651| PV1
     PrimaryNetwork <-->|P2P :9651| V0
     PrimaryNetwork <-->|P2P :9651| V1
     PrimaryNetwork <-->|P2P :9651| V2
 
-    V0 <-->|P2P| V1
-    V1 <-->|P2P| V2
-    V0 <-->|P2P| V2
+    V0 <-->|L1 P2P| V1
+    V1 <-->|L1 P2P| V2
+    V0 <-->|L1 P2P| V2
 
-    R0 <-->|P2P :9651| V0
-    R1 <-->|P2P :9651| V1
+    Users -->|Primary RPC| LB_Primary
+    LB_Primary --> PR0
 
-    Users -->|RPC :9650| LB
-    LB --> R0
-    LB --> R1
+    Users -->|L1 RPC| LB_L1
+    LB_L1 --> R0
+    LB_L1 --> R1
 ```
 
 ## Helm Charts
 
-| Chart | Description |
-|-------|-------------|
-| `avalanche-validator` | StatefulSet for L1 validators |
-| `avalanche-rpc` | Deployment for RPC nodes with LoadBalancer |
-| `monitoring` | Grafana dashboard ConfigMap |
+| Chart | Description | Image |
+|-------|-------------|-------|
+| `primary-network-validator` | StatefulSet for Primary Network validators | `avaplatform/avalanchego` |
+| `primary-network-rpc` | Deployment for Primary Network RPC nodes | `avaplatform/avalanchego` |
+| `l1-validator` | StatefulSet for L1 validators (partial sync) | `avaplatform/subnet-evm_avalanchego` |
+| `l1-rpc` | Deployment for L1 RPC nodes (partial sync) | `avaplatform/subnet-evm_avalanchego` |
+| `monitoring` | Prometheus + Grafana with dashboards | - |
 
 ## Deployment Steps
 
-### 1. Deploy Validators
+### Option A: L1 Only (Recommended for Most Use Cases)
+
+Deploy L1 validators with partial sync (only syncs P-Chain from Primary Network):
 
 ```bash
-helm install validators ./helm/avalanche-validator \
-  --set replicaCount=3 \
-  --set network=fuji \
-  --set persistence.storageClass=gp3  # AWS EBS
+# Deploy L1 validators
+helm install l1-validators ./helm/avalanche-validator \
+  --set l1_validator_replicas=3 \
+  --set network=fuji
+
+# Deploy L1 RPC nodes
+helm install l1-rpc ./helm/avalanche-rpc \
+  --set l1_rpc_replicas=2 \
+  --set network=fuji
 ```
 
-### 2. Deploy RPC Nodes (Optional)
+### Option B: Full Infrastructure (Primary + L1)
+
+Deploy both Primary Network and L1 infrastructure:
 
 ```bash
-helm install rpc ./helm/avalanche-rpc \
-  --set replicaCount=2 \
-  --set network=fuji \
-  --set service.type=LoadBalancer
+# 1. Deploy Primary Network validators (full sync - takes longer)
+helm install primary-validators ./helm/primary-network-validator \
+  --set primary_validator_replicas=2 \
+  --set network=fuji
+
+# 2. Deploy Primary Network RPC
+helm install primary-rpc ./helm/primary-network-rpc \
+  --set primary_rpc_replicas=2 \
+  --set network=fuji
+
+# 3. Deploy L1 validators (partial sync)
+helm install l1-validators ./helm/avalanche-validator \
+  --set l1_validator_replicas=3 \
+  --set network=fuji
+
+# 4. Deploy L1 RPC nodes
+helm install l1-rpc ./helm/avalanche-rpc \
+  --set l1_rpc_replicas=2 \
+  --set network=fuji
 ```
 
-### 3. Wait for P-Chain Sync
+### Wait for P-Chain Sync
 
 ```bash
 ./scripts/wait-for-sync.sh
 # Or manually:
-kubectl exec -it validators-0 -- \
+kubectl exec -it l1-validators-0 -- \
   curl -s localhost:9650/ext/info -X POST \
   -H 'content-type:application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"info.isBootstrapped","params":{"chain":"P"}}'
 ```
 
-### 4. Create L1
+### Create and Configure L1
 
 ```bash
 export AVALANCHE_PRIVATE_KEY="0x..."
 
-# Option 1: Use the script
+# Create L1
 ./scripts/create-l1.sh --chain-name=mychain --network=fuji
 
-# Option 2: Run as K8s Job
-kubectl apply -f jobs/create-l1-job.yaml
-kubectl logs -f job/create-l1
-```
-
-### 5. Configure Validators for L1
-
-```bash
-# Get the L1 config
+# Configure validators with subnet tracking
 source l1.env
-
-# Update validators with subnet tracking
-./scripts/configure-l1.sh
+helm upgrade l1-validators ./helm/avalanche-validator \
+  --set l1.enabled=true \
+  --set l1.subnetId=$SUBNET_ID \
+  --set l1.chainId=$CHAIN_ID
 ```
 
-### 6. Verify
+## Configuration Reference
 
-```bash
-./scripts/status.sh
-
-# Or get RPC endpoint
-kubectl get svc rpc-avalanche-rpc -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-```
-
-## Configuration
-
-### Validator Values
+### L1 Validator Values
 
 ```yaml
-# values-production.yaml
-replicaCount: 5
+# L1 validators with partial sync
+l1_validator_replicas: 3
+network: fuji
+
+l1_validator_image:
+  repository: avaplatform/subnet-evm_avalanchego
+  tag: "v1.14.1-v0.8.0"
+
+l1_validator_resources:
+  requests:
+    cpu: "4"
+    memory: "16Gi"
+  limits:
+    cpu: "8"
+    memory: "32Gi"
+
+l1_validator_persistence:
+  size: 500Gi  # Smaller due to partial sync
+  storageClass: gp3
+
+l1_validator_config:
+  partialSyncPrimaryNetwork: "P-Chain"  # Only sync P-Chain
+
+l1:
+  enabled: true
+  subnetId: "..."
+  chainId: "..."
+```
+
+### Primary Network Validator Values
+
+```yaml
+# Primary Network validators with full sync
+primary_validator_replicas: 2
 network: mainnet
 
-resources:
+primary_validator_image:
+  repository: avaplatform/avalanchego
+  tag: "v1.14.1"
+
+primary_validator_resources:
+  requests:
+    cpu: "4"
+    memory: "16Gi"
+  limits:
+    cpu: "8"
+    memory: "32Gi"
+
+primary_validator_persistence:
+  size: 1000Gi  # Full Primary Network history
+  storageClass: gp3
+```
+
+### Production Configuration
+
+```yaml
+# values-production.yaml for L1
+l1_validator_replicas: 5
+network: mainnet
+
+l1_validator_resources:
   requests:
     cpu: "8"
     memory: "32Gi"
@@ -165,24 +252,36 @@ resources:
     cpu: "16"
     memory: "64Gi"
 
-persistence:
+l1_validator_persistence:
   size: 1Ti
   storageClass: gp3
 
 # Spread across availability zones
-affinity:
+l1_validator_affinity:
   podAntiAffinity:
     requiredDuringSchedulingIgnoredDuringExecution:
       - labelSelector:
           matchLabels:
-            app.kubernetes.io/name: avalanche-validator
+            app.kubernetes.io/name: l1-validator
         topologyKey: topology.kubernetes.io/zone
 ```
 
-### Deploy with Custom Values
+## Monitoring
+
+Deploy the monitoring stack with separate dashboards for Primary Network and L1:
 
 ```bash
-helm install validators ./helm/avalanche-validator -f values-production.yaml
+helm install monitoring ./helm/monitoring
+```
+
+Dashboards:
+- **Primary Network**: P-Chain height, C-Chain TPS, memory usage, peers
+- **L1 Benchmark**: L1 TPS, block latency, gas metrics, verification time
+
+Access Grafana:
+```bash
+kubectl port-forward svc/monitoring-grafana 3000:3000
+# Open http://localhost:3000 (admin/admin)
 ```
 
 ## Local Testing with kind
@@ -207,8 +306,8 @@ This creates a 4-node kind cluster with:
 ### Access Services
 
 ```bash
-# Port forward to RPC
-kubectl port-forward svc/validators-avalanche-validator 9650:9650
+# Port forward to L1 RPC
+kubectl port-forward svc/l1-rpc-l1-rpc 9650:9650
 
 # In another terminal
 curl localhost:9650/ext/health
@@ -218,8 +317,11 @@ curl localhost:9650/ext/health
 
 ```bash
 # Delete releases
-helm uninstall validators
-helm uninstall rpc
+helm uninstall l1-validators
+helm uninstall l1-rpc
+helm uninstall primary-validators
+helm uninstall primary-rpc
+helm uninstall monitoring
 
 # Delete kind cluster (local testing)
 kind delete cluster --name avalanche-l1
@@ -229,13 +331,13 @@ kind delete cluster --name avalanche-l1
 
 **Pods stuck in Pending**
 ```bash
-kubectl describe pod validators-0
+kubectl describe pod l1-validators-0
 # Check for resource constraints or storage issues
 ```
 
 **Nodes not syncing**
 ```bash
-kubectl logs validators-0 -f
+kubectl logs l1-validators-0 -f
 ```
 
 **Can't reach RPC endpoint**
@@ -244,7 +346,7 @@ kubectl logs validators-0 -f
 kubectl get svc
 
 # For kind, use port-forward
-kubectl port-forward svc/rpc-avalanche-rpc 9650:9650
+kubectl port-forward svc/l1-rpc-l1-rpc 9650:9650
 ```
 
 ---

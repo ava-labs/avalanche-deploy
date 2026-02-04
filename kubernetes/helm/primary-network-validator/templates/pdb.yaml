@@ -1,0 +1,13 @@
+{{- if .Values.primary_validator_pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "primary-network-validator.fullname" . }}
+  labels:
+    {{- include "primary-network-validator.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.primary_validator_pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "primary-network-validator.selectorLabels" . | nindent 6 }}
+{{- end }}

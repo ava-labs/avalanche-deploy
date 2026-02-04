@@ -1,18 +1,18 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "l1-validator.name" -}}
-{{- default "l1-validator" .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- define "primary-network-validator.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Create a default fully qualified app name.
 */}}
-{{- define "l1-validator.fullname" -}}
+{{- define "primary-network-validator.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
-{{- $name := default "l1-validator" .Values.nameOverride }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
 {{- if contains $name .Release.Name }}
 {{- .Release.Name | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -24,45 +24,45 @@ Create a default fully qualified app name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "l1-validator.chart" -}}
+{{- define "primary-network-validator.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "l1-validator.labels" -}}
-helm.sh/chart: {{ include "l1-validator.chart" . }}
-{{ include "l1-validator.selectorLabels" . }}
+{{- define "primary-network-validator.labels" -}}
+helm.sh/chart: {{ include "primary-network-validator.chart" . }}
+{{ include "primary-network-validator.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
-app.kubernetes.io/component: l1
+app.kubernetes.io/component: primary-network
 {{- end }}
 
 {{/*
 Selector labels
 */}}
-{{- define "l1-validator.selectorLabels" -}}
-app.kubernetes.io/name: l1-validator
+{{- define "primary-network-validator.selectorLabels" -}}
+app.kubernetes.io/name: primary-network-validator
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
 Create the name of the service account to use
 */}}
-{{- define "l1-validator.serviceAccountName" -}}
-{{- if .Values.l1_validator_serviceAccount.create }}
-{{- default (include "l1-validator.fullname" .) .Values.l1_validator_serviceAccount.name }}
+{{- define "primary-network-validator.serviceAccountName" -}}
+{{- if .Values.primary_validator_serviceAccount.create }}
+{{- default (include "primary-network-validator.fullname" .) .Values.primary_validator_serviceAccount.name }}
 {{- else }}
-{{- default "default" .Values.l1_validator_serviceAccount.name }}
+{{- default "default" .Values.primary_validator_serviceAccount.name }}
 {{- end }}
 {{- end }}
 
 {{/*
-Network ID based on network name
+Get network ID based on network name
 */}}
-{{- define "l1-validator.networkId" -}}
+{{- define "primary-network-validator.networkId" -}}
 {{- if eq .Values.network "mainnet" }}1{{- else }}5{{- end }}
 {{- end }}

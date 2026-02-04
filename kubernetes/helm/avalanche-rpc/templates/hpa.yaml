@@ -1,0 +1,22 @@
+{{- if .Values.l1_rpc_autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "l1-rpc.fullname" . }}
+  labels:
+    {{- include "l1-rpc.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "l1-rpc.fullname" . }}
+  minReplicas: {{ .Values.l1_rpc_autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.l1_rpc_autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.l1_rpc_autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

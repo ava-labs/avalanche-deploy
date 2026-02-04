@@ -5,5 +5,9 @@ metadata:
   labels:
     grafana_dashboard: "1"
 data:
+  # L1 (Subnet-EVM) Dashboard
   avalanche-l1.json: |-
 {{ .Files.Get "dashboards/avalanche-l1.json" | indent 4 }}
+  # Primary Network (P-Chain, C-Chain) Dashboard
+  primary-network.json: |-
+{{ .Files.Get "dashboards/primary-network.json" | indent 4 }}

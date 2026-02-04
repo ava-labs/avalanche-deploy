@@ -1,17 +1,17 @@
-{{- if .Values.persistence.enabled }}
+{{- if .Values.l1_rpc_persistence.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "avalanche-rpc.fullname" . }}
+  name: {{ include "l1-rpc.fullname" . }}
   labels:
-    {{- include "avalanche-rpc.labels" . | nindent 4 }}
+    {{- include "l1-rpc.labels" . | nindent 4 }}
 spec:
   accessModes:
-    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
-  {{- if .Values.persistence.storageClass }}
-  storageClassName: {{ .Values.persistence.storageClass }}
+    {{- toYaml .Values.l1_rpc_persistence.accessModes | nindent 4 }}
+  {{- if .Values.l1_rpc_persistence.storageClass }}
+  storageClassName: {{ .Values.l1_rpc_persistence.storageClass }}
   {{- end }}
   resources:
     requests:
-      storage: {{ .Values.persistence.size }}
+      storage: {{ .Values.l1_rpc_persistence.size }}
 {{- end }}
