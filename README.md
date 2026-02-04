@@ -19,6 +19,12 @@ make destroy    # tear down (stops billing!)
 | **RPC Node** | 1 | External queries, block explorer |
 | **Monitoring** | 1 | Prometheus + Grafana dashboards |
 
+Configure counts in `terraform/aws/terraform.tfvars`:
+```hcl
+validator_count = 3   # minimum 1 for testnet, 5+ recommended for mainnet
+rpc_count       = 2   # scale based on traffic
+```
+
 **Optional Add-ons:**
 - **Blockscout** - Block explorer for your L1
 - **Safe Multisig** `[EXPERIMENTAL]` - Gnosis Safe infrastructure (see [SAFE.md](SAFE.md))
