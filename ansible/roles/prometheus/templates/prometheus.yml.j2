@@ -7,34 +7,25 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:{{ prometheus_port }}']
 
-  # Avalanche metrics (port 9650)
-  - job_name: 'avalanche-validators'
+  # Avalanche metrics (port 9650) - job name matches dashboard expectations
+  - job_name: 'avalanchego'
     metrics_path: '/ext/metrics'
     static_configs:
       - targets:
 {% for host in groups['validators'] %}
           - '{{ hostvars[host]['private_ip'] | default(hostvars[host]['ansible_host']) }}:9650'
 {% endfor %}
-
-  - job_name: 'avalanche-rpc'
-    metrics_path: '/ext/metrics'
-    static_configs:
-      - targets:
 {% for host in groups['rpc'] %}
           - '{{ hostvars[host]['private_ip'] | default(hostvars[host]['ansible_host']) }}:9650'
 {% endfor %}
 
-  # Node exporter system metrics (port 9100)
-  - job_name: 'node-validators'
+  # Node exporter system metrics (port 9100) - job name matches dashboard expectations
+  - job_name: 'node'
     static_configs:
       - targets:
 {% for host in groups['validators'] %}
           - '{{ hostvars[host]['private_ip'] | default(hostvars[host]['ansible_host']) }}:9100'
 {% endfor %}
-
-  - job_name: 'node-rpc'
-    static_configs:
-      - targets:
 {% for host in groups['rpc'] %}
           - '{{ hostvars[host]['private_ip'] | default(hostvars[host]['ansible_host']) }}:9100'
 {% endfor %}
