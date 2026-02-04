@@ -35,25 +35,46 @@ export AVALANCHE_PRIVATE_KEY="0x..."
 - `kubectl` configured to your cluster
 - `helm` v3+
 - For local testing: `kind` and `docker`
+- Funded P-Chain address ([get test AVAX](https://build.avax.network/tools/faucet))
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Kubernetes Cluster                    │
-│                                                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
-│  │ validator-0  │  │ validator-1  │  │ validator-2  │   │
-│  │ (StatefulSet)│  │ (StatefulSet)│  │ (StatefulSet)│   │
-│  │  Port 9651   │  │  Port 9651   │  │  Port 9651   │   │
-│  └──────────────┘  └──────────────┘  └──────────────┘   │
-│                                                          │
-│  ┌──────────────┐  ┌──────────────┐                     │
-│  │   rpc-0      │  │   rpc-1      │   LoadBalancer      │
-│  │ (Deployment) │  │ (Deployment) │──► Port 9650        │
-│  └──────────────┘  └──────────────┘                     │
-│                                                          │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Internet
+        Users([Users / dApps])
+        PrimaryNetwork([Avalanche Primary Network])
+    end
+
+    subgraph K8s["Kubernetes Cluster"]
+        subgraph Validators["StatefulSet: validators"]
+            V0[validator-0<br/>:9651 P2P]
+            V1[validator-1<br/>:9651 P2P]
+            V2[validator-2<br/>:9651 P2P]
+        end
+
+        subgraph RPC["Deployment: rpc"]
+            R0[rpc-0<br/>:9650 API]
+            R1[rpc-1<br/>:9650 API]
+        end
+
+        LB[LoadBalancer<br/>:9650]
+    end
+
+    PrimaryNetwork <-->|P2P :9651| V0
+    PrimaryNetwork <-->|P2P :9651| V1
+    PrimaryNetwork <-->|P2P :9651| V2
+
+    V0 <-->|P2P| V1
+    V1 <-->|P2P| V2
+    V0 <-->|P2P| V2
+
+    R0 <-->|P2P :9651| V0
+    R1 <-->|P2P :9651| V1
+
+    Users -->|RPC :9650| LB
+    LB --> R0
+    LB --> R1
 ```
 
 ## Helm Charts
@@ -225,3 +246,18 @@ kubectl get svc
 # For kind, use port-forward
 kubectl port-forward svc/rpc-avalanche-rpc 9650:9650
 ```
+
+---
+
+## Genesis Configuration
+
+Use the **[Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain)** to generate your `genesis.json`, or copy the template from `../genesis.json`.
+
+---
+
+## Links
+
+- [Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain) - Generate genesis.json
+- [Fuji Faucet](https://build.avax.network/tools/faucet) - Get test AVAX
+- [Avalanche Docs](https://docs.avax.network/) - Official documentation
+- [Main README](../README.md) - Terraform + Ansible deployment
