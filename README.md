@@ -79,39 +79,6 @@ flowchart TB
 | RPC Node | rpc-sg | API queries, Blockscout explorer |
 | Monitoring | monitoring-sg | Prometheus, Grafana dashboards |
 
-### Security Groups & Ports
-
-**Validators (validators-sg)**
-| Port | Source | Purpose |
-|------|--------|---------|
-| 22 | Operator IP | SSH |
-| 9650 | VPC only | API & metrics (not public) |
-| 9651 | 0.0.0.0/0 | P2P consensus |
-| 9100 | VPC only | Node exporter |
-
-**RPC Node (rpc-sg)**
-| Port | Source | Purpose |
-|------|--------|---------|
-| 22 | Operator IP | SSH |
-| 9650 | Configurable | RPC API (can be public) |
-| 9651 | 0.0.0.0/0 | P2P sync |
-| 9100 | VPC only | Node exporter |
-| 4000-4001 | Configurable | Blockscout |
-
-**Monitoring (monitoring-sg)**
-| Port | Source | Purpose |
-|------|--------|---------|
-| 22 | Operator IP | SSH |
-| 3000 | Configurable | Grafana |
-| 9090 | VPC only | Prometheus |
-
-### External Access
-```
-RPC API:    http://<rpc-ip>:9650/ext/bc/<chain>/rpc
-Blockscout: http://<rpc-ip>:4001
-Grafana:    http://<monitoring-ip>:3000 (admin/admin)
-```
-
 ## Quick Start (AWS)
 
 ### Prerequisites
