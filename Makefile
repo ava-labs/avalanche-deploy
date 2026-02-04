@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks faucet upgrade graph-node erpc
+.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager
 
 # Default cloud provider
 CLOUD ?= aws
@@ -137,6 +137,30 @@ erpc:
 		-e "erpc_evm_chain_id=$(EVM_CHAIN_ID)"
 
 #
+# Validator Manager
+#
+init-validator-manager:
+	@echo "Building initialize-validator-manager tool..."
+	@cd tools/initialize-validator-manager && go mod tidy && go build -o initialize-validator-manager .
+	@echo "Done! Binary at tools/initialize-validator-manager/initialize-validator-manager"
+
+initialize-validator-manager:
+	@if [ -z "$(SUBNET_ID)" ]; then echo "Usage: make initialize-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
+	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make initialize-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
+	@if [ -z "$(CONVERSION_TX)" ]; then echo "Usage: make initialize-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
+	@if [ -z "$(PROXY_ADDRESS)" ]; then echo "Usage: make initialize-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
+	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make initialize-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
+	@echo "Initializing Validator Manager..."
+	@cd ansible && ansible-playbook playbooks/09-initialize-validator-manager.yml \
+		-e "subnet_id=$(SUBNET_ID)" \
+		-e "chain_id=$(CHAIN_ID)" \
+		-e "conversion_tx=$(CONVERSION_TX)" \
+		-e "proxy_address=$(PROXY_ADDRESS)" \
+		-e "evm_chain_id=$(EVM_CHAIN_ID)" \
+		$(if $(MANAGER_TYPE),-e "manager_type=$(MANAGER_TYPE)",) \
+		$(if $(ICM_CONTRACTS_PATH),-e "icm_contracts_path=$(ICM_CONTRACTS_PATH)",)
+
+#
 # Safe Multisig
 #
 safe:
@@ -168,7 +192,9 @@ destroy:
 clean:
 	@rm -f ansible/node_ids.txt
 	@rm -f l1.env
+	@rm -f validator-manager.json
 	@rm -f tools/create-l1/create-l1
+	@rm -f tools/initialize-validator-manager/initialize-validator-manager
 	@echo "Cleaned up generated files."
 
 #
@@ -197,6 +223,10 @@ help:
 	@echo "  make graph-node        Deploy The Graph Node for indexing"
 	@echo "  make erpc              Deploy eRPC load balancer"
 	@echo ""
+	@echo "Validator Manager:"
+	@echo "  make init-validator-manager      Build the validator manager tool"
+	@echo "  make initialize-validator-manager Deploy and initialize validator manager contract"
+	@echo ""
 	@echo "Safe Multisig (EXPERIMENTAL):"
 	@echo "  make safe-genesis Merge Safe contracts into genesis.json (EXPERIMENTAL)"
 	@echo "  make safe         Deploy Safe infrastructure (EXPERIMENTAL)"
@@ -215,4 +245,5 @@ help:
 	@echo "  make faucet CHAIN_ID=xxx EVM_CHAIN_ID=99999 FAUCET_KEY=0x..."
 	@echo "  make graph-node CHAIN_ID=xxx NETWORK_NAME=my-l1"
 	@echo "  make erpc CHAIN_ID=xxx EVM_CHAIN_ID=99999"
+	@echo "  make initialize-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"
 	@echo "  make safe CHAIN_ID=xxx EVM_CHAIN_ID=99999"

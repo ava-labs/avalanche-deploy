@@ -178,6 +178,29 @@ make configure-l1 SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID
 make status
 ```
 
+### 7. Initialize Validator Manager (Optional)
+
+If your genesis includes a ValidatorManager proxy contract, initialize it:
+
+```bash
+# Requires foundry (forge/cast) and icm-contracts repo
+# Install foundry: curl -L https://foundry.paradigm.xyz | bash && foundryup
+
+# Set path to icm-contracts (clone from github.com/ava-labs/icm-contracts)
+export ICM_CONTRACTS_PATH=~/code/icm-contracts
+
+# Initialize the validator manager
+source l1.env
+make initialize-validator-manager \
+  SUBNET_ID=$SUBNET_ID \
+  CHAIN_ID=$CHAIN_ID \
+  CONVERSION_TX=$CONVERSION_TX \
+  PROXY_ADDRESS=0x... \
+  EVM_CHAIN_ID=99999
+```
+
+This deploys the ValidatorManager implementation, upgrades the genesis proxy, initializes settings, and registers the initial validator set using a Warp message from the P-Chain.
+
 Your L1 is now running.
 
 ---
@@ -367,6 +390,13 @@ Key settings:
 | `make faucet` | Deploy token faucet |
 | `make graph-node` | Deploy The Graph Node |
 | `make erpc` | Deploy eRPC load balancer |
+
+### Validator Manager
+
+| Command | Description |
+|---------|-------------|
+| `make init-validator-manager` | Build the validator manager initialization tool |
+| `make initialize-validator-manager` | Deploy and initialize ValidatorManager contract |
 
 ### Safe Multisig (Experimental)
 

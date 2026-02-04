@@ -18,6 +18,8 @@ node_ids.txt
 
 # Binaries
 tools/create-l1/create-l1
+tools/initialize-validator-manager/initialize-validator-manager
+validator-manager.json
 
 # OS files
 .DS_Store

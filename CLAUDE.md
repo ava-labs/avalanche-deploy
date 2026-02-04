@@ -70,6 +70,11 @@ make graph-node CHAIN_ID=<id> NETWORK_NAME=my-l1
 
 # Deploy eRPC load balancer (caching + failover)
 make erpc CHAIN_ID=<id> EVM_CHAIN_ID=<evm-id>
+
+# Initialize ValidatorManager contract (after L1 creation)
+make initialize-validator-manager \
+  SUBNET_ID=<id> CHAIN_ID=<id> CONVERSION_TX=<tx-hash> \
+  PROXY_ADDRESS=0x... EVM_CHAIN_ID=<evm-id>
 ```
 
 ## Architecture
@@ -92,11 +97,13 @@ make erpc CHAIN_ID=<id> EVM_CHAIN_ID=<evm-id>
 │   │   ├── 06-deploy-faucet.yml     # Token faucet
 │   │   ├── 07-deploy-graph-node.yml # The Graph Node (indexing)
 │   │   ├── 08-deploy-erpc.yml       # eRPC load balancer
+│   │   ├── 09-initialize-validator-manager.yml  # Validator manager init
 │   │   ├── rolling-restart.yml      # Zero-downtime restart
 │   │   ├── upgrade-nodes.yml        # Version upgrades
 │   │   └── health-checks.yml        # Comprehensive health checks
 │   └── roles/          # avalanchego, prometheus, grafana, faucet, blockscout, safe, graph_node, erpc
 ├── tools/create-l1/    # Go CLI for L1 creation (supports --json output)
+├── tools/initialize-validator-manager/  # Go CLI for ValidatorManager contract deployment
 ├── shared/             # Genesis templates, configs, dashboards
 └── scripts/            # status.sh, wait-for-sync.sh
 ```
@@ -125,6 +132,20 @@ Outputs `l1.env` with SUBNET_ID and CHAIN_ID.
 ```
 Returns structured JSON with subnet_id, chain_id, validators, rpc_endpoints for CI/CD integration.
 
+### initialize-validator-manager tool
+Go program in `tools/initialize-validator-manager/` that deploys and initializes ValidatorManager contracts:
+1. Deploy ValidatorManager implementation (PoA, NativeStaking, or ERC20Staking)
+2. Upgrade genesis proxy to point to implementation
+3. Initialize ValidatorManager settings (admin, subnetID, churnPeriod, maxChurn)
+4. Fetch aggregated warp signature from Glacier API (or local sig-agg)
+5. Call initializeValidatorSet with warp message to register validators
+
+Requires: foundry (forge/cast), icm-contracts repository.
+
+```bash
+make initialize-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345
+```
+
 ## Environment Variables
 
 ```bash
@@ -139,6 +160,12 @@ L1_VALIDATOR_BALANCE_AVAX=5
 
 # Validator IPs (alternative to --validators flag)
 VALIDATOR_1_IP, VALIDATOR_2_IP, VALIDATOR_3_IP
+
+# Path to icm-contracts repo (for initialize-validator-manager)
+ICM_CONTRACTS_PATH=~/code/icm-contracts
+
+# Glacier API key (optional, for signature aggregation)
+GLACIER_API_KEY=...
 ```
 
 ## Genesis Configuration
