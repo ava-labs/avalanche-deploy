@@ -1,0 +1,149 @@
+---
+# Rolling Restart Playbook
+#
+# Restarts avalanchego nodes one at a time with health checks between each restart.
+# This ensures zero-downtime during upgrades or configuration changes.
+#
+# Usage:
+#   ansible-playbook playbooks/rolling-restart.yml
+#   ansible-playbook playbooks/rolling-restart.yml -e wait_seconds=60
+#   ansible-playbook playbooks/rolling-restart.yml --limit validators
+#
+# Variables:
+#   wait_seconds: Time to wait after restart before health check (default: 30)
+#   health_retries: Number of health check retries (default: 30)
+#   health_delay: Delay between health check retries in seconds (default: 10)
+
+- name: Rolling Restart - Validators
+  hosts: validators
+  become: true
+  serial: 1  # One node at a time
+  gather_facts: false
+
+  vars:
+    wait_seconds: "{{ restart_wait | default(30) }}"
+    health_retries: "{{ restart_health_retries | default(30) }}"
+    health_delay: "{{ restart_health_delay | default(10) }}"
+
+  tasks:
+    - name: Display restart notice
+      debug:
+        msg: "Starting rolling restart for {{ inventory_hostname }}"
+
+    - name: Restart avalanchego service
+      systemd:
+        name: avalanchego
+        state: restarted
+        daemon_reload: yes
+
+    - name: Wait for service to start
+      pause:
+        seconds: "{{ wait_seconds }}"
+
+    - name: Wait for node to become healthy
+      uri:
+        url: "http://127.0.0.1:9650/ext/health"
+        method: GET
+        return_content: yes
+        status_code: 200
+      register: health_check
+      until: health_check.status == 200
+      retries: "{{ health_retries }}"
+      delay: "{{ health_delay }}"
+
+    - name: Verify P-Chain is bootstrapped
+      uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.isBootstrapped"
+          params:
+            chain: "P"
+        return_content: yes
+      register: p_chain_status
+      until: p_chain_status.json.result.isBootstrapped | default(false)
+      retries: "{{ health_retries }}"
+      delay: "{{ health_delay }}"
+
+    - name: Display health status
+      debug:
+        msg: "{{ inventory_hostname }} is healthy and bootstrapped"
+
+- name: Rolling Restart - RPC Nodes
+  hosts: rpc
+  become: true
+  serial: 1  # One node at a time
+  gather_facts: false
+
+  vars:
+    wait_seconds: "{{ restart_wait | default(30) }}"
+    health_retries: "{{ restart_health_retries | default(30) }}"
+    health_delay: "{{ restart_health_delay | default(10) }}"
+
+  tasks:
+    - name: Display restart notice
+      debug:
+        msg: "Starting rolling restart for {{ inventory_hostname }}"
+
+    - name: Restart avalanchego service
+      systemd:
+        name: avalanchego
+        state: restarted
+        daemon_reload: yes
+
+    - name: Wait for service to start
+      pause:
+        seconds: "{{ wait_seconds }}"
+
+    - name: Wait for node to become healthy
+      uri:
+        url: "http://127.0.0.1:9650/ext/health"
+        method: GET
+        return_content: yes
+        status_code: 200
+      register: health_check
+      until: health_check.status == 200
+      retries: "{{ health_retries }}"
+      delay: "{{ health_delay }}"
+
+    - name: Verify P-Chain is bootstrapped
+      uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.isBootstrapped"
+          params:
+            chain: "P"
+        return_content: yes
+      register: p_chain_status
+      until: p_chain_status.json.result.isBootstrapped | default(false)
+      retries: "{{ health_retries }}"
+      delay: "{{ health_delay }}"
+
+    - name: Display health status
+      debug:
+        msg: "{{ inventory_hostname }} is healthy and bootstrapped"
+
+- name: Rolling Restart Summary
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Display completion message
+      debug:
+        msg: |
+
+          ============================================
+          Rolling Restart Complete
+          ============================================
+
+          All nodes have been restarted and verified healthy.
+
+          Run 'make status' to verify cluster health.
+
+          ============================================

@@ -1,0 +1,113 @@
+---
+# eRPC Role - Deploy eRPC load balancer for EVM RPC endpoints
+#
+# eRPC provides:
+# - Load balancing across multiple RPC nodes
+# - Automatic failover
+# - Response caching
+# - Rate limiting
+#
+# Required variables:
+#   erpc_chain_id: L1 chain ID (blockchain ID from create-l1)
+#   erpc_evm_chain_id: EVM chain ID (from genesis.json)
+#
+# Optional variables:
+#   erpc_port: HTTP port (default: 4000)
+#   erpc_admin_port: Admin/metrics port (default: 4001)
+
+- name: Install Docker dependencies
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+    update_cache: yes
+
+- name: Add Docker GPG key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Add Docker repository
+  apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+
+- name: Install Docker
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+    update_cache: yes
+
+- name: Start Docker service
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Create erpc user
+  user:
+    name: erpc
+    groups: docker
+    shell: /bin/bash
+    create_home: yes
+
+- name: Create erpc directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: erpc
+    group: erpc
+    mode: '0755'
+  loop:
+    - /opt/erpc
+    - /opt/erpc/data
+
+- name: Create eRPC configuration file
+  template:
+    src: erpc.yaml.j2
+    dest: /opt/erpc/erpc.yaml
+    owner: erpc
+    group: erpc
+    mode: '0644'
+  notify: Restart erpc
+
+- name: Create docker-compose file
+  template:
+    src: docker-compose.yml.j2
+    dest: /opt/erpc/docker-compose.yml
+    owner: erpc
+    group: erpc
+    mode: '0644'
+
+- name: Create systemd service
+  template:
+    src: erpc.service.j2
+    dest: /etc/systemd/system/erpc.service
+    mode: '0644'
+  notify: Restart erpc
+
+- name: Enable and start erpc
+  systemd:
+    name: erpc
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: Wait for eRPC to be ready
+  uri:
+    url: "http://127.0.0.1:{{ erpc_admin_port | default(4001) }}/healthcheck"
+    method: GET
+    status_code: 200
+  register: erpc_health
+  until: erpc_health.status == 200
+  retries: 30
+  delay: 5
+  ignore_errors: yes

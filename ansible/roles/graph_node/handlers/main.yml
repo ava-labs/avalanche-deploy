@@ -1,0 +1,6 @@
+---
+- name: Restart graph-node
+  systemd:
+    name: graph-node
+    state: restarted
+    daemon_reload: yes

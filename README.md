@@ -3,12 +3,13 @@
 Deploy production-ready Avalanche L1 blockchains on AWS, GCP, or Azure.
 
 ```bash
-make setup      # install tools (terraform, ansible, jq)
-make infra      # create cloud VMs
-make deploy     # install avalanchego
-make create-l1  # create your L1 blockchain
-make status     # check node health
-make destroy    # tear down (stops billing!)
+make setup           # install tools (terraform, ansible, jq)
+make infra           # create cloud VMs
+make deploy          # install avalanchego
+make create-l1       # create your L1 blockchain
+make status          # check node health
+make upgrade VERSION=1.12.0  # zero-downtime upgrades
+make destroy         # tear down (stops billing!)
 ```
 
 ## What You Get
@@ -27,6 +28,9 @@ rpc_count       = 2   # scale based on traffic
 
 **Optional Add-ons:**
 - **Blockscout** - Block explorer for your L1
+- **Faucet** - Token faucet for developers
+- **The Graph Node** - Subgraph indexing for dApps
+- **eRPC** - RPC load balancer with caching and failover
 - **Safe Multisig** `[EXPERIMENTAL]` - Gnosis Safe infrastructure (see [SAFE.md](SAFE.md))
 
 > **Warning:** Safe Multisig support is experimental and not production-ready. Known issues include transaction indexing delays, Docker container restarts, and HTTPS certificate management. Use at your own risk.
@@ -49,11 +53,14 @@ flowchart TB
         subgraph RPCSG["rpc-sg"]
             RPC[RPC Node<br/>avalanchego<br/>:9650 API]
             Blockscout[Blockscout<br/>:4001 Explorer]
+            Faucet[Faucet<br/>:8000]
+            GraphNode[Graph Node<br/>:8000 GraphQL]
         end
 
         subgraph MonitoringSG["monitoring-sg"]
             Prometheus[Prometheus<br/>:9090]
             Grafana[Grafana<br/>:3000]
+            eRPC[eRPC<br/>:4000 Load Balancer]
         end
     end
 
@@ -65,11 +72,16 @@ flowchart TB
     V1 <-->|P2P :9651| RPC
     V2 <-->|P2P :9651| RPC
 
-    Users -->|RPC :9650| RPC
+    Users -->|Load Balanced :4000| eRPC
     Users -->|Explorer :4001| Blockscout
     Users -->|Dashboard :3000| Grafana
+    Users -->|GraphQL :8000| GraphNode
+    Users -->|Faucet :8000| Faucet
 
+    eRPC -->|load balance| RPC
     Blockscout -.->|queries| RPC
+    GraphNode -.->|indexes| RPC
+    Faucet -.->|sends tx| RPC
 
     V1 -.->|metrics :9650/:9100| Prometheus
     V2 -.->|metrics :9650/:9100| Prometheus
@@ -153,6 +165,9 @@ make create-l1
   --validators=$VALIDATORS \
   --chain-name=mychain \
   --output=l1.env
+
+# For CI/CD, use --json for structured output:
+# ./tools/create-l1/create-l1 --json --validators=$VALIDATORS
 ```
 
 ### 6. Configure Nodes
@@ -167,14 +182,45 @@ Your L1 is now running.
 
 ---
 
-## Optional: Monitoring
+## Operations
+
+### Rolling Restart (Zero Downtime)
+
+Restart nodes one at a time with health checks:
+
+```bash
+make rolling-restart
+```
+
+### Upgrade Avalanchego
+
+Zero-downtime version upgrades (subnet-evm is bundled automatically):
+
+```bash
+make upgrade VERSION=1.12.0
+```
+
+### Health Checks
+
+Comprehensive health checks on all nodes:
+
+```bash
+make health-checks
+make health-checks CHAIN_ID=$CHAIN_ID  # include L1 status
+```
+
+---
+
+## Optional Add-ons
+
+### Monitoring
 
 ```bash
 make monitoring
 # Access: http://<monitoring-ip>:3000 (admin/admin)
 ```
 
-## Optional: Blockscout
+### Blockscout (Block Explorer)
 
 ```bash
 source l1.env
@@ -182,9 +228,46 @@ make deploy-blockscout CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999 CHAIN_NAME=$CHAIN_N
 # Access: http://<rpc-ip>:4001
 ```
 
-The `CHAIN_NAME` parameter sets the network name displayed in Blockscout. If not provided, it defaults to "Avalanche L1".
+### Faucet (Token Distribution)
 
-## Optional: Safe Multisig `[EXPERIMENTAL]`
+Deploy a faucet for developers to request test tokens:
+
+```bash
+source l1.env
+make faucet CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999 FAUCET_KEY=0x...
+# Access: http://<rpc-ip>:8000
+```
+
+> **Note:** The faucet wallet must be funded on your L1.
+
+### The Graph Node (Subgraph Indexing)
+
+Deploy The Graph for indexing blockchain data via GraphQL:
+
+```bash
+source l1.env
+make graph-node CHAIN_ID=$CHAIN_ID NETWORK_NAME=my-l1
+# GraphQL: http://<rpc-ip>:8000/subgraphs/name/<SUBGRAPH>
+# Admin:   http://<rpc-ip>:8020
+```
+
+### eRPC (Load Balancer)
+
+Deploy eRPC for RPC load balancing, caching, and automatic failover:
+
+```bash
+source l1.env
+make erpc CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999
+# RPC: http://<monitoring-ip>:4000 (use this in your dApps)
+```
+
+Features:
+- Load balancing across all RPC nodes
+- Automatic failover with circuit breaker
+- Response caching
+- Prometheus metrics
+
+### Safe Multisig `[EXPERIMENTAL]`
 
 > **Warning:** Safe is experimental and not production-ready.
 
@@ -192,13 +275,28 @@ See [SAFE.md](SAFE.md) for deploying Gnosis Safe infrastructure.
 
 ---
 
-## Cloud Providers
+## Deployment Options
+
+### Cloud VMs (Terraform + Ansible)
 
 | Provider | Config | Command |
 |----------|--------|---------|
 | AWS | `terraform/aws/` | `make infra` (default) |
 | GCP | `terraform/gcp/` | `make infra CLOUD=gcp` |
 | Azure | `terraform/azure/` | `make infra CLOUD=azure` |
+
+### Kubernetes (Helm Charts)
+
+Deploy to existing K8s clusters using Helm charts in `kubernetes/helm/`:
+
+```bash
+cd kubernetes/helm
+helm install validator ./avalanche-validator
+helm install rpc ./avalanche-rpc
+helm install monitoring ./monitoring
+```
+
+See [kubernetes/README.md](kubernetes/README.md) for detailed K8s deployment guide.
 
 ## Cost Estimate
 
@@ -238,22 +336,45 @@ Key settings:
 
 ## Commands Reference
 
+### Infrastructure & Deployment
+
 | Command | Description |
 |---------|-------------|
 | `make setup` | Install terraform, ansible, jq |
 | `make infra` | Create cloud infrastructure |
 | `make deploy` | Install avalanchego on nodes |
-| `make status` | Check node sync status |
 | `make create-l1` | Build the L1 creation tool |
 | `make configure-l1` | Configure nodes for L1 |
-| `make monitoring` | Deploy Prometheus + Grafana |
-| `make deploy-blockscout` | Deploy block explorer |
-| `make safe` | Deploy Safe infrastructure (EXPERIMENTAL) |
-| `make safe-genesis` | Merge Safe contracts into genesis (EXPERIMENTAL) |
-| `make reset-genesis` | Reset genesis.json to clean state |
+| `make destroy` | Tear down infrastructure |
+
+### Operations
+
+| Command | Description |
+|---------|-------------|
+| `make status` | Check node sync status |
+| `make health-checks` | Comprehensive health checks |
+| `make rolling-restart` | Zero-downtime node restart |
+| `make upgrade VERSION=x.y.z` | Upgrade avalanchego version |
 | `make reset-l1` | Wipe L1 chain data for redeployment |
 | `make logs` | View avalanchego logs |
-| `make destroy` | Tear down infrastructure |
+
+### Developer Tools
+
+| Command | Description |
+|---------|-------------|
+| `make monitoring` | Deploy Prometheus + Grafana |
+| `make deploy-blockscout` | Deploy block explorer |
+| `make faucet` | Deploy token faucet |
+| `make graph-node` | Deploy The Graph Node |
+| `make erpc` | Deploy eRPC load balancer |
+
+### Safe Multisig (Experimental)
+
+| Command | Description |
+|---------|-------------|
+| `make safe` | Deploy Safe infrastructure |
+| `make safe-genesis` | Merge Safe contracts into genesis |
+| `make reset-genesis` | Reset genesis.json to clean state |
 
 ---
 
@@ -289,16 +410,29 @@ Supported key formats:
 
 ```
 .
-├── terraform/          # Infrastructure as code
-│   ├── aws/           # AWS config
-│   ├── gcp/           # GCP config
-│   └── azure/         # Azure config
-├── ansible/           # Configuration management
-│   ├── playbooks/     # Deployment phases
-│   └── roles/         # avalanchego, prometheus, grafana, blockscout, safe
-├── tools/create-l1/   # Go tool for P-Chain transactions
-├── shared/            # Genesis templates, dashboards
-└── scripts/           # Helper scripts
+├── terraform/              # Infrastructure as code
+│   ├── aws/               # AWS config
+│   ├── gcp/               # GCP config
+│   └── azure/             # Azure config
+├── ansible/               # Configuration management
+│   ├── playbooks/         # Deployment & operations
+│   │   ├── 01-deploy-nodes.yml
+│   │   ├── 02-configure-l1.yml
+│   │   ├── 03-setup-monitoring.yml
+│   │   ├── 04-deploy-blockscout.yml
+│   │   ├── 05-deploy-safe.yml
+│   │   ├── 06-deploy-faucet.yml
+│   │   ├── 07-deploy-graph-node.yml
+│   │   ├── 08-deploy-erpc.yml
+│   │   ├── rolling-restart.yml
+│   │   ├── upgrade-nodes.yml
+│   │   └── health-checks.yml
+│   └── roles/             # avalanchego, prometheus, grafana,
+│                          # blockscout, safe, faucet, graph_node, erpc
+├── kubernetes/            # Helm charts for K8s deployment
+├── tools/create-l1/       # Go tool for P-Chain transactions (--json output)
+├── shared/                # Genesis templates, dashboards
+└── scripts/               # Helper scripts
 ```
 
 ---

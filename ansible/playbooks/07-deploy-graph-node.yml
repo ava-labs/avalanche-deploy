@@ -1,0 +1,112 @@
+---
+# Deploy Graph Node Playbook
+#
+# Deploys The Graph Node for blockchain indexing on your L1 chain.
+# Enables developers to create and query subgraphs via GraphQL.
+#
+# The Graph Node stack includes:
+# - PostgreSQL: Stores indexed data
+# - IPFS: Content-addressed storage for subgraph manifests
+# - Graph Node: Indexes blockchain data and serves GraphQL queries
+#
+# Usage:
+#   ansible-playbook playbooks/07-deploy-graph-node.yml \
+#     -e graph_chain_id=xxx
+#
+# Or with l1.env loaded:
+#   source ../l1.env
+#   ansible-playbook playbooks/07-deploy-graph-node.yml \
+#     -e graph_chain_id=$CHAIN_ID
+#
+# Required variables:
+#   graph_chain_id: L1 chain ID (from create-l1 output)
+#
+# Optional variables:
+#   graph_network_name: Network name for subgraph manifests (default: avalanche-l1)
+#   graph_node_port: GraphQL HTTP port (default: 8000)
+#   graph_postgres_password: PostgreSQL password (auto-generated if not set)
+
+- name: Validate required variables
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check required variables
+      fail:
+        msg: "Missing required variable: {{ item }}"
+      when: vars[item] is not defined or vars[item] == ''
+      loop:
+        - graph_chain_id
+
+- name: Deploy Graph Node
+  hosts: rpc[0]  # Deploy to first RPC node
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Wait for system to become reachable
+      wait_for_connection:
+        timeout: 300
+
+  roles:
+    - role: graph_node
+      vars:
+        graph_chain_id: "{{ hostvars['localhost']['graph_chain_id'] }}"
+        graph_network_name: "{{ hostvars['localhost']['graph_network_name'] | default('avalanche-l1') }}"
+        graph_rpc_host: "127.0.0.1"
+
+- name: Display Graph Node Information
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Get RPC node IP
+      set_fact:
+        graph_host: "{{ hostvars[groups['rpc'][0]]['ansible_host'] }}"
+
+    - name: Show Graph Node URLs
+      debug:
+        msg: |
+
+          ============================================
+          Graph Node Deployed Successfully
+          ============================================
+
+          GraphQL Endpoint:
+            http://{{ graph_host }}:{{ graph_node_port | default(8000) }}/subgraphs/name/<SUBGRAPH_NAME>
+
+          WebSocket Endpoint:
+            ws://{{ graph_host }}:{{ graph_node_ws_port | default(8001) }}/subgraphs/name/<SUBGRAPH_NAME>
+
+          Admin Endpoint (for deploying subgraphs):
+            http://{{ graph_host }}:{{ graph_node_admin_port | default(8020) }}
+
+          Index Status (check indexing progress):
+            http://{{ graph_host }}:{{ graph_node_index_port | default(8030) }}/graphql
+
+          IPFS API:
+            http://{{ graph_host }}:{{ graph_ipfs_port | default(5001) }}
+
+          ============================================
+          Deploying a Subgraph
+          ============================================
+
+          1. Create your subgraph project:
+             graph init --product hosted-service <SUBGRAPH_NAME>
+
+          2. Update subgraph.yaml with your L1 network:
+             network: {{ graph_network_name | default('avalanche-l1') }}
+             source:
+               address: "<CONTRACT_ADDRESS>"
+               startBlock: 0
+
+          3. Generate types and build:
+             graph codegen && graph build
+
+          4. Create the subgraph on the node:
+             graph create --node http://{{ graph_host }}:{{ graph_node_admin_port | default(8020) }} <SUBGRAPH_NAME>
+
+          5. Deploy the subgraph:
+             graph deploy --node http://{{ graph_host }}:{{ graph_node_admin_port | default(8020) }} \
+               --ipfs http://{{ graph_host }}:{{ graph_ipfs_port | default(5001) }} \
+               <SUBGRAPH_NAME>
+
+          ============================================

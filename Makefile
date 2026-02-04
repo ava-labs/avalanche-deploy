@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs
+.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks faucet upgrade graph-node erpc
 
 # Default cloud provider
 CLOUD ?= aws
@@ -60,6 +60,20 @@ reset-l1:
 monitoring:
 	@cd ansible && ansible-playbook playbooks/03-setup-monitoring.yml
 
+rolling-restart:
+	@echo "Performing rolling restart of all nodes..."
+	@cd ansible && ansible-playbook playbooks/rolling-restart.yml
+
+health-checks:
+	@cd ansible && ansible-playbook playbooks/health-checks.yml $(if $(CHAIN_ID),-e chain_id=$(CHAIN_ID),)
+
+upgrade:
+	@if [ -z "$(VERSION)" ]; then echo "Usage: make upgrade VERSION=1.12.0"; exit 1; fi
+	@echo "Upgrading nodes to avalanchego $(VERSION)..."
+	@echo "NOTE: subnet-evm is bundled with avalanchego and will be updated automatically."
+	@cd ansible && ansible-playbook playbooks/upgrade-nodes.yml \
+		-e "avalanchego_version=$(VERSION)"
+
 #
 # Status
 #
@@ -90,6 +104,37 @@ deploy-blockscout:
 		-e "chain_id=$(CHAIN_ID)" \
 		-e "evm_chain_id=$(EVM_CHAIN_ID)" \
 		-e "l1_name=$(or $(CHAIN_NAME),Avalanche L1)"
+
+#
+# Faucet
+#
+faucet:
+	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make faucet CHAIN_ID=xxx EVM_CHAIN_ID=yyy FAUCET_KEY=0x..."; exit 1; fi
+	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make faucet CHAIN_ID=xxx EVM_CHAIN_ID=yyy FAUCET_KEY=0x..."; exit 1; fi
+	@if [ -z "$(FAUCET_KEY)" ]; then echo "Usage: make faucet CHAIN_ID=xxx EVM_CHAIN_ID=yyy FAUCET_KEY=0x..."; exit 1; fi
+	@echo "Deploying faucet..."
+	@cd ansible && ansible-playbook playbooks/06-deploy-faucet.yml \
+		-e "faucet_chain_id=$(CHAIN_ID)" \
+		-e "faucet_evm_chain_id=$(EVM_CHAIN_ID)" \
+		-e "faucet_private_key=$(FAUCET_KEY)"
+
+#
+# The Graph Node
+#
+graph-node:
+	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make graph-node CHAIN_ID=xxx [NETWORK_NAME=my-l1]"; exit 1; fi
+	@echo "Deploying The Graph Node..."
+	@cd ansible && ansible-playbook playbooks/07-deploy-graph-node.yml \
+		-e "graph_chain_id=$(CHAIN_ID)" \
+		$(if $(NETWORK_NAME),-e "graph_network_name=$(NETWORK_NAME)",)
+
+erpc:
+	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make erpc CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
+	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make erpc CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
+	@echo "Deploying eRPC load balancer..."
+	@cd ansible && ansible-playbook playbooks/08-deploy-erpc.yml \
+		-e "erpc_chain_id=$(CHAIN_ID)" \
+		-e "erpc_evm_chain_id=$(EVM_CHAIN_ID)"
 
 #
 # Safe Multisig
@@ -140,8 +185,17 @@ help:
 	@echo "  make create-l1    Build the create-l1 tool"
 	@echo "  make destroy      Tear down infrastructure (stops billing!)"
 	@echo ""
-	@echo "Block Explorer:"
-	@echo "  make deploy-blockscout  Deploy Blockscout (uses CHAIN_NAME from l1.env)"
+	@echo "Operations:"
+	@echo "  make rolling-restart   Restart nodes one-at-a-time (zero downtime)"
+	@echo "  make upgrade           Upgrade avalanchego (subnet-evm bundled)"
+	@echo "  make health-checks     Run comprehensive health checks on all nodes"
+	@echo "  make monitoring        Deploy Prometheus + Grafana monitoring"
+	@echo ""
+	@echo "Developer Tools:"
+	@echo "  make faucet            Deploy token faucet for L1"
+	@echo "  make deploy-blockscout Deploy Blockscout block explorer"
+	@echo "  make graph-node        Deploy The Graph Node for indexing"
+	@echo "  make erpc              Deploy eRPC load balancer"
 	@echo ""
 	@echo "Safe Multisig (EXPERIMENTAL):"
 	@echo "  make safe-genesis Merge Safe contracts into genesis.json (EXPERIMENTAL)"
@@ -152,7 +206,13 @@ help:
 	@echo "  CLOUD=aws|gcp|azure  (default: aws)"
 	@echo "  NETWORK=fuji|mainnet (default: fuji)"
 	@echo ""
-	@echo "Example:"
+	@echo "Examples:"
 	@echo "  make infra CLOUD=gcp"
 	@echo "  make deploy NETWORK=mainnet"
+	@echo "  make upgrade VERSION=1.12.0"
+	@echo "  make rolling-restart"
+	@echo "  make health-checks CHAIN_ID=xxx"
+	@echo "  make faucet CHAIN_ID=xxx EVM_CHAIN_ID=99999 FAUCET_KEY=0x..."
+	@echo "  make graph-node CHAIN_ID=xxx NETWORK_NAME=my-l1"
+	@echo "  make erpc CHAIN_ID=xxx EVM_CHAIN_ID=99999"
 	@echo "  make safe CHAIN_ID=xxx EVM_CHAIN_ID=99999"

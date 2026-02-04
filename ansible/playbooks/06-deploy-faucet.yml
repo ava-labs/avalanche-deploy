@@ -1,0 +1,99 @@
+---
+# Deploy Faucet Playbook
+#
+# Deploys the Avalanche Faucet for your L1 chain.
+# The faucet allows developers to request test tokens.
+#
+# Usage:
+#   ansible-playbook playbooks/06-deploy-faucet.yml \
+#     -e faucet_chain_id=xxx \
+#     -e faucet_evm_chain_id=12345 \
+#     -e faucet_private_key=0x...
+#
+# Or with l1.env loaded:
+#   source ../l1.env
+#   ansible-playbook playbooks/06-deploy-faucet.yml \
+#     -e faucet_chain_id=$CHAIN_ID \
+#     -e faucet_evm_chain_id=12345 \
+#     -e faucet_private_key=0x...
+#
+# Required variables:
+#   faucet_chain_id: L1 chain ID (from create-l1 output)
+#   faucet_evm_chain_id: EVM chain ID (from genesis.json config.chainId)
+#   faucet_private_key: Private key for faucet wallet (must be funded!)
+#
+# Optional variables:
+#   faucet_amount: Tokens per request (default: 1)
+#   faucet_rate_limit: Requests per hour per address (default: 1)
+
+- name: Validate required variables
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check required variables
+      fail:
+        msg: "Missing required variable: {{ item }}"
+      when: vars[item] is not defined or vars[item] == ''
+      loop:
+        - faucet_chain_id
+        - faucet_evm_chain_id
+        - faucet_private_key
+
+- name: Deploy Faucet
+  hosts: rpc[0]  # Deploy to first RPC node
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Wait for system to become reachable
+      wait_for_connection:
+        timeout: 300
+
+  roles:
+    - role: faucet
+      vars:
+        faucet_chain_id: "{{ hostvars['localhost']['faucet_chain_id'] }}"
+        faucet_evm_chain_id: "{{ hostvars['localhost']['faucet_evm_chain_id'] }}"
+        faucet_private_key: "{{ hostvars['localhost']['faucet_private_key'] }}"
+        faucet_rpc_host: "127.0.0.1"
+
+  post_tasks:
+    - name: Wait for faucet to start
+      uri:
+        url: "http://127.0.0.1:{{ faucet_port | default(8000) }}/health"
+        method: GET
+        status_code: 200
+      register: faucet_health
+      until: faucet_health.status == 200
+      retries: 30
+      delay: 5
+      ignore_errors: yes
+
+- name: Display Faucet Information
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Get RPC node IP
+      set_fact:
+        faucet_host: "{{ hostvars[groups['rpc'][0]]['ansible_host'] }}"
+
+    - name: Show faucet URL
+      debug:
+        msg: |
+
+          ============================================
+          Faucet Deployed Successfully
+          ============================================
+
+          Faucet URL: http://{{ faucet_host }}:{{ faucet_port | default(8000) }}
+
+          Configuration:
+            Chain ID (L1):     {{ faucet_chain_id }}
+            Chain ID (EVM):    {{ faucet_evm_chain_id }}
+            Drop Amount:       {{ faucet_amount | default(1) }} tokens
+            Rate Limit:        {{ faucet_rate_limit | default(1) }} request(s)/hour
+
+          NOTE: Ensure the faucet wallet is funded!
+                The faucet will not work until the wallet has tokens.
+
+          ============================================

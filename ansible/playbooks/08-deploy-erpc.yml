@@ -1,0 +1,127 @@
+---
+# Deploy eRPC Playbook
+#
+# Deploys eRPC load balancer for your L1 chain RPC endpoints.
+# Provides load balancing, automatic failover, caching, and rate limiting.
+#
+# Usage:
+#   ansible-playbook playbooks/08-deploy-erpc.yml \
+#     -e erpc_chain_id=xxx \
+#     -e erpc_evm_chain_id=12345
+#
+# Or with l1.env loaded:
+#   source ../l1.env
+#   ansible-playbook playbooks/08-deploy-erpc.yml \
+#     -e erpc_chain_id=$CHAIN_ID \
+#     -e erpc_evm_chain_id=12345
+#
+# Required variables:
+#   erpc_chain_id: L1 chain ID (from create-l1 output)
+#   erpc_evm_chain_id: EVM chain ID (from genesis.json config.chainId)
+#
+# Optional variables:
+#   erpc_port: HTTP port (default: 4000)
+#   erpc_rate_limit_enabled: Enable rate limiting (default: false)
+
+- name: Validate required variables
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check required variables
+      fail:
+        msg: "Missing required variable: {{ item }}"
+      when: vars[item] is not defined or vars[item] == ''
+      loop:
+        - erpc_chain_id
+        - erpc_evm_chain_id
+
+- name: Build upstream list from RPC nodes
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Build upstream endpoints
+      set_fact:
+        erpc_upstreams: "{{ erpc_upstreams | default([]) + [{'id': 'rpc-' ~ (idx + 1), 'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ erpc_chain_id ~ '/rpc'}] }}"
+      loop: "{{ groups['rpc'] }}"
+      loop_control:
+        index_var: idx
+
+    - name: Display upstream configuration
+      debug:
+        msg: "Configured {{ erpc_upstreams | length }} upstream RPC endpoints"
+
+- name: Deploy eRPC
+  hosts: monitoring[0]  # Deploy to monitoring server (or first RPC if no monitoring)
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Wait for system to become reachable
+      wait_for_connection:
+        timeout: 300
+
+  roles:
+    - role: erpc
+      vars:
+        erpc_chain_id: "{{ hostvars['localhost']['erpc_chain_id'] }}"
+        erpc_evm_chain_id: "{{ hostvars['localhost']['erpc_evm_chain_id'] }}"
+        erpc_upstreams: "{{ hostvars['localhost']['erpc_upstreams'] }}"
+
+- name: Display eRPC Information
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Get eRPC host
+      set_fact:
+        erpc_host: "{{ hostvars[groups['monitoring'][0]]['ansible_host'] | default(hostvars[groups['rpc'][0]]['ansible_host']) }}"
+
+    - name: Show eRPC information
+      debug:
+        msg: |
+
+          ============================================
+          eRPC Load Balancer Deployed Successfully
+          ============================================
+
+          RPC Endpoint (use this instead of direct RPC):
+            http://{{ erpc_host }}:{{ erpc_port | default(4000) }}
+
+          Health Check:
+            http://{{ erpc_host }}:{{ erpc_admin_port | default(4001) }}/healthcheck
+
+          Metrics (Prometheus):
+            http://{{ erpc_host }}:{{ erpc_metrics_port | default(9090) }}/metrics
+
+          ============================================
+          Load Balancing Configuration
+          ============================================
+
+          Upstream RPC Nodes: {{ erpc_upstreams | length }}
+          {% for upstream in erpc_upstreams %}
+            - {{ upstream.id }}: {{ upstream.endpoint }}
+          {% endfor %}
+
+          Features enabled:
+            ✓ Automatic failover
+            ✓ Response caching ({{ erpc_cache_max_items | default(100000) }} items)
+            ✓ Retry with exponential backoff
+            ✓ Hedged requests (parallel after {{ erpc_hedge_delay | default('1s') }})
+            ✓ Circuit breaker protection
+            {% if erpc_rate_limit_enabled | default(false) %}✓ Rate limiting ({{ erpc_rate_limit_max | default(1000) }}/{{ erpc_rate_limit_period | default('1s') }}){% else %}✗ Rate limiting (disabled){% endif %}
+
+          ============================================
+          Usage Example
+          ============================================
+
+          # Instead of connecting directly to RPC nodes:
+          # curl http://rpc-node:9650/ext/bc/{{ erpc_chain_id }}/rpc
+
+          # Connect through eRPC for load balancing:
+          curl -X POST http://{{ erpc_host }}:{{ erpc_port | default(4000) }} \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+
+          # In your dApp, use:
+          # RPC_URL=http://{{ erpc_host }}:{{ erpc_port | default(4000) }}
+
+          ============================================

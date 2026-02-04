@@ -1,0 +1,14 @@
+---
+# Faucet defaults
+
+# Port to expose faucet web interface
+faucet_port: 8000
+
+# Amount of tokens to dispense per request (in native token units)
+faucet_amount: 1
+
+# Rate limit: requests allowed per hour per address
+faucet_rate_limit: 1
+
+# RPC host (defaults to the node's ansible_host)
+# faucet_rpc_host: localhost

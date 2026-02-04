@@ -56,7 +56,36 @@ var (
 	sigAggPort             uint
 	startSigAgg            bool
 	genesisProxyAddress    string
+	jsonOutput             bool
 )
+
+// L1Output represents the JSON output structure for scripting
+type L1Output struct {
+	SubnetID               string            `json:"subnet_id"`
+	ChainID                string            `json:"chain_id"`
+	ChainName              string            `json:"chain_name"`
+	Network                string            `json:"network"`
+	Validators             []ValidatorOutput `json:"validators"`
+	RPCEndpoints           []string          `json:"rpc_endpoints"`
+	ValidatorManager       *VMOutput         `json:"validator_manager,omitempty"`
+	ConversionTxID         string            `json:"conversion_tx_id,omitempty"`
+	OutputFile             string            `json:"output_file"`
+	CreatedAt              string            `json:"created_at"`
+}
+
+// ValidatorOutput represents a validator in the JSON output
+type ValidatorOutput struct {
+	NodeID string `json:"node_id"`
+	IP     string `json:"ip"`
+	Weight uint64 `json:"weight"`
+}
+
+// VMOutput represents validator manager contract addresses
+type VMOutput struct {
+	Implementation string `json:"implementation,omitempty"`
+	Proxy          string `json:"proxy,omitempty"`
+	PoAManager     string `json:"poa_manager,omitempty"`
+}
 
 func main() {
 	flag.StringVar(&networkName, "network", "fuji", "Network: fuji or mainnet")
@@ -77,6 +106,7 @@ func main() {
 	flag.UintVar(&sigAggPort, "sig-agg-port", 8080, "Port for signature-aggregator when starting it")
 	flag.BoolVar(&startSigAgg, "start-sig-agg", false, "Start a local signature-aggregator process")
 	flag.StringVar(&genesisProxyAddress, "genesis-proxy-address", "", "Use existing proxy address from genesis (e.g., 0xfacade0000000000000000000000000000000000)")
+	flag.BoolVar(&jsonOutput, "json", false, "Output results as JSON (for scripting)")
 	flag.Parse()
 
 	if err := run(); err != nil {
@@ -523,12 +553,52 @@ func run() error {
 	}
 
 	// Verify chain is accessible
-	for i, ip := range ips {
-		rpcURL := fmt.Sprintf("http://%s:9650/ext/bc/%s/rpc", ip, chainID)
-		fmt.Printf("  Checking RPC [%d]: %s\n", i+1, rpcURL)
+	if !jsonOutput {
+		for i, ip := range ips {
+			rpcURL := fmt.Sprintf("http://%s:9650/ext/bc/%s/rpc", ip, chainID)
+			fmt.Printf("  Checking RPC [%d]: %s\n", i+1, rpcURL)
+		}
 	}
 
-	// Write output
+	// Build RPC endpoints list
+	rpcEndpoints := make([]string, len(ips))
+	for i, ip := range ips {
+		rpcEndpoints[i] = fmt.Sprintf("http://%s:9650/ext/bc/%s/rpc", ip, chainID)
+	}
+
+	// Build validators output
+	validatorOutputs := make([]ValidatorOutput, len(nodeIDs))
+	for i, nodeID := range nodeIDs {
+		validatorOutputs[i] = ValidatorOutput{
+			NodeID: nodeID.String(),
+			IP:     ips[i],
+			Weight: weights[i],
+		}
+	}
+
+	// Build JSON output structure
+	output := L1Output{
+		SubnetID:       subnetID.String(),
+		ChainID:        chainID.String(),
+		ChainName:      chainName,
+		Network:        networkName,
+		Validators:     validatorOutputs,
+		RPCEndpoints:   rpcEndpoints,
+		ConversionTxID: conversionTxID.String(),
+		OutputFile:     outputFile,
+		CreatedAt:      time.Now().Format(time.RFC3339),
+	}
+
+	// Add validator manager info if deployed
+	if vmDeployment != nil {
+		output.ValidatorManager = &VMOutput{
+			Implementation: vmDeployment.ValidatorManagerImpl,
+			Proxy:          vmDeployment.ValidatorManagerProxy,
+			PoAManager:     vmDeployment.PoAManager,
+		}
+	}
+
+	// Write output file (always write the .env file)
 	var vmSection string
 	if vmDeployment != nil {
 		vmSection = fmt.Sprintf(`
@@ -568,9 +638,19 @@ NETWORK=%s
 	if err := os.WriteFile(outputFile, []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write output file: %w", err)
 	}
-	fmt.Printf("\nConfiguration written to: %s\n", outputFile)
 
-	// Print summary
+	// Output JSON if requested
+	if jsonOutput {
+		jsonBytes, err := json.MarshalIndent(output, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON output: %w", err)
+		}
+		fmt.Println(string(jsonBytes))
+		return nil
+	}
+
+	// Print human-readable summary
+	fmt.Printf("\nConfiguration written to: %s\n", outputFile)
 	fmt.Println()
 	fmt.Println("=== L1 Created Successfully ===")
 	fmt.Println()

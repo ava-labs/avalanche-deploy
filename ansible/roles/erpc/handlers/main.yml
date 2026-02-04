@@ -1,0 +1,6 @@
+---
+- name: Restart erpc
+  systemd:
+    name: erpc
+    state: restarted
+    daemon_reload: yes

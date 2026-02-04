@@ -1,0 +1,31 @@
+---
+# Graph Node defaults
+
+# Graph Node version (Docker image tag)
+graph_node_version: latest
+
+# Network name shown in Graph Node logs and subgraph manifests
+graph_network_name: avalanche-l1
+
+# GraphQL HTTP port
+graph_node_port: 8000
+
+# GraphQL WebSocket port
+graph_node_ws_port: 8001
+
+# Admin port (for deploying subgraphs)
+graph_node_admin_port: 8020
+
+# Index status port (for checking indexing status)
+graph_node_index_port: 8030
+
+# IPFS API port
+graph_ipfs_port: 5001
+
+# PostgreSQL configuration
+graph_postgres_user: graph
+graph_postgres_db: graph
+# graph_postgres_password: auto-generated if not set
+
+# RPC host (defaults to localhost, assuming Graph Node runs on RPC node)
+# graph_rpc_host: 127.0.0.1

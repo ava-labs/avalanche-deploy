@@ -1,0 +1,118 @@
+---
+# Graph Node Role - Deploy The Graph Node for blockchain indexing
+#
+# This role deploys The Graph Node stack:
+# - PostgreSQL (data storage)
+# - IPFS (content addressing)
+# - Graph Node (indexing engine)
+#
+# Required variables:
+#   graph_chain_id: L1 chain ID (blockchain ID from create-l1)
+#   graph_evm_chain_id: EVM chain ID (from genesis.json)
+#
+# Optional variables:
+#   graph_node_port: GraphQL HTTP port (default: 8000)
+#   graph_node_ws_port: GraphQL WebSocket port (default: 8001)
+#   graph_node_admin_port: Admin port (default: 8020)
+#   graph_node_index_port: Index status port (default: 8030)
+
+- name: Install Docker dependencies
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+    update_cache: yes
+
+- name: Add Docker GPG key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Add Docker repository
+  apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+
+- name: Install Docker
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+    update_cache: yes
+
+- name: Start Docker service
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Create graph user
+  user:
+    name: graph
+    groups: docker
+    shell: /bin/bash
+    create_home: yes
+
+- name: Create graph directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: graph
+    group: graph
+    mode: '0755'
+  loop:
+    - /opt/graph-node
+    - /opt/graph-node/data
+    - /opt/graph-node/data/postgres
+    - /opt/graph-node/data/ipfs
+
+- name: Create docker-compose file
+  template:
+    src: docker-compose.yml.j2
+    dest: /opt/graph-node/docker-compose.yml
+    owner: graph
+    group: graph
+    mode: '0644'
+
+- name: Create environment file
+  template:
+    src: graph-node.env.j2
+    dest: /opt/graph-node/.env
+    owner: graph
+    group: graph
+    mode: '0600'
+
+- name: Create systemd service
+  template:
+    src: graph-node.service.j2
+    dest: /etc/systemd/system/graph-node.service
+    mode: '0644'
+  notify: Restart graph-node
+
+- name: Enable and start graph-node
+  systemd:
+    name: graph-node
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: Wait for Graph Node to be ready
+  uri:
+    url: "http://127.0.0.1:{{ graph_node_index_port | default(8030) }}/graphql"
+    method: POST
+    body_format: json
+    body:
+      query: "{ indexingStatuses { subgraph } }"
+    status_code: 200
+  register: graph_health
+  until: graph_health.status == 200
+  retries: 30
+  delay: 10
+  ignore_errors: yes

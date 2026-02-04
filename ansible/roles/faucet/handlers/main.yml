@@ -1,0 +1,6 @@
+---
+- name: Restart faucet
+  systemd:
+    name: faucet
+    state: restarted
+    daemon_reload: yes

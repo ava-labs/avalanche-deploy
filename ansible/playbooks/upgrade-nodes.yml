@@ -1,0 +1,322 @@
+---
+# Upgrade Nodes Playbook
+#
+# Upgrades avalanchego to a new version across all nodes with zero downtime.
+# Uses rolling restart to upgrade one node at a time.
+#
+# NOTE: As of avalanchego v1.12.0+, subnet-evm is bundled with avalanchego.
+#       The plugin is automatically installed from the avalanchego release tarball.
+#       No separate subnet-evm download is needed.
+#
+# Usage:
+#   ansible-playbook playbooks/upgrade-nodes.yml -e avalanchego_version=1.12.0
+#
+# Required variables:
+#   avalanchego_version: Target avalanchego version (e.g., 1.12.0)
+
+- name: Validate upgrade parameters
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check required version
+      fail:
+        msg: "Missing required variable: avalanchego_version. Usage: ansible-playbook playbooks/upgrade-nodes.yml -e avalanchego_version=1.12.0"
+      when: avalanchego_version is not defined
+
+    - name: Display upgrade plan
+      debug:
+        msg: |
+
+          ============================================
+          Avalanche Node Upgrade Plan
+          ============================================
+
+          Target avalanchego version: {{ avalanchego_version }}
+
+          NOTE: subnet-evm is bundled with avalanchego and will be
+                automatically updated from the release tarball.
+
+          This will upgrade nodes one at a time using rolling restart.
+          Each node will be verified healthy before proceeding to the next.
+
+          ============================================
+
+- name: Upgrade Validators (Rolling)
+  hosts: validators
+  become: true
+  serial: 1
+  gather_facts: true
+
+  vars:
+    wait_seconds: 30
+    health_retries: 60
+    health_delay: 10
+    plugin_dir: /opt/avalanche/avalanchego/plugins
+
+  tasks:
+    - name: Display upgrade notice
+      debug:
+        msg: "Upgrading {{ inventory_hostname }} to avalanchego {{ avalanchego_version }}"
+
+    - name: Stop avalanchego service
+      systemd:
+        name: avalanchego
+        state: stopped
+
+    - name: Download new avalanchego version
+      get_url:
+        url: "https://github.com/ava-labs/avalanchego/releases/download/v{{ avalanchego_version }}/avalanchego-linux-amd64-v{{ avalanchego_version }}.tar.gz"
+        dest: /tmp/avalanchego.tar.gz
+        mode: '0644'
+        force: yes
+
+    - name: Create extraction directory
+      file:
+        path: /tmp/avalanchego-extract
+        state: directory
+        mode: '0755'
+
+    - name: Extract avalanchego
+      unarchive:
+        src: /tmp/avalanchego.tar.gz
+        dest: /tmp/avalanchego-extract
+        remote_src: yes
+
+    - name: Install avalanchego binary
+      copy:
+        src: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/avalanchego"
+        dest: /opt/avalanche/avalanchego/avalanchego
+        mode: '0755'
+        remote_src: yes
+        backup: yes
+
+    - name: Check if bundled subnet-evm exists in release
+      stat:
+        path: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
+      register: bundled_subnet_evm
+
+    - name: Install bundled subnet-evm plugin
+      copy:
+        src: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
+        dest: "{{ plugin_dir }}/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
+        mode: '0755'
+        remote_src: yes
+        backup: yes
+      when: bundled_subnet_evm.stat.exists
+
+    - name: Warn if subnet-evm not bundled (older release)
+      debug:
+        msg: "WARNING: subnet-evm not found in release tarball. This may be an older avalanchego version. Keeping existing subnet-evm plugin."
+      when: not bundled_subnet_evm.stat.exists
+
+    - name: Clean up temp files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/avalanchego.tar.gz
+        - /tmp/avalanchego-extract
+
+    - name: Start avalanchego service
+      systemd:
+        name: avalanchego
+        state: started
+        daemon_reload: yes
+
+    - name: Wait for service to start
+      pause:
+        seconds: "{{ wait_seconds }}"
+
+    - name: Wait for node to become healthy
+      uri:
+        url: "http://127.0.0.1:9650/ext/health"
+        method: GET
+        return_content: yes
+        status_code: 200
+      register: health_check
+      until: health_check.status == 200
+      retries: "{{ health_retries }}"
+      delay: "{{ health_delay }}"
+
+    - name: Verify P-Chain is bootstrapped
+      uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.isBootstrapped"
+          params:
+            chain: "P"
+        return_content: yes
+      register: p_chain_status
+      until: p_chain_status.json.result.isBootstrapped | default(false)
+      retries: "{{ health_retries }}"
+      delay: "{{ health_delay }}"
+
+    - name: Verify version upgraded
+      uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.getNodeVersion"
+        return_content: yes
+      register: version_check
+
+    - name: Display upgrade status
+      debug:
+        msg: "{{ inventory_hostname }} upgraded successfully - Version: {{ version_check.json.result.version }}"
+
+- name: Upgrade RPC Nodes (Rolling)
+  hosts: rpc
+  become: true
+  serial: 1
+  gather_facts: true
+
+  vars:
+    wait_seconds: 30
+    health_retries: 60
+    health_delay: 10
+    plugin_dir: /opt/avalanche/avalanchego/plugins
+
+  tasks:
+    - name: Display upgrade notice
+      debug:
+        msg: "Upgrading {{ inventory_hostname }} to avalanchego {{ avalanchego_version }}"
+
+    - name: Stop avalanchego service
+      systemd:
+        name: avalanchego
+        state: stopped
+
+    - name: Download new avalanchego version
+      get_url:
+        url: "https://github.com/ava-labs/avalanchego/releases/download/v{{ avalanchego_version }}/avalanchego-linux-amd64-v{{ avalanchego_version }}.tar.gz"
+        dest: /tmp/avalanchego.tar.gz
+        mode: '0644'
+        force: yes
+
+    - name: Create extraction directory
+      file:
+        path: /tmp/avalanchego-extract
+        state: directory
+        mode: '0755'
+
+    - name: Extract avalanchego
+      unarchive:
+        src: /tmp/avalanchego.tar.gz
+        dest: /tmp/avalanchego-extract
+        remote_src: yes
+
+    - name: Install avalanchego binary
+      copy:
+        src: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/avalanchego"
+        dest: /opt/avalanche/avalanchego/avalanchego
+        mode: '0755'
+        remote_src: yes
+        backup: yes
+
+    - name: Check if bundled subnet-evm exists in release
+      stat:
+        path: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
+      register: bundled_subnet_evm
+
+    - name: Install bundled subnet-evm plugin
+      copy:
+        src: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
+        dest: "{{ plugin_dir }}/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
+        mode: '0755'
+        remote_src: yes
+        backup: yes
+      when: bundled_subnet_evm.stat.exists
+
+    - name: Warn if subnet-evm not bundled (older release)
+      debug:
+        msg: "WARNING: subnet-evm not found in release tarball. This may be an older avalanchego version. Keeping existing subnet-evm plugin."
+      when: not bundled_subnet_evm.stat.exists
+
+    - name: Clean up temp files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/avalanchego.tar.gz
+        - /tmp/avalanchego-extract
+
+    - name: Start avalanchego service
+      systemd:
+        name: avalanchego
+        state: started
+        daemon_reload: yes
+
+    - name: Wait for service to start
+      pause:
+        seconds: "{{ wait_seconds }}"
+
+    - name: Wait for node to become healthy
+      uri:
+        url: "http://127.0.0.1:9650/ext/health"
+        method: GET
+        return_content: yes
+        status_code: 200
+      register: health_check
+      until: health_check.status == 200
+      retries: "{{ health_retries }}"
+      delay: "{{ health_delay }}"
+
+    - name: Verify P-Chain is bootstrapped
+      uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.isBootstrapped"
+          params:
+            chain: "P"
+        return_content: yes
+      register: p_chain_status
+      until: p_chain_status.json.result.isBootstrapped | default(false)
+      retries: "{{ health_retries }}"
+      delay: "{{ health_delay }}"
+
+    - name: Verify version upgraded
+      uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.getNodeVersion"
+        return_content: yes
+      register: version_check
+
+    - name: Display upgrade status
+      debug:
+        msg: "{{ inventory_hostname }} upgraded successfully - Version: {{ version_check.json.result.version }}"
+
+- name: Upgrade Summary
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Display completion message
+      debug:
+        msg: |
+
+          ============================================
+          Upgrade Complete
+          ============================================
+
+          All nodes have been upgraded to avalanchego {{ avalanchego_version }}
+
+          subnet-evm was automatically updated from the bundled release.
+
+          Run 'make health-checks' to verify cluster health.
+
+          ============================================

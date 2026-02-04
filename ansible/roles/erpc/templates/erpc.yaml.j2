@@ -1,0 +1,72 @@
+# eRPC Configuration
+# https://docs.erpc.cloud/config/example
+
+logLevel: info
+
+server:
+  httpHost: 0.0.0.0
+  httpPort: {{ erpc_port | default(4000) }}
+  adminHost: 0.0.0.0
+  adminPort: {{ erpc_admin_port | default(4001) }}
+
+metrics:
+  enabled: true
+  host: 0.0.0.0
+  port: {{ erpc_metrics_port | default(9090) }}
+
+database:
+  # Use memory cache for simplicity (can upgrade to Redis for production)
+  evmJsonRpcCache:
+    driver: memory
+    memory:
+      maxItems: {{ erpc_cache_max_items | default(100000) }}
+
+projects:
+  - id: {{ erpc_project_id | default('avalanche-l1') }}
+
+    networks:
+      - architecture: evm
+        evm:
+          chainId: {{ erpc_evm_chain_id }}
+
+        # Failover configuration
+        failsafe:
+          timeout:
+            duration: {{ erpc_timeout | default('30s') }}
+          retry:
+            maxAttempts: {{ erpc_retry_attempts | default(3) }}
+            delay: {{ erpc_retry_delay | default('500ms') }}
+            backoffMaxDelay: {{ erpc_retry_backoff | default('10s') }}
+            backoffFactor: {{ erpc_retry_factor | default(2) }}
+            jitter: {{ erpc_retry_jitter | default('200ms') }}
+          hedge:
+            delay: {{ erpc_hedge_delay | default('1s') }}
+            maxCount: {{ erpc_hedge_max | default(2) }}
+          circuitBreaker:
+            failureThresholdCount: {{ erpc_cb_failures | default(10) }}
+            failureThresholdCapacity: {{ erpc_cb_capacity | default(100) }}
+            halfOpenAfter: {{ erpc_cb_half_open | default('30s') }}
+            successThresholdCount: {{ erpc_cb_successes | default(5) }}
+            successThresholdCapacity: {{ erpc_cb_success_capacity | default(10) }}
+
+    upstreams:
+{% for upstream in erpc_upstreams %}
+      - id: {{ upstream.id | default('rpc-' ~ loop.index) }}
+        type: evm
+        endpoint: {{ upstream.endpoint }}
+        evm:
+          chainId: {{ erpc_evm_chain_id }}
+{% if upstream.rate_limit_budget is defined %}
+        rateLimitBudget: {{ upstream.rate_limit_budget }}
+{% endif %}
+{% endfor %}
+
+{% if erpc_rate_limit_enabled | default(false) %}
+rateLimiters:
+  budgets:
+    - id: default-budget
+      rules:
+        - method: '*'
+          maxCount: {{ erpc_rate_limit_max | default(1000) }}
+          period: {{ erpc_rate_limit_period | default('1s') }}
+{% endif %}

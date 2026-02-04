@@ -1,0 +1,97 @@
+---
+# Faucet Role - Deploy Avalanche Faucet for L1 Chain
+#
+# This role deploys the official Avalanche Faucet as a Docker container.
+# The faucet allows developers to request test tokens on your L1.
+#
+# Required variables:
+#   faucet_chain_id: The L1 chain ID (blockchain ID from create-l1)
+#   faucet_evm_chain_id: The EVM chain ID (from genesis.json)
+#   faucet_private_key: Private key for the faucet wallet (must be funded)
+#
+# Optional variables:
+#   faucet_port: Port to expose faucet (default: 8000)
+#   faucet_amount: Amount of tokens to dispense per request (default: 1)
+#   faucet_rate_limit: Requests per hour per address (default: 1)
+
+- name: Install Docker dependencies
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+    update_cache: yes
+
+- name: Add Docker GPG key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Add Docker repository
+  apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+
+- name: Install Docker
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+    update_cache: yes
+
+- name: Start Docker service
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Create faucet user
+  user:
+    name: faucet
+    groups: docker
+    shell: /bin/bash
+    create_home: yes
+
+- name: Create faucet directory
+  file:
+    path: /opt/faucet
+    state: directory
+    owner: faucet
+    group: faucet
+    mode: '0755'
+
+- name: Create faucet docker-compose file
+  template:
+    src: docker-compose.yml.j2
+    dest: /opt/faucet/docker-compose.yml
+    owner: faucet
+    group: faucet
+    mode: '0644'
+
+- name: Create faucet environment file
+  template:
+    src: faucet.env.j2
+    dest: /opt/faucet/.env
+    owner: faucet
+    group: faucet
+    mode: '0600'
+
+- name: Create faucet systemd service
+  template:
+    src: faucet.service.j2
+    dest: /etc/systemd/system/faucet.service
+    mode: '0644'
+  notify: Restart faucet
+
+- name: Enable and start faucet
+  systemd:
+    name: faucet
+    state: started
+    enabled: yes
+    daemon_reload: yes

@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  erpc:
+    image: ghcr.io/erpc/erpc:{{ erpc_version | default('latest') }}
+    container_name: erpc
+    restart: unless-stopped
+    volumes:
+      - /opt/erpc/erpc.yaml:/root/erpc.yaml:ro
+    ports:
+      - "{{ erpc_port | default(4000) }}:{{ erpc_port | default(4000) }}"
+      - "{{ erpc_admin_port | default(4001) }}:{{ erpc_admin_port | default(4001) }}"
+      - "{{ erpc_metrics_port | default(9090) }}:{{ erpc_metrics_port | default(9090) }}"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:{{ erpc_admin_port | default(4001) }}/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

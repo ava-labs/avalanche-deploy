@@ -1,0 +1,54 @@
+---
+# eRPC defaults
+
+# eRPC version (Docker image tag)
+erpc_version: latest
+
+# Project ID (used in logs and metrics)
+erpc_project_id: avalanche-l1
+
+# HTTP port for RPC requests
+erpc_port: 4000
+
+# Admin/healthcheck port
+erpc_admin_port: 4001
+
+# Metrics port (Prometheus format)
+erpc_metrics_port: 9090
+
+# Cache configuration
+erpc_cache_max_items: 100000
+
+# Timeout for upstream requests
+erpc_timeout: 30s
+
+# Retry configuration
+erpc_retry_attempts: 3
+erpc_retry_delay: 500ms
+erpc_retry_backoff: 10s
+erpc_retry_factor: 2
+erpc_retry_jitter: 200ms
+
+# Hedging (send parallel requests after delay)
+erpc_hedge_delay: 1s
+erpc_hedge_max: 2
+
+# Circuit breaker configuration
+erpc_cb_failures: 10
+erpc_cb_capacity: 100
+erpc_cb_half_open: 30s
+erpc_cb_successes: 5
+erpc_cb_success_capacity: 10
+
+# Rate limiting (disabled by default)
+erpc_rate_limit_enabled: false
+erpc_rate_limit_max: 1000
+erpc_rate_limit_period: 1s
+
+# Upstreams - list of RPC endpoints to load balance
+# Will be auto-populated from inventory if not set
+# erpc_upstreams:
+#   - id: rpc-1
+#     endpoint: http://10.0.1.10:9650/ext/bc/xxx/rpc
+#   - id: rpc-2
+#     endpoint: http://10.0.1.11:9650/ext/bc/xxx/rpc

@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: graph-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+    volumes:
+      - /opt/graph-node/data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - graph-network
+
+  ipfs:
+    image: ipfs/kubo:latest
+    container_name: graph-ipfs
+    restart: unless-stopped
+    environment:
+      IPFS_PROFILE: server
+    volumes:
+      - /opt/graph-node/data/ipfs:/data/ipfs
+    ports:
+      - "{{ graph_ipfs_port | default(5001) }}:5001"
+    healthcheck:
+      test: ["CMD-SHELL", "ipfs dag stat /ipfs/QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - graph-network
+
+  graph-node:
+    image: graphprotocol/graph-node:{{ graph_node_version | default('latest') }}
+    container_name: graph-node
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ipfs:
+        condition: service_healthy
+    environment:
+      postgres_host: postgres
+      postgres_port: 5432
+      postgres_user: ${POSTGRES_USER}
+      postgres_pass: ${POSTGRES_PASSWORD}
+      postgres_db: ${POSTGRES_DB}
+      ipfs: ipfs:5001
+      ethereum: "{{ graph_network_name | default('avalanche-l1') }}:${ETHEREUM_RPC_URL}"
+      GRAPH_LOG: info
+      GRAPH_ETHEREUM_CLEANUP_BLOCKS: "true"
+      EXPERIMENTAL_SUBGRAPH_VERSION_SWITCHING_MODE: synced
+    ports:
+      - "{{ graph_node_port | default(8000) }}:8000"
+      - "{{ graph_node_ws_port | default(8001) }}:8001"
+      - "{{ graph_node_admin_port | default(8020) }}:8020"
+      - "{{ graph_node_index_port | default(8030) }}:8030"
+    networks:
+      - graph-network
+
+networks:
+  graph-network:
+    driver: bridge
