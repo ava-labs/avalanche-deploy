@@ -40,8 +40,8 @@
       "id": 2,
       "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
       "pluginVersion": "11.2.2",
-      "targets": [{"expr": "sum(avalanche_platformvm_active_l1_validators)", "legendFormat": "Validators", "refId": "A"}],
-      "title": "Active L1 Validators",
+      "targets": [{"expr": "max(avalanche_network_peers_subnet)", "legendFormat": "Peers", "refId": "A"}],
+      "title": "L1 Subnet Peers",
       "type": "stat"
     },
     {
@@ -60,83 +60,26 @@
       "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
       "pluginVersion": "11.2.2",
       "targets": [{"expr": "avg(avalanche_network_peers)", "legendFormat": "Peers", "refId": "A"}],
-      "title": "Network Peers",
+      "title": "Primary Network Peers",
       "type": "stat"
     },
     {
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "mappings": [],
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+          "color": {"mode": "thresholds"},
+          "mappings": [{"options": {"0": {"color": "red", "index": 0, "text": "Syncing"}, "1": {"color": "green", "index": 1, "text": "Synced"}}, "type": "value"}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
           "unit": "short"
         },
         "overrides": []
       },
       "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
       "id": 4,
-      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
       "pluginVersion": "11.2.2",
-      "targets": [{"expr": "sum(avalanche_platformvm_total_staked) / 1000000000", "legendFormat": "Staked", "refId": "A"}],
-      "title": "Total Staked (AVAX)",
-      "type": "stat"
-    },
-    {
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {
-        "defaults": {
-          "color": {"mode": "palette-classic"},
-          "mappings": [],
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 4},
-      "id": 10,
-      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
-      "pluginVersion": "11.2.2",
-      "targets": [{"expr": "sum(avalanche_platformvm_local_staked) / 1000000000", "legendFormat": "Local", "refId": "A"}],
-      "title": "Local Staked (AVAX)",
-      "type": "stat"
-    },
-    {
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {
-        "defaults": {
-          "color": {"mode": "palette-classic"},
-          "mappings": [],
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {"h": 4, "w": 8, "x": 8, "y": 4},
-      "id": 11,
-      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
-      "pluginVersion": "11.2.2",
-      "targets": [{"expr": "avg(avalanche_network_node_uptime_weighted_average) * 100", "legendFormat": "Uptime", "refId": "A"}],
-      "title": "Validator Uptime",
-      "type": "stat"
-    },
-    {
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {
-        "defaults": {
-          "color": {"mode": "palette-classic"},
-          "mappings": [],
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {"h": 4, "w": 8, "x": 16, "y": 4},
-      "id": 12,
-      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
-      "pluginVersion": "11.2.2",
-      "targets": [{"expr": "avg(avalanche_network_tracked_subnets)", "legendFormat": "Subnets", "refId": "A"}],
-      "title": "Tracked Subnets",
+      "targets": [{"expr": "min(avalanche_snowman_bootstrap_finished{chain=\"P\"})", "legendFormat": "Status", "refId": "A"}],
+      "title": "P-Chain Bootstrap",
       "type": "stat"
     },
     {
@@ -151,11 +94,11 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
       "id": 5,
       "options": {"legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
       "targets": [{"expr": "avalanche_snowman_last_accepted_height{chain=\"P\"}", "legendFormat": "{{instance}}", "refId": "A"}],
-      "title": "P-Chain Block Height",
+      "title": "P-Chain Block Height Over Time",
       "type": "timeseries"
     },
     {
@@ -170,14 +113,11 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
       "id": 6,
       "options": {"legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [
-        {"expr": "avalanche_platformvm_gas_consumed", "legendFormat": "consumed {{instance}}", "refId": "A"},
-        {"expr": "avalanche_platformvm_gas_capacity", "legendFormat": "capacity {{instance}}", "refId": "B"}
-      ],
-      "title": "Platform VM Gas",
+      "targets": [{"expr": "avalanche_network_peers_subnet", "legendFormat": "{{instance}}", "refId": "A"}],
+      "title": "L1 Subnet Peers Over Time",
       "type": "timeseries"
     },
     {
@@ -192,11 +132,11 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
       "id": 7,
       "options": {"legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "avalanche_proposervm_block_building_slot", "legendFormat": "{{instance}}", "refId": "A"}],
-      "title": "Proposer VM Block Building Slot",
+      "targets": [{"expr": "avalanche_network_peers", "legendFormat": "{{instance}}", "refId": "A"}],
+      "title": "Primary Network Peers Over Time",
       "type": "timeseries"
     },
     {
@@ -211,7 +151,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
       "id": 8,
       "options": {"legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
       "targets": [
@@ -229,25 +169,25 @@
           "custom": {"axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "insertNulls": false, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "auto", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}, "thresholdsStyle": {"mode": "off"}},
           "mappings": [],
           "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
-          "unit": "short"
+          "unit": "decbytes"
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
       "id": 9,
       "options": {"legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "sum(rate(avalanche_api_calls{method=~\"platform\\..*\"}[1m])) by (method)", "legendFormat": "{{method}}", "refId": "A"}],
-      "title": "Platform API Calls (rate/min)",
+      "targets": [{"expr": "avalanche_db_size{chain=\"P\"}", "legendFormat": "{{instance}}", "refId": "A"}],
+      "title": "P-Chain Database Size",
       "type": "timeseries"
     }
   ],
   "schemaVersion": 39,
-  "tags": ["avalanche", "p-chain", "platformvm"],
+  "tags": ["avalanche", "p-chain", "network"],
   "templating": {"list": []},
   "time": {"from": "now-1h", "to": "now"},
   "timepicker": {},
   "timezone": "browser",
-  "title": "P-Chain Status",
+  "title": "P-Chain & Network",
   "uid": "p-chain-status",
   "version": 1
 }

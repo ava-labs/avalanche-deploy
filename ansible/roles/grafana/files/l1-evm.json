@@ -21,8 +21,8 @@
       "id": 1,
       "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
       "pluginVersion": "11.2.2",
-      "targets": [{"expr": "max(avalanche_snowman_last_accepted_height{chain!=\"P\",chain!=\"X\",chain!=\"C\"})", "legendFormat": "Height", "refId": "A"}],
-      "title": "Block Height",
+      "targets": [{"expr": "max(avalanche_snowman_last_accepted_height{chain=~\"2.*\"}) or vector(0)", "legendFormat": "Height", "refId": "A"}],
+      "title": "L1 Block Height",
       "type": "stat"
     },
     {
@@ -40,7 +40,7 @@
       "id": 2,
       "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
       "pluginVersion": "11.2.2",
-      "targets": [{"expr": "sum(increase(avalanche_snowman_blks_accepted_count{chain!=\"P\",chain!=\"X\",chain!=\"C\"}[5m]))", "legendFormat": "Blocks", "refId": "A"}],
+      "targets": [{"expr": "sum(increase(avalanche_snowman_blks_accepted_count{chain=~\"2.*\"}[5m])) or vector(0)", "legendFormat": "Blocks", "refId": "A"}],
       "title": "Blocks Accepted (5m)",
       "type": "stat"
     },
@@ -59,7 +59,7 @@
       "id": 3,
       "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
       "pluginVersion": "11.2.2",
-      "targets": [{"expr": "sum(avalanche_snowman_blks_processing{chain!=\"P\",chain!=\"X\",chain!=\"C\"})", "legendFormat": "Processing", "refId": "A"}],
+      "targets": [{"expr": "sum(avalanche_snowman_blks_processing{chain=~\"2.*\"}) or vector(0)", "legendFormat": "Processing", "refId": "A"}],
       "title": "Blocks Processing",
       "type": "stat"
     },
@@ -67,19 +67,19 @@
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "mappings": [],
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+          "color": {"mode": "thresholds"},
+          "mappings": [{"options": {"0": {"color": "red", "index": 0, "text": "Syncing"}, "1": {"color": "green", "index": 1, "text": "Synced"}}, "type": "value"}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
           "unit": "short"
         },
         "overrides": []
       },
       "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
       "id": 4,
-      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
       "pluginVersion": "11.2.2",
-      "targets": [{"expr": "sum(increase(avalanche_api_calls{method=~\"eth_.*\"}[5m]))", "legendFormat": "Calls", "refId": "A"}],
-      "title": "ETH RPC Calls (5m)",
+      "targets": [{"expr": "min(avalanche_snowman_bootstrap_finished{chain=~\"2.*\"}) or vector(0)", "legendFormat": "Status", "refId": "A"}],
+      "title": "L1 Bootstrap Status",
       "type": "stat"
     },
     {
@@ -97,8 +97,8 @@
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
       "id": 5,
       "options": {"legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "avalanche_snowman_last_accepted_height{chain!=\"P\",chain!=\"X\",chain!=\"C\"}", "legendFormat": "{{instance}}", "refId": "A"}],
-      "title": "Block Height Over Time",
+      "targets": [{"expr": "avalanche_snowman_last_accepted_height{chain=~\"2.*\"}", "legendFormat": "{{instance}}", "refId": "A"}],
+      "title": "L1 Block Height Over Time",
       "type": "timeseries"
     },
     {
@@ -116,8 +116,8 @@
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
       "id": 6,
       "options": {"legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "sum(rate(avalanche_api_calls{method=~\"eth_.*\"}[1m])) by (method)", "legendFormat": "{{method}}", "refId": "A"}],
-      "title": "ETH RPC Methods (rate/min)",
+      "targets": [{"expr": "rate(avalanche_snowman_blks_accepted_count{chain=~\"2.*\"}[1m]) * 60", "legendFormat": "{{instance}}", "refId": "A"}],
+      "title": "Blocks Per Minute",
       "type": "timeseries"
     },
     {
@@ -135,8 +135,8 @@
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
       "id": 7,
       "options": {"legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "rate(avalanche_snowman_blks_accepted_count{chain!=\"P\",chain!=\"X\",chain!=\"C\"}[1m]) * 60", "legendFormat": "{{instance}}", "refId": "A"}],
-      "title": "Blocks Per Minute",
+      "targets": [{"expr": "sum(rate(avalanche_api_calls{base=~\"2.*\"}[1m])) by (instance)", "legendFormat": "{{instance}}", "refId": "A"}],
+      "title": "L1 RPC Calls (rate/min)",
       "type": "timeseries"
     },
     {
@@ -154,7 +154,7 @@
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
       "id": 8,
       "options": {"legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "avalanche_db_size{chain!=\"P\",chain!=\"X\",chain!=\"C\"}", "legendFormat": "{{instance}}", "refId": "A"}],
+      "targets": [{"expr": "avalanche_db_size{chain=~\"2.*\"}", "legendFormat": "{{instance}}", "refId": "A"}],
       "title": "L1 Database Size",
       "type": "timeseries"
     }
