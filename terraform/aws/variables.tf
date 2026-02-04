@@ -51,15 +51,15 @@ variable "rpc_count" {
 }
 
 variable "validator_instance_type" {
-  description = "EC2 instance type for validators (use 'd' suffix for local NVMe)"
+  description = "EC2 instance type for validators"
   type        = string
-  default     = "m6id.xlarge" # 4 vCPU, 16GB RAM, 1x237GB NVMe
+  default     = "c6a.large" # 2 vCPU, 4GB RAM - suitable for small L1s
 }
 
 variable "rpc_instance_type" {
-  description = "EC2 instance type for RPC nodes (use 'd' suffix for local NVMe)"
+  description = "EC2 instance type for RPC nodes"
   type        = string
-  default     = "m6id.large" # 2 vCPU, 8GB RAM, 1x118GB NVMe
+  default     = "c6a.large" # 2 vCPU, 4GB RAM - increase for high traffic
 }
 
 variable "disk_size_gb" {
@@ -69,15 +69,15 @@ variable "disk_size_gb" {
 }
 
 variable "disk_iops" {
-  description = "Provisioned IOPS for gp3 volumes"
+  description = "Provisioned IOPS for gp3 volumes (3000 included free)"
   type        = number
-  default     = 6000
+  default     = 3000
 }
 
 variable "disk_throughput" {
-  description = "Provisioned throughput in MB/s for gp3 volumes"
+  description = "Provisioned throughput in MB/s for gp3 volumes (125 included free)"
   type        = number
-  default     = 500
+  default     = 125
 }
 
 #

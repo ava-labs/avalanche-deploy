@@ -202,11 +202,15 @@ See [SAFE.md](SAFE.md) for deploying Gnosis Safe infrastructure.
 
 ## Cost Estimate
 
+Default instance types: `c6a.large` (2 vCPU, 4GB RAM), 500GB gp3 storage.
+
 | Provider | Monthly (2 val + 1 RPC + monitoring) |
 |----------|--------------------------------------|
-| AWS | ~$225 |
-| GCP | ~$195 |
-| Azure | ~$420 |
+| AWS | ~$300 |
+| GCP | ~$270 |
+| Azure | ~$350 |
+
+*Costs vary by region. Use cloud pricing calculators for exact estimates.*
 
 **Remember:** `make destroy` when done testing!
 
