@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager
+.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots
 
 # Default cloud provider
 CLOUD ?= aws
@@ -161,6 +161,66 @@ initialize-validator-manager:
 		$(if $(ICM_CONTRACTS_PATH),-e "icm_contracts_path=$(ICM_CONTRACTS_PATH)",)
 
 #
+# Primary Network Validators
+#
+primary-infra:
+	@echo "Creating Primary Network validator infrastructure..."
+	@cd terraform/$(CLOUD) && terraform init && terraform apply -var="primary_validator_count=1"
+	@echo ""
+	@echo "Done! Run 'make primary-deploy' next."
+
+primary-deploy:
+	@echo "Deploying Primary Network validators..."
+	@cd ansible && ansible-playbook playbooks/10-deploy-primary-network.yml -e network=$(NETWORK)
+	@echo ""
+	@echo "Done! Run 'make primary-status' to check sync progress."
+
+primary-status:
+	@./scripts/check-primary-sync.sh
+
+backup-keys:
+	@echo "Backing up staking keys to S3 (L1 + Primary Network validators)..."
+	@cd ansible && ansible-playbook playbooks/11-backup-staking-keys.yml
+
+restore-keys:
+	@if [ -z "$(SOURCE)" ]; then echo "Usage: make restore-keys SOURCE=primary-validator-1 TARGET_IP=10.0.1.50"; exit 1; fi
+	@if [ -z "$(TARGET_IP)" ]; then echo "Usage: make restore-keys SOURCE=primary-validator-1 TARGET_IP=10.0.1.50"; exit 1; fi
+	@./scripts/restore-staking-keys.sh $(SOURCE) $(TARGET_IP)
+
+prepare-migration:
+	@if [ -z "$(NODE)" ]; then echo "Usage: make prepare-migration NODE=migration-target [SNAPSHOT=true] [SNAPSHOT_NAME=latest]"; exit 1; fi
+	@echo "Preparing migration node $(NODE)..."
+	@cd ansible && ansible-playbook playbooks/12-prepare-migration-node.yml --limit $(NODE) \
+		$(if $(SNAPSHOT),-e "use_snapshot=$(SNAPSHOT)",) \
+		$(if $(SNAPSHOT_NAME),-e "snapshot_name=$(SNAPSHOT_NAME)",)
+
+migrate-validator:
+	@if [ -z "$(SOURCE)" ]; then echo "Usage: make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target"; exit 1; fi
+	@if [ -z "$(TARGET)" ]; then echo "Usage: make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target"; exit 1; fi
+	@echo "Migrating validator from $(SOURCE) to $(TARGET)..."
+	@cd ansible && ansible-playbook playbooks/13-migrate-validator.yml \
+		-e "source_host=$(SOURCE)" \
+		-e "target_host=$(TARGET)"
+
+#
+# Database Snapshots
+#
+create-snapshot:
+	@if [ -z "$(NODE)" ]; then echo "Usage: make create-snapshot NODE=primary-validator-1 [NAME=my-snapshot]"; exit 1; fi
+	@echo "Creating database snapshot from $(NODE)..."
+	@cd ansible && ansible-playbook playbooks/14-create-snapshot.yml --limit $(NODE) \
+		$(if $(NAME),-e "snapshot_name=$(NAME)",)
+
+restore-snapshot:
+	@if [ -z "$(TARGET)" ]; then echo "Usage: make restore-snapshot TARGET=migration-target [SNAPSHOT=latest]"; exit 1; fi
+	@echo "Restoring snapshot to $(TARGET)..."
+	@cd ansible && ansible-playbook playbooks/15-restore-snapshot.yml --limit $(TARGET) \
+		$(if $(SNAPSHOT),-e "snapshot_name=$(SNAPSHOT)",)
+
+list-snapshots:
+	@./scripts/list-snapshots.sh
+
+#
 # Safe Multisig
 #
 safe:
@@ -203,13 +263,27 @@ clean:
 help:
 	@echo "Avalanche L1 Deploy"
 	@echo ""
-	@echo "Quick start:"
+	@echo "Quick start (L1):"
 	@echo "  make setup        Install dependencies (terraform, ansible, aws-cli)"
 	@echo "  make infra        Create cloud infrastructure"
 	@echo "  make deploy       Deploy avalanchego to nodes"
 	@echo "  make status       Check node sync status"
 	@echo "  make create-l1    Build the create-l1 tool"
 	@echo "  make destroy      Tear down infrastructure (stops billing!)"
+	@echo ""
+	@echo "Primary Network Validators:"
+	@echo "  make primary-infra      Create Primary Network validator infrastructure"
+	@echo "  make primary-deploy     Deploy avalanchego for Primary Network"
+	@echo "  make primary-status     Check Primary Network sync status (P/X/C chains)"
+	@echo "  make backup-keys        Backup staking keys to S3"
+	@echo "  make restore-keys       Restore staking keys from S3"
+	@echo "  make prepare-migration  Prepare a new node for migration (supports SNAPSHOT=true)"
+	@echo "  make migrate-validator  Execute zero-downtime validator migration"
+	@echo ""
+	@echo "Database Snapshots:"
+	@echo "  make create-snapshot    Create database snapshot from synced node"
+	@echo "  make restore-snapshot   Restore database snapshot to a node"
+	@echo "  make list-snapshots     List available snapshots in S3"
 	@echo ""
 	@echo "Operations:"
 	@echo "  make rolling-restart   Restart nodes one-at-a-time (zero downtime)"
@@ -237,13 +311,22 @@ help:
 	@echo "  NETWORK=fuji|mainnet (default: fuji)"
 	@echo ""
 	@echo "Examples:"
+	@echo "  # L1 Deployment"
 	@echo "  make infra CLOUD=gcp"
 	@echo "  make deploy NETWORK=mainnet"
 	@echo "  make upgrade VERSION=1.12.0"
-	@echo "  make rolling-restart"
-	@echo "  make health-checks CHAIN_ID=xxx"
+	@echo ""
+	@echo "  # Primary Network Validators"
+	@echo "  make primary-infra"
+	@echo "  make primary-deploy NETWORK=mainnet"
+	@echo "  make backup-keys"
+	@echo "  make create-snapshot NODE=primary-validator-1"
+	@echo "  make list-snapshots"
+	@echo "  make prepare-migration NODE=migration-target SNAPSHOT=true"
+	@echo "  make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target"
+	@echo ""
+	@echo "  # Developer Tools"
 	@echo "  make faucet CHAIN_ID=xxx EVM_CHAIN_ID=99999 FAUCET_KEY=0x..."
 	@echo "  make graph-node CHAIN_ID=xxx NETWORK_NAME=my-l1"
 	@echo "  make erpc CHAIN_ID=xxx EVM_CHAIN_ID=99999"
 	@echo "  make initialize-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"
-	@echo "  make safe CHAIN_ID=xxx EVM_CHAIN_ID=99999"

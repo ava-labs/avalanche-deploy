@@ -1,6 +1,8 @@
-# Avalanche L1 Deploy
+# Avalanche Deploy
 
-Deploy production-ready Avalanche L1 blockchains on AWS, GCP, or Azure.
+Deploy production-ready **Avalanche L1 blockchains** or **Primary Network validators** on AWS, GCP, or Azure.
+
+## L1 Blockchain Deployment
 
 ```bash
 make setup           # install tools (terraform, ansible, jq)
@@ -8,22 +10,52 @@ make infra           # create cloud VMs
 make deploy          # install avalanchego
 make create-l1       # create your L1 blockchain
 make status          # check node health
-make upgrade VERSION=1.12.0  # zero-downtime upgrades
+make destroy         # tear down (stops billing!)
+```
+
+## Primary Network Validator Deployment
+
+```bash
+make setup           # install tools
+make primary-infra   # create validator infrastructure (i4i.xlarge + NVMe)
+make primary-deploy  # install avalanchego for Primary Network
+make primary-status  # check P/X/C chain sync
+make backup-keys     # backup staking keys to S3
 make destroy         # tear down (stops billing!)
 ```
 
 ## What You Get
 
+### L1 Blockchain Infrastructure
+
 | Component | Default | Purpose |
 |-----------|---------|---------|
-| **Validators** | 2 | Block production, consensus |
-| **RPC Node** | 1 | External queries, block explorer |
-| **Monitoring** | 1 | Prometheus + Grafana dashboards |
+| **Validators** | 3 | Block production, consensus (c6a.xlarge) |
+| **Archive RPC** | 1 | Full history, debug APIs, Blockscout (c6a.xlarge, 1TB) |
+| **Pruned RPC** | 1 | Fast queries, state-sync, transactions (c6a.large, 500GB) |
+| **Monitoring** | 1 | Prometheus + Grafana dashboards (t3.small) |
+| **S3 Bucket** | 1 | Staking key backup with KMS encryption |
 
 Configure counts in `terraform/aws/terraform.tfvars`:
 ```hcl
-validator_count = 3   # minimum 1 for testnet, 5+ recommended for mainnet
-rpc_count       = 2   # scale based on traffic
+validator_count     = 5      # minimum 1 for testnet, 5+ recommended for mainnet
+rpc_archive_count   = 1      # archive nodes for debug APIs and block explorer
+rpc_pruned_count    = 1      # pruned nodes for transaction workloads
+enable_staking_key_backup = true  # S3 backup for validator staking keys
+```
+
+### Primary Network Validators
+
+| Component | Default | Purpose |
+|-----------|---------|---------|
+| **Primary Validators** | 0 | Avalanche Primary Network validation (i4i.xlarge, 937GB NVMe) |
+| **S3 Bucket** | 1 | Staking key backup with KMS encryption |
+| **Monitoring** | 1 | Prometheus + Grafana dashboards (t3.small) |
+
+Configure in `terraform/aws/terraform.tfvars`:
+```hcl
+primary_validator_count = 1    # Number of Primary Network validators
+enable_staking_key_backup = true  # S3 backup for staking keys
 ```
 
 **Optional Add-ons:**
@@ -37,6 +69,8 @@ rpc_count       = 2   # scale based on traffic
 
 ## Architecture
 
+### L1 Blockchain Architecture
+
 ```mermaid
 flowchart TB
     subgraph Internet
@@ -46,12 +80,14 @@ flowchart TB
 
     subgraph VPC["AWS VPC (10.0.0.0/16)"]
         subgraph ValidatorsSG["validators-sg"]
-            V1[Validator 1<br/>avalanchego<br/>:9651 P2P]
-            V2[Validator 2<br/>avalanchego<br/>:9651 P2P]
+            V1[Validator 1<br/>c6a.xlarge<br/>:9651 P2P]
+            V2[Validator 2<br/>c6a.xlarge<br/>:9651 P2P]
+            V3[Validator 3+<br/>c6a.xlarge<br/>:9651 P2P]
         end
 
         subgraph RPCSG["rpc-sg"]
-            RPC[RPC Node<br/>avalanchego<br/>:9650 API]
+            ArchiveRPC[Archive RPC<br/>1TB disk<br/>debug APIs]
+            PrunedRPC[Pruned RPC<br/>500GB disk<br/>state-sync]
             Blockscout[Blockscout<br/>:4001 Explorer]
             Faucet[Faucet<br/>:8000]
             GraphNode[Graph Node<br/>:8000 GraphQL]
@@ -66,11 +102,11 @@ flowchart TB
 
     PrimaryNetwork <-->|P2P :9651| V1
     PrimaryNetwork <-->|P2P :9651| V2
-    PrimaryNetwork <-->|P2P :9651| RPC
+    PrimaryNetwork <-->|P2P :9651| ArchiveRPC
+    PrimaryNetwork <-->|P2P :9651| PrunedRPC
 
     V1 <-->|P2P :9651| V2
-    V1 <-->|P2P :9651| RPC
-    V2 <-->|P2P :9651| RPC
+    V1 <-->|P2P :9651| V3
 
     Users -->|Load Balanced :4000| eRPC
     Users -->|Explorer :4001| Blockscout
@@ -78,24 +114,114 @@ flowchart TB
     Users -->|GraphQL :8000| GraphNode
     Users -->|Faucet :8000| Faucet
 
-    eRPC -->|load balance| RPC
-    Blockscout -.->|queries| RPC
-    GraphNode -.->|indexes| RPC
-    Faucet -.->|sends tx| RPC
+    eRPC -->|debug_*, trace_*| ArchiveRPC
+    eRPC -->|eth_*, net_*| PrunedRPC
+    Blockscout -.->|queries| ArchiveRPC
+    GraphNode -.->|indexes| ArchiveRPC
+    Faucet -.->|sends tx| PrunedRPC
 
-    V1 -.->|metrics :9650/:9100| Prometheus
-    V2 -.->|metrics :9650/:9100| Prometheus
-    RPC -.->|metrics :9650/:9100| Prometheus
+    V1 -.->|metrics| Prometheus
+    V2 -.->|metrics| Prometheus
+    ArchiveRPC -.->|metrics| Prometheus
+    PrunedRPC -.->|metrics| Prometheus
     Prometheus -.-> Grafana
 ```
 
-**4 EC2 Instances:**
-| Instance | Security Group | Purpose |
-|----------|---------------|---------|
-| Validator 1 | validators-sg | Block production, consensus |
-| Validator 2 | validators-sg | Block production, consensus |
-| RPC Node | rpc-sg | API queries, Blockscout explorer |
-| Monitoring | monitoring-sg | Prometheus, Grafana dashboards |
+### Primary Network Validator Architecture
+
+```mermaid
+flowchart TB
+    subgraph Internet
+        PrimaryNetwork([Avalanche Primary Network<br/>P-Chain / X-Chain / C-Chain])
+        Operator([Operator])
+    end
+
+    subgraph AWS["AWS Cloud"]
+        subgraph VPC["VPC (10.0.0.0/16)"]
+            subgraph PrimaryValidatorsSG["primary-validators-sg"]
+                PV1[Primary Validator<br/>i4i.xlarge<br/>937GB NVMe<br/>:9651 P2P]
+                PV2[Primary Validator 2<br/>i4i.xlarge<br/>937GB NVMe<br/>:9651 P2P]
+            end
+
+            subgraph MonitoringSG["monitoring-sg"]
+                Prometheus[Prometheus<br/>:9090]
+                Grafana[Grafana<br/>:3000]
+            end
+        end
+
+        subgraph Storage["S3 + KMS"]
+            S3[(S3 Bucket<br/>Staking Keys<br/>KMS Encrypted)]
+        end
+    end
+
+    PrimaryNetwork <-->|P2P :9651| PV1
+    PrimaryNetwork <-->|P2P :9651| PV2
+    PV1 <-->|P2P :9651| PV2
+
+    Operator -->|SSH :22| PV1
+    Operator -->|API :9650| PV1
+    Operator -->|Dashboard :3000| Grafana
+
+    PV1 -.->|backup| S3
+    PV2 -.->|backup| S3
+
+    PV1 -.->|metrics| Prometheus
+    PV2 -.->|metrics| Prometheus
+    Prometheus -.-> Grafana
+```
+
+**Primary Network Validator Migration (Near-Zero Downtime):**
+
+```mermaid
+sequenceDiagram
+    participant Old as Old Validator
+    participant S3 as S3 (Staking Keys)
+    participant New as New Validator
+    participant Network as Primary Network
+
+    Note over Old,Network: Normal Operation
+    Old->>Network: Validating (active)
+
+    Note over New: Phase 1: Sync New Node
+    New->>Network: State-sync (no keys)
+    New-->>New: Bootstrap P/X/C chains
+
+    Note over Old,S3: Phase 2: Backup Keys
+    Old->>S3: Upload staking keys (KMS encrypted)
+
+    Note over New,S3: Phase 3: Prepare Migration
+    New->>S3: Download staking keys
+    New-->>New: Stop avalanchego
+
+    Note over Old,New: Phase 4: Execute Migration (~30s downtime)
+    Old-->>Old: Stop avalanchego
+    New-->>New: Start with staking keys
+    New->>Network: Validating (same NodeID)
+
+    Note over New,Network: Migration Complete
+```
+
+**L1 Production Infrastructure (5 validators + 2 RPC):**
+| Instance | Type | Disk | Purpose |
+|----------|------|------|---------|
+| L1 Validators (5x) | c6a.xlarge | 500GB EBS | Block production, consensus |
+| Archive RPC | c6a.xlarge | 1TB EBS | Full history, debug APIs, Blockscout |
+| Pruned RPC | c6a.large | 500GB EBS | State-sync, transaction workloads |
+| Monitoring | t3.small | 50GB EBS | Prometheus, Grafana, eRPC |
+| S3 Bucket | - | - | Staking key backup (KMS encrypted) |
+
+**Primary Network Validator Infrastructure:**
+| Instance | Type | Disk | Purpose |
+|----------|------|------|---------|
+| Primary Validator | i4i.xlarge | 937GB NVMe | Primary Network validation (P/X/C chains) |
+| S3 Bucket | - | - | Staking key backup (KMS encrypted) |
+| Monitoring | t3.small | 50GB EBS | Prometheus, Grafana |
+
+**RPC Node Types (L1):**
+| Type | APIs | Pruning | State-Sync | Use Case |
+|------|------|---------|------------|----------|
+| Archive | Full (incl. debug/trace) | Disabled | Disabled | Block explorer, debugging, historical queries |
+| Pruned | Standard (eth, net, web3) | Enabled | Enabled | Transaction submission, latest state queries |
 
 ## Quick Start (AWS)
 
@@ -127,11 +253,12 @@ cp terraform.tfvars.example terraform.tfvars
 
 Edit `terraform.tfvars`:
 ```hcl
-name_prefix    = "my-l1"
-environment    = "fuji"
-validator_count = 2
-rpc_count       = 1
-ssh_public_key  = "ssh-rsa AAAA..."
+name_prefix       = "my-l1"
+environment       = "fuji"
+validator_count   = 5
+rpc_archive_count = 1
+rpc_pruned_count  = 1
+ssh_public_key    = "ssh-rsa AAAA..."
 ssh_private_key_file = "~/.ssh/avalanche-deploy"
 ```
 
@@ -203,6 +330,119 @@ This deploys the ValidatorManager implementation, upgrades the genesis proxy, in
 
 Your L1 is now running.
 
+### L1 Staking Key Management
+
+Staking keys are automatically backed up to S3 during deployment (if `enable_staking_key_backup=true`).
+
+```bash
+# Backup all validator keys to S3
+make backup-keys
+
+# Backup specific validator
+./scripts/backup-staking-keys.sh validator-1
+
+# Restore keys to a new node
+./scripts/restore-staking-keys.sh validator-1 10.0.1.50
+
+# List backups
+aws s3 ls s3://$(terraform -chdir=terraform/aws output -raw staking_keys_bucket)/
+```
+
+---
+
+## Primary Network Validators
+
+Deploy and operate Avalanche Primary Network validators with enterprise-grade features.
+
+### Features
+
+- **High-performance storage**: i4i.xlarge instances with 937GB NVMe
+- **Staking key backup**: Automatic S3 backup with KMS encryption
+- **Near-zero downtime migration**: Transfer validators to new instances
+- **Full chain sync**: Complete P/X/C chain data (no partial sync)
+
+### Quick Start
+
+```bash
+# 1. Create infrastructure
+make primary-infra
+
+# 2. Deploy validators
+make primary-deploy NETWORK=fuji  # or mainnet
+
+# 3. Wait for sync (2-4 hours for state-sync)
+make primary-status
+
+# 4. Register as validator on P-Chain (requires staking)
+# Use Core Wallet or avalanche-cli
+
+# 5. Verify keys are backed up
+make backup-keys
+```
+
+### Database Snapshots
+
+Create snapshots of synced nodes for faster bootstrapping:
+
+```bash
+# Create a snapshot from a synced validator
+make create-snapshot NODE=primary-validator-1
+
+# Create with custom name
+make create-snapshot NODE=primary-validator-1 NAME=mainnet-2025-02
+
+# List available snapshots
+make list-snapshots
+
+# Restore snapshot to a node
+make restore-snapshot TARGET=migration-target
+make restore-snapshot TARGET=migration-target SNAPSHOT=mainnet-2025-02
+```
+
+Snapshots are stored in S3 with KMS encryption. A **pruned mainnet snapshot is ~400GB** and restores in minutes vs hours for state sync.
+
+### Validator Migration
+
+Migrate a validator to a new instance with minimal downtime:
+
+```bash
+# 1. Add new instance to inventory as 'migration-target'
+
+# 2. Prepare the new node
+# Option A: Using snapshot (faster - minutes)
+make prepare-migration NODE=migration-target SNAPSHOT=true
+
+# Option B: Using state-sync (slower - hours)
+make prepare-migration NODE=migration-target
+
+# 3. Wait for sync to complete
+./scripts/check-primary-sync.sh <new-node-ip>
+
+# 4. Execute migration (~30s downtime)
+make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target
+```
+
+### Staking Key Management
+
+```bash
+# Backup all validator keys to S3
+make backup-keys
+
+# Restore keys to a specific node
+make restore-keys SOURCE=primary-validator-1 TARGET_IP=10.0.1.50
+
+# List backups
+aws s3 ls s3://$(terraform -chdir=terraform/aws output -raw staking_keys_bucket)/
+```
+
+### Cost Estimate
+
+| Component | Instance | Storage | Monthly (us-east-1) |
+|-----------|----------|---------|---------------------|
+| Primary Validator | i4i.xlarge | 937GB NVMe | ~$310 |
+| S3 + KMS | - | ~1GB | ~$1 |
+| **Total per validator** | | | **~$311/mo** |
+
 ---
 
 ## Operations
@@ -248,8 +488,10 @@ make monitoring
 ```bash
 source l1.env
 make deploy-blockscout CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999 CHAIN_NAME=$CHAIN_NAME
-# Access: http://<rpc-ip>:4001
+# Access: http://<archive-rpc-ip>:4001
 ```
+
+> **Note:** Blockscout is deployed on the archive RPC node which has full history and debug APIs.
 
 ### Faucet (Token Distribution)
 
@@ -285,6 +527,7 @@ make erpc CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999
 ```
 
 Features:
+- **Intelligent routing**: `debug_*` and `trace_*` methods route to archive nodes only
 - Load balancing across all RPC nodes
 - Automatic failover with circuit breaker
 - Response caching
@@ -323,13 +566,27 @@ See [kubernetes/README.md](kubernetes/README.md) for detailed K8s deployment gui
 
 ## Cost Estimate
 
-Default instance types: `c6a.large` (2 vCPU, 4GB RAM), 500GB gp3 storage.
+### L1 Blockchain (Production)
 
-| Provider | Monthly (2 val + 1 RPC + monitoring) |
-|----------|--------------------------------------|
-| AWS | ~$300 |
-| GCP | ~$270 |
-| Azure | ~$350 |
+5x validators (c6a.xlarge), 1x archive RPC (c6a.xlarge, 1TB), 1x pruned RPC (c6a.large), 1x monitoring (t3.small).
+
+| Component | Count | Instance | Disk | Monthly (AWS us-east-1) |
+|-----------|-------|----------|------|-------------------------|
+| Validators | 5 | c6a.xlarge | 500GB | ~$450 |
+| Archive RPC | 1 | c6a.xlarge | 1TB | ~$120 |
+| Pruned RPC | 1 | c6a.large | 500GB | ~$65 |
+| Monitoring | 1 | t3.small | 50GB | ~$15 |
+| S3 + KMS | - | - | ~1GB | ~$1 |
+| **Total** | | | | **~$651/mo** |
+
+### Primary Network Validators
+
+| Component | Count | Instance | Storage | Monthly (AWS us-east-1) |
+|-----------|-------|----------|---------|-------------------------|
+| Primary Validator | 1 | i4i.xlarge | 937GB NVMe | ~$310 |
+| S3 + KMS | - | - | ~1GB | ~$1 |
+| Monitoring | 1 | t3.small | 50GB | ~$15 |
+| **Total (per validator)** | | | | **~$326/mo** |
 
 *Costs vary by region. Use cloud pricing calculators for exact estimates.*
 
@@ -342,8 +599,11 @@ Default instance types: `c6a.large` (2 vCPU, 4GB RAM), 500GB gp3 storage.
 | File | Purpose |
 |------|---------|
 | `genesis.json` | L1 chain config (chainId, alloc, fees) |
-| `validator-chain-config.json` | Validator settings (pruning on, fast sync) |
-| `rpc-chain-config.json` | RPC settings (archive mode, debug APIs) |
+| `validator-chain-config.json` | L1 validator settings (pruning on, fast sync) |
+| `rpc-archive-chain-config.json` | Archive RPC settings (no pruning, debug APIs) |
+| `rpc-pruned-chain-config.json` | Pruned RPC settings (state-sync, minimal APIs) |
+| `rpc-chain-config.json` | Legacy/fallback RPC config |
+| `primary-network-node-config.json` | Primary Network validator settings (state-sync enabled) |
 
 ### Genesis Configuration
 
@@ -359,16 +619,36 @@ Key settings:
 
 ## Commands Reference
 
-### Infrastructure & Deployment
+### L1 Infrastructure & Deployment
 
 | Command | Description |
 |---------|-------------|
 | `make setup` | Install terraform, ansible, jq |
-| `make infra` | Create cloud infrastructure |
-| `make deploy` | Install avalanchego on nodes |
+| `make infra` | Create L1 cloud infrastructure |
+| `make deploy` | Install avalanchego on L1 nodes |
 | `make create-l1` | Build the L1 creation tool |
 | `make configure-l1` | Configure nodes for L1 |
 | `make destroy` | Tear down infrastructure |
+
+### Primary Network Validators
+
+| Command | Description |
+|---------|-------------|
+| `make primary-infra` | Create Primary Network validator infrastructure |
+| `make primary-deploy` | Deploy avalanchego for Primary Network |
+| `make primary-status` | Check P/X/C chain sync status |
+| `make backup-keys` | Backup staking keys to S3 |
+| `make restore-keys` | Restore staking keys from S3 |
+| `make prepare-migration` | Prepare new node for migration (supports `SNAPSHOT=true`) |
+| `make migrate-validator` | Execute validator migration |
+
+### Database Snapshots
+
+| Command | Description |
+|---------|-------------|
+| `make create-snapshot` | Create database snapshot from synced node |
+| `make restore-snapshot` | Restore database snapshot to a node |
+| `make list-snapshots` | List available snapshots in S3 |
 
 ### Operations
 
@@ -441,19 +721,25 @@ Supported key formats:
 ```
 .
 ├── terraform/              # Infrastructure as code
-│   ├── aws/               # AWS config
+│   ├── aws/               # AWS config (L1 + Primary Network validators)
 │   ├── gcp/               # GCP config
 │   └── azure/             # Azure config
 ├── ansible/               # Configuration management
 │   ├── playbooks/         # Deployment & operations
-│   │   ├── 01-deploy-nodes.yml
-│   │   ├── 02-configure-l1.yml
-│   │   ├── 03-setup-monitoring.yml
-│   │   ├── 04-deploy-blockscout.yml
-│   │   ├── 05-deploy-safe.yml
-│   │   ├── 06-deploy-faucet.yml
-│   │   ├── 07-deploy-graph-node.yml
-│   │   ├── 08-deploy-erpc.yml
+│   │   ├── 01-deploy-nodes.yml         # L1 node deployment
+│   │   ├── 02-configure-l1.yml         # L1 configuration
+│   │   ├── 03-setup-monitoring.yml     # Prometheus + Grafana
+│   │   ├── 04-deploy-blockscout.yml    # Block explorer
+│   │   ├── 05-deploy-safe.yml          # Safe multisig
+│   │   ├── 06-deploy-faucet.yml        # Token faucet
+│   │   ├── 07-deploy-graph-node.yml    # The Graph Node
+│   │   ├── 08-deploy-erpc.yml          # eRPC load balancer
+│   │   ├── 10-deploy-primary-network.yml   # Primary Network validators
+│   │   ├── 11-backup-staking-keys.yml      # S3 key backup
+│   │   ├── 12-prepare-migration-node.yml   # Migration preparation (supports snapshots)
+│   │   ├── 13-migrate-validator.yml        # Validator migration
+│   │   ├── 14-create-snapshot.yml          # Create database snapshot
+│   │   ├── 15-restore-snapshot.yml         # Restore from snapshot
 │   │   ├── rolling-restart.yml
 │   │   ├── upgrade-nodes.yml
 │   │   └── health-checks.yml
@@ -462,7 +748,16 @@ Supported key formats:
 ├── kubernetes/            # Helm charts for K8s deployment
 ├── tools/create-l1/       # Go tool for P-Chain transactions (--json output)
 ├── shared/                # Genesis templates, dashboards
-└── scripts/               # Helper scripts
+├── scripts/               # Helper scripts
+│   ├── status.sh              # Node status checker
+│   ├── check-primary-sync.sh  # Primary Network sync status
+│   ├── backup-staking-keys.sh # CLI key backup
+│   ├── restore-staking-keys.sh # CLI key restore
+│   ├── create-snapshot.sh     # Create database snapshot
+│   ├── restore-snapshot.sh    # Restore from snapshot
+│   └── list-snapshots.sh      # List available snapshots
+├── primary-network-node-config.json  # Primary Network node config
+└── genesis.json           # L1 genesis configuration
 ```
 
 ---

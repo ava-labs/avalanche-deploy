@@ -44,26 +44,50 @@ variable "validator_count" {
   default     = 3
 }
 
-variable "rpc_count" {
-  description = "Number of RPC nodes"
+variable "rpc_archive_count" {
+  description = "Number of archive RPC nodes (full history, debug APIs)"
   type        = number
-  default     = 2
+  default     = 1
+}
+
+variable "rpc_pruned_count" {
+  description = "Number of pruned RPC nodes (state-sync, minimal APIs)"
+  type        = number
+  default     = 1
 }
 
 variable "validator_instance_type" {
   description = "EC2 instance type for validators"
   type        = string
-  default     = "c6a.large" # 2 vCPU, 4GB RAM - suitable for small L1s
+  default     = "c6a.xlarge" # 4 vCPU, 8GB RAM - production validators
 }
 
-variable "rpc_instance_type" {
-  description = "EC2 instance type for RPC nodes"
+variable "rpc_archive_instance_type" {
+  description = "EC2 instance type for archive RPC nodes"
   type        = string
-  default     = "c6a.large" # 2 vCPU, 4GB RAM - increase for high traffic
+  default     = "c6a.xlarge" # 4 vCPU, 8GB RAM - needs resources for debug APIs
+}
+
+variable "rpc_pruned_instance_type" {
+  description = "EC2 instance type for pruned RPC nodes"
+  type        = string
+  default     = "c6a.large" # 2 vCPU, 4GB RAM - lighter workload
 }
 
 variable "disk_size_gb" {
-  description = "Root disk size in GB"
+  description = "Root disk size in GB for validators"
+  type        = number
+  default     = 500
+}
+
+variable "rpc_archive_disk_size_gb" {
+  description = "Disk size for archive RPC nodes (full history requires more space)"
+  type        = number
+  default     = 1000
+}
+
+variable "rpc_pruned_disk_size_gb" {
+  description = "Disk size for pruned RPC nodes"
   type        = number
   default     = 500
 }
@@ -144,4 +168,32 @@ variable "monitoring_disk_size_gb" {
   description = "Disk size for monitoring server in GB"
   type        = number
   default     = 50
+}
+
+#
+# Primary Network Validator Configuration
+#
+
+variable "primary_validator_count" {
+  description = "Number of Primary Network validators"
+  type        = number
+  default     = 0 # Disabled by default, L1 focus
+}
+
+variable "primary_validator_instance_type" {
+  description = "EC2 instance type for Primary Network validators (must have NVMe)"
+  type        = string
+  default     = "i4i.xlarge" # 4 vCPU, 32GB RAM, 937GB NVMe
+}
+
+variable "primary_validator_root_disk_gb" {
+  description = "Root EBS disk size for Primary Network validators (OS only)"
+  type        = number
+  default     = 50 # OS + binaries only, data on NVMe
+}
+
+variable "enable_staking_key_backup" {
+  description = "Enable S3 backup for validator staking keys"
+  type        = bool
+  default     = true
 }

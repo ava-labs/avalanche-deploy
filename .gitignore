@@ -4,6 +4,12 @@
 *.tfstate.*
 terraform.tfvars
 .terraform.lock.hcl
+tfplan
+*.tfplan
+
+# Credentials (never commit)
+.aws-creds.sh
+*-creds.sh
 
 # Environment files
 .env
@@ -15,11 +21,17 @@ l1.env
 *.bak
 *.broken
 node_ids.txt
+primary_validator_node_ids.txt
+migration_targets.txt
 
 # Binaries
 tools/create-l1/create-l1
 tools/initialize-validator-manager/initialize-validator-manager
+tools/initialize-validator-manager/init-vm
 validator-manager.json
+
+# Local notes
+notes/
 
 # OS files
 .DS_Store

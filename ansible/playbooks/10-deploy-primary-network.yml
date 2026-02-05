@@ -1,25 +1,33 @@
 ---
-# Phase 1: Deploy nodes and sync with primary network
+# Deploy Primary Network Validators
 #
-# This deploys avalanchego nodes that sync with Fuji/Mainnet.
-# They do NOT track any subnet yet - that comes after L1 creation.
+# This deploys avalanchego nodes configured as Primary Network validators.
+# Unlike L1 validators, these nodes:
+#   - Sync full P/X/C chains (no partial-sync)
+#   - Use state-sync for faster initial sync
+#   - Require substantial storage (937GB NVMe on i4i.xlarge)
 #
 # Usage:
-#   ansible-playbook playbooks/01-deploy-nodes.yml
+#   ansible-playbook playbooks/10-deploy-primary-network.yml
+#   ansible-playbook playbooks/10-deploy-primary-network.yml -e network=mainnet
 #
-# After this completes:
-#   1. Wait for nodes to sync (check /ext/health)
-#   2. Run create-l1 tool to create your L1
-#   3. Run 02-configure-l1.yml with the SUBNET_ID
+# After deployment:
+#   1. Wait for all chains to bootstrap (check scripts/check-primary-sync.sh)
+#   2. Register validator with P-Chain (requires staking)
+#   3. Back up staking keys: make backup-keys
 
-- name: Deploy Avalanche Nodes (Phase 1 - Primary Network Sync)
-  hosts: validators:rpc
+- name: Deploy Primary Network Validators
+  hosts: primary_validators
   become: true
   gather_facts: true
 
   vars:
-    # No subnet tracking in phase 1
+    # Primary Network validators need full sync
+    partial_sync_primary_network: false
+    # No subnet tracking for Primary Network validators
     track_subnets: []
+    # Node type for config loading
+    node_type: "primary-validator"
 
   pre_tasks:
     - name: Wait for system to become reachable
@@ -32,15 +40,12 @@
         cache_valid_time: 3600
       when: ansible_os_family == "Debian"
 
-    - name: Install AWS CLI for staking key backup
+    - name: Install AWS CLI for S3 backup
       apt:
-        name: awscli
+        name:
+          - awscli
         state: present
-      when:
-        - ansible_os_family == "Debian"
-        - staking_keys_bucket is defined
-        - staking_keys_bucket != ""
-        - node_type == "validator"
+      when: staking_keys_bucket is defined and staking_keys_bucket != ""
 
   roles:
     - role: avalanchego
@@ -65,22 +70,22 @@
 
     - name: Display Node ID
       debug:
-        msg: "{{ inventory_hostname }}: {{ (node_info.json.result.nodeID) }}"
+        msg: "{{ inventory_hostname }}: {{ node_info.json.result.nodeID }}"
 
     - name: Save node IDs to local file
       lineinfile:
-        path: "{{ playbook_dir }}/../node_ids.txt"
+        path: "{{ playbook_dir }}/../primary_validator_node_ids.txt"
         line: "{{ inventory_hostname }}={{ hostvars[inventory_hostname]['ansible_host'] }}={{ node_info.json.result.nodeID }}"
         create: yes
       delegate_to: localhost
       become: false
 
-- name: Backup validator staking keys to S3
-  hosts: validators
+- name: Backup staking keys to S3
+  hosts: primary_validators
   become: true
   gather_facts: false
   tasks:
-    - name: Check if S3 backup is configured
+    - name: Check if S3 backup is enabled
       set_fact:
         s3_backup_enabled: "{{ staking_keys_bucket is defined and staking_keys_bucket != '' }}"
 
@@ -119,28 +124,25 @@
         msg: |
 
           ============================================
-          Phase 1 Complete - Nodes Deployed
+          Primary Network Validators Deployed
           ============================================
 
-          Node IDs saved to: ansible/node_ids.txt
-          Staking keys backed up to S3 (if enabled)
+          Node IDs saved to: ansible/primary_validator_node_ids.txt
 
           Next steps:
-          1. Wait for nodes to sync with {{ network | default('fuji') }}
-             Check: curl http://<node-ip>:9650/ext/health
+          1. Wait for all chains to bootstrap (P, X, C):
+             ./scripts/check-primary-sync.sh
 
-          2. Create your L1:
-             cd tools/create-l1
-             export AVALANCHE_PRIVATE_KEY=PrivateKey-...
-             ./create-l1 --network={{ network | default('fuji') }} \
-               --validators=<ip1>,<ip2>,<ip3> \
-               --genesis=../../genesis.json
+          2. Check bootstrap progress:
+             curl http://<node-ip>:9650/ext/info -X POST \
+               -H 'Content-Type: application/json' \
+               -d '{"jsonrpc":"2.0","id":1,"method":"info.isBootstrapped","params":{"chain":"P"}}'
 
-          3. Configure nodes with your L1:
-             SUBNET_ID=<from-create-l1-output>
-             ansible-playbook playbooks/02-configure-l1.yml -e subnet_id=$SUBNET_ID
+          3. Register as validator on P-Chain:
+             - Requires minimum stake (2000 AVAX on Mainnet, 1 AVAX on Fuji)
+             - Use Avalanche Core wallet or CLI
 
-          To backup keys manually later:
-             make backup-keys
+          4. Verify staking keys are backed up:
+             aws s3 ls s3://<bucket>/primary-validator-1/
 
           ============================================

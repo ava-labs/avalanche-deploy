@@ -1,0 +1,187 @@
+---
+# Restore Database from Snapshot
+#
+# Downloads and restores an avalanchego database snapshot from S3.
+# Use this to quickly bootstrap new nodes instead of state sync.
+#
+# Usage:
+#   ansible-playbook playbooks/15-restore-snapshot.yml --limit migration-target
+#   ansible-playbook playbooks/15-restore-snapshot.yml --limit migration-target -e snapshot_name=mainnet-2025-02
+#
+# If snapshot_name is not specified, uses 'latest'.
+#
+# Requirements:
+#   - S3 bucket with snapshots (created by 14-create-snapshot.yml)
+#   - Target node has avalanchego installed but NOT running as validator
+#   - Sufficient disk space (~2x snapshot size during extraction)
+
+- name: Restore Database from Snapshot
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    snapshot_name: "latest"
+    temp_dir: /tmp/snapshot-restore
+    db_path: /var/lib/avalanchego/db
+
+  pre_tasks:
+    - name: Verify S3 backup is configured
+      assert:
+        that:
+          - staking_keys_bucket is defined
+          - staking_keys_bucket != ""
+        fail_msg: "S3 backup not configured. Set staking_keys_bucket in inventory."
+
+    - name: Install lz4 compression
+      apt:
+        name: lz4
+        state: present
+
+    - name: Check if snapshot exists in S3
+      command: >
+        aws s3 ls s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4
+      register: snapshot_exists
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if snapshot not found
+      fail:
+        msg: |
+          Snapshot not found: s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4
+
+          List available snapshots:
+            aws s3 ls s3://{{ staking_keys_bucket }}/snapshots/
+
+          Create a snapshot first:
+            ansible-playbook playbooks/14-create-snapshot.yml --limit <synced-node>
+      when: snapshot_exists.rc != 0
+
+  tasks:
+    - name: Get snapshot metadata
+      command: >
+        aws s3 cp s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.json -
+      register: snapshot_metadata
+      failed_when: false
+      changed_when: false
+
+    - name: Display snapshot info
+      debug:
+        msg: "Restoring snapshot: {{ snapshot_name }} ({{ (snapshot_metadata.stdout | from_json).created | default('unknown date') }})"
+      when: snapshot_metadata.rc == 0
+
+    - name: Stop avalanchego
+      systemd:
+        name: avalanchego
+        state: stopped
+
+    - name: Create temp directory
+      file:
+        path: "{{ temp_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Check available disk space
+      shell: df -BG {{ db_path | dirname }} | tail -1 | awk '{print $4}' | sed 's/G//'
+      register: available_space
+      changed_when: false
+
+    - name: Display available space
+      debug:
+        msg: "Available space: {{ available_space.stdout }}GB"
+
+    - name: Remove existing database
+      file:
+        path: "{{ db_path }}"
+        state: absent
+
+    - name: Create database directory
+      file:
+        path: "{{ db_path }}"
+        state: directory
+        owner: avalanche
+        group: avalanche
+        mode: '0755'
+
+    - name: Download and extract snapshot (streaming)
+      shell: |
+        aws s3 cp s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4 - | \
+          lz4 -d | \
+          tar xf - -C {{ db_path | dirname }}
+      register: restore_result
+      async: 7200  # 2 hour timeout
+      poll: 60
+
+    - name: Set database ownership
+      file:
+        path: "{{ db_path }}"
+        owner: avalanche
+        group: avalanche
+        recurse: yes
+
+    - name: Clean up temp directory
+      file:
+        path: "{{ temp_dir }}"
+        state: absent
+
+    - name: Start avalanchego
+      systemd:
+        name: avalanchego
+        state: started
+
+    - name: Wait for node to start
+      uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.getNodeID"
+        return_content: yes
+      register: node_info
+      until: node_info.status == 200
+      retries: 30
+      delay: 10
+
+    - name: Display Node ID
+      debug:
+        msg: "Node ID: {{ node_info.json.result.nodeID }}"
+
+    - name: Check P-Chain status
+      uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.isBootstrapped"
+          params:
+            chain: "P"
+        return_content: yes
+      register: pchain_status
+      until: pchain_status.status == 200
+      retries: 60
+      delay: 10
+
+    - name: Display completion message
+      debug:
+        msg: |
+
+          ============================================
+          Snapshot Restored Successfully
+          ============================================
+
+          Node ID: {{ node_info.json.result.nodeID }}
+          Snapshot: {{ snapshot_name }}
+
+          The node is now catching up from the snapshot.
+          This should only take a few minutes to sync recent blocks.
+
+          Check sync status:
+            ./scripts/check-primary-sync.sh {{ ansible_host }}
+
+          P-Chain bootstrapped: {{ pchain_status.json.result.isBootstrapped | default(false) }}
+
+          ============================================
