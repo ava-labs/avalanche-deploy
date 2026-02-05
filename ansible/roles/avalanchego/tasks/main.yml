@@ -3,21 +3,21 @@
 
 # Create user/group FIRST (needed for NVMe ownership)
 - name: Create avalanche group
-  group:
+  ansible.builtin.group:
     name: "{{ avalanchego_group }}"
-    system: yes
+    system: true
 
 - name: Create avalanche user
-  user:
+  ansible.builtin.user:
     name: "{{ avalanchego_user }}"
     group: "{{ avalanchego_group }}"
-    system: yes
+    system: true
     shell: /bin/false
     home: /home/{{ avalanchego_user }}
-    create_home: yes
+    create_home: true
 
 - name: Create staking directory for auto-generated keys
-  file:
+  ansible.builtin.file:
     path: "/home/{{ avalanchego_user }}/.avalanchego/staking"
     state: directory
     owner: "{{ avalanchego_user }}"
@@ -27,12 +27,12 @@
 # Mount local NVMe if available (AWS instance store, GCP local SSD, Azure Lsv3)
 # This mounts to avalanchego_data_dir (/var/lib/avalanchego)
 - name: Setup NVMe storage
-  include_tasks: nvme.yml
+  ansible.builtin.include_tasks: nvme.yml
   when: use_local_nvme | default(true)
 
 # Create directories (data_dir may already be a mount point from NVMe)
 - name: Create directories
-  file:
+  ansible.builtin.file:
     path: "{{ item }}"
     state: directory
     owner: "{{ avalanchego_user }}"
@@ -48,74 +48,77 @@
     - "{{ avalanchego_config_dir }}/chains"
 
 - name: Download avalanchego
-  get_url:
+  ansible.builtin.get_url:
     url: "https://github.com/ava-labs/avalanchego/releases/download/{{ avalanchego_version }}/avalanchego-linux-amd64-{{ avalanchego_version }}.tar.gz"
     dest: /tmp/avalanchego.tar.gz
     mode: "0644"
 
 - name: Extract avalanchego
-  unarchive:
+  ansible.builtin.unarchive:
     src: /tmp/avalanchego.tar.gz
     dest: /tmp/
-    remote_src: yes
+    remote_src: true
 
 - name: Install avalanchego binary
-  copy:
+  ansible.builtin.copy:
     src: "/tmp/avalanchego-{{ avalanchego_version }}/avalanchego"
     dest: /usr/local/bin/avalanchego
     owner: root
     group: root
     mode: "0755"
-    remote_src: yes
+    remote_src: true
 
 # subnet-evm is bundled with avalanchego as of v1.12.0+
 - name: Check if bundled subnet-evm exists in release
-  stat:
+  ansible.builtin.stat:
     path: "/tmp/avalanchego-{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
   register: bundled_subnet_evm
 
 - name: Install bundled subnet-evm plugin
-  copy:
+  ansible.builtin.copy:
     src: "/tmp/avalanchego-{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
     dest: "{{ avalanchego_plugin_dir }}/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
     owner: "{{ avalanchego_user }}"
     group: "{{ avalanchego_group }}"
     mode: "0755"
-    remote_src: yes
+    remote_src: true
   when: bundled_subnet_evm.stat.exists
 
 # Fallback for older avalanchego versions that don't bundle subnet-evm
 - name: Download subnet-evm plugin (fallback for older versions)
-  get_url:
-    url: "https://github.com/ava-labs/subnet-evm/releases/download/{{ subnet_evm_version }}/subnet-evm_{{ subnet_evm_version | regex_replace('^v', '') }}_linux_amd64.tar.gz"
+  vars:
+    subnet_evm_base: "https://github.com/ava-labs/subnet-evm/releases/download"
+    subnet_evm_file: "subnet-evm_{{ subnet_evm_version | regex_replace('^v', '') }}_linux_amd64.tar.gz"
+  ansible.builtin.get_url:
+    url: "{{ subnet_evm_base }}/{{ subnet_evm_version }}/{{ subnet_evm_file }}"
     dest: /tmp/subnet-evm.tar.gz
     mode: "0644"
   when: not bundled_subnet_evm.stat.exists and subnet_evm_version is defined
 
 - name: Extract subnet-evm (fallback)
-  unarchive:
+  ansible.builtin.unarchive:
     src: /tmp/subnet-evm.tar.gz
     dest: /tmp/
-    remote_src: yes
+    remote_src: true
   when: not bundled_subnet_evm.stat.exists and subnet_evm_version is defined
 
 - name: Install subnet-evm plugin (fallback)
-  copy:
+  ansible.builtin.copy:
     src: /tmp/subnet-evm
     dest: "{{ avalanchego_plugin_dir }}/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
     owner: "{{ avalanchego_user }}"
     group: "{{ avalanchego_group }}"
     mode: "0755"
-    remote_src: yes
+    remote_src: true
   when: not bundled_subnet_evm.stat.exists and subnet_evm_version is defined
 
 - name: Load custom node config from repo root
-  set_fact:
+  ansible.builtin.set_fact:
     custom_node_config: "{{ lookup('file', playbook_dir + '/../../' + node_type + '-node-config.json') | from_json }}"
-  ignore_errors: yes
+  failed_when: false
 
 - name: Build base node configuration
-  set_fact:
+  ansible.builtin.set_fact:
     base_node_config:
       network-id: "{{ network_ids[avalanchego_network] }}"
       http-host: "0.0.0.0"
@@ -135,21 +138,21 @@
       partial-sync-primary-network: "{{ partial_sync_primary_network | default(true) }}"
 
 - name: Add subnet tracking to config
-  set_fact:
+  ansible.builtin.set_fact:
     base_node_config: "{{ base_node_config | combine({'track-subnets': track_subnets | join(',')}) }}"
   when: track_subnets is defined and track_subnets | length > 0
 
 - name: Add L1 bootstrap info to config
-  set_fact:
+  ansible.builtin.set_fact:
     base_node_config: "{{ base_node_config | combine({'bootstrap-ids': l1_bootstrap_ids | join(','), 'bootstrap-ips': l1_bootstrap_ips | join(',')}) }}"
   when: l1_bootstrap_ids is defined and l1_bootstrap_ids | length > 0
 
 - name: Merge custom config with base config
-  set_fact:
+  ansible.builtin.set_fact:
     final_node_config: "{{ base_node_config | combine(custom_node_config | default({})) }}"
 
 - name: Write node configuration
-  copy:
+  ansible.builtin.copy:
     content: "{{ final_node_config | to_nice_json }}"
     dest: "{{ avalanchego_config_dir }}/node.json"
     owner: "{{ avalanchego_user }}"
@@ -158,7 +161,7 @@
   notify: Restart avalanchego
 
 - name: Create systemd service
-  template:
+  ansible.builtin.template:
     src: avalanchego.service.j2
     dest: /etc/systemd/system/avalanchego.service
     owner: root
@@ -169,14 +172,14 @@
     - Restart avalanchego
 
 - name: Enable and start avalanchego
-  systemd:
+  ansible.builtin.systemd:
     name: avalanchego
-    enabled: yes
+    enabled: true
     state: started
-    daemon_reload: yes
+    daemon_reload: true
 
 - name: Wait for P-Chain to bootstrap
-  uri:
+  ansible.builtin.uri:
     url: "http://127.0.0.1:{{ http_port }}/ext/info"
     method: POST
     body_format: json
@@ -186,14 +189,14 @@
       method: "info.isBootstrapped"
       params:
         chain: "P"
-    return_content: yes
+    return_content: true
   register: bootstrap_check
   until: bootstrap_check.status == 200 and (bootstrap_check.json.result.isBootstrapped | default(false))
   retries: 60
   delay: 10
 
 - name: Clean up temp files
-  file:
+  ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:
@@ -201,4 +204,4 @@
     - "/tmp/avalanchego-{{ avalanchego_version }}"
     - /tmp/subnet-evm.tar.gz
     - /tmp/subnet-evm
-  ignore_errors: yes
+  failed_when: false

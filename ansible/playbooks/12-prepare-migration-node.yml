@@ -42,17 +42,17 @@
 
   pre_tasks:
     - name: Wait for system to become reachable
-      wait_for_connection:
+      ansible.builtin.wait_for_connection:
         timeout: 300
 
     - name: Update apt cache
-      apt:
-        update_cache: yes
+      ansible.builtin.apt:
+        update_cache: true
         cache_valid_time: 3600
       when: ansible_os_family == "Debian"
 
     - name: Install required packages
-      apt:
+      ansible.builtin.apt:
         name:
           - awscli
           - lz4
@@ -69,14 +69,14 @@
       when: use_snapshot | bool
       block:
         - name: Check if snapshot exists
-          command: >
+          ansible.builtin.command: >
             aws s3 ls s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4
           register: snapshot_check
           failed_when: false
           changed_when: false
 
         - name: Fail if snapshot not found
-          fail:
+          ansible.builtin.fail:
             msg: |
               Snapshot not found: s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4
 
@@ -88,17 +88,17 @@
           when: snapshot_check.rc != 0
 
         - name: Stop avalanchego for snapshot restore
-          systemd:
+          ansible.builtin.systemd:
             name: avalanchego
             state: stopped
 
         - name: Remove existing database
-          file:
+          ansible.builtin.file:
             path: /var/lib/avalanchego/db
             state: absent
 
         - name: Create database directory
-          file:
+          ansible.builtin.file:
             path: /var/lib/avalanchego/db
             state: directory
             owner: avalanche
@@ -106,32 +106,36 @@
             mode: '0755'
 
         - name: Download and extract snapshot
-          shell: |
+          ansible.builtin.shell: |
+            set -o pipefail
             aws s3 cp s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4 - | \
               lz4 -d | \
               tar xf - -C /var/lib/avalanchego
+          args:
+            executable: /bin/bash
           async: 7200
           poll: 60
+          changed_when: true
 
         - name: Set database ownership
-          file:
+          ansible.builtin.file:
             path: /var/lib/avalanchego/db
             owner: avalanche
             group: avalanche
-            recurse: yes
+            recurse: true
 
         - name: Start avalanchego after snapshot restore
-          systemd:
+          ansible.builtin.systemd:
             name: avalanchego
             state: started
 
         - name: Display snapshot restore status
-          debug:
+          ansible.builtin.debug:
             msg: "Snapshot restored from s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4"
 
     # Wait for sync (both paths)
     - name: Wait for P-Chain to start bootstrapping
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -141,14 +145,14 @@
           method: "info.isBootstrapped"
           params:
             chain: "P"
-        return_content: yes
+        return_content: true
       register: pchain_status
       until: pchain_status.status == 200
       retries: 60
       delay: 10
 
     - name: Display sync status
-      debug:
+      ansible.builtin.debug:
         msg: |
           Node is {{ 'catching up from snapshot' if use_snapshot | bool else 'syncing via state-sync' }}.
           P-Chain bootstrap status: {{ pchain_status.json.result.isBootstrapped | default(false) }}
@@ -156,10 +160,11 @@
           This node does NOT have staking keys yet.
 
     - name: Save migration target info
-      lineinfile:
+      ansible.builtin.lineinfile:
         path: "{{ playbook_dir }}/../migration_targets.txt"
         line: "{{ inventory_hostname }}={{ hostvars[inventory_hostname]['ansible_host'] }}={{ 'SNAPSHOT' if use_snapshot | bool else 'STATE_SYNC' }}"
-        create: yes
+        create: true
+        mode: '0644'
       delegate_to: localhost
       become: false
 
@@ -168,14 +173,18 @@
   gather_facts: false
   tasks:
     - name: Show instructions
-      debug:
+      ansible.builtin.debug:
         msg: |
 
           ============================================
           Migration Node Preparation Started
           ============================================
 
-          The new node is now {{ 'catching up from snapshot' if hostvars[groups['all'][0]]['use_snapshot'] | default(false) | bool else 'syncing via state-sync' }}.
+          {% if hostvars[groups['all'][0]]['use_snapshot'] | default(false) | bool %}
+          The new node is now catching up from snapshot.
+          {% else %}
+          The new node is now syncing via state-sync.
+          {% endif %}
           It does NOT have staking keys yet - that happens during migration.
 
           Monitor sync progress:

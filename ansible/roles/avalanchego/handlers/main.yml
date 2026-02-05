@@ -1,9 +1,9 @@
 ---
 - name: Reload systemd
-  systemd:
-    daemon_reload: yes
+  ansible.builtin.systemd:
+    daemon_reload: true
 
 - name: Restart avalanchego
-  systemd:
+  ansible.builtin.systemd:
     name: avalanchego
     state: restarted

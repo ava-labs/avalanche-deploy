@@ -28,5 +28,5 @@
 
   post_tasks:
     - name: Display Grafana URL
-      debug:
+      ansible.builtin.debug:
         msg: "Grafana available at: http://{{ ansible_host }}:{{ grafana_port }}"

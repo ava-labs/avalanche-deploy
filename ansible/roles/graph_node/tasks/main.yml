@@ -17,7 +17,7 @@
 #   graph_node_index_port: Index status port (default: 8030)
 
 - name: Install Docker dependencies
-  apt:
+  ansible.builtin.apt:
     name:
       - apt-transport-https
       - ca-certificates
@@ -25,43 +25,43 @@
       - gnupg
       - lsb-release
     state: present
-    update_cache: yes
+    update_cache: true
 
 - name: Add Docker GPG key
-  apt_key:
+  ansible.builtin.apt_key:
     url: https://download.docker.com/linux/ubuntu/gpg
     state: present
 
 - name: Add Docker repository
-  apt_repository:
+  ansible.builtin.apt_repository:
     repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
     state: present
 
 - name: Install Docker
-  apt:
+  ansible.builtin.apt:
     name:
       - docker-ce
       - docker-ce-cli
       - containerd.io
       - docker-compose-plugin
     state: present
-    update_cache: yes
+    update_cache: true
 
 - name: Start Docker service
-  systemd:
+  ansible.builtin.systemd:
     name: docker
     state: started
-    enabled: yes
+    enabled: true
 
 - name: Create graph user
-  user:
+  ansible.builtin.user:
     name: graph
     groups: docker
     shell: /bin/bash
-    create_home: yes
+    create_home: true
 
 - name: Create graph directories
-  file:
+  ansible.builtin.file:
     path: "{{ item }}"
     state: directory
     owner: graph
@@ -74,7 +74,7 @@
     - /opt/graph-node/data/ipfs
 
 - name: Create docker-compose file
-  template:
+  ansible.builtin.template:
     src: docker-compose.yml.j2
     dest: /opt/graph-node/docker-compose.yml
     owner: graph
@@ -82,7 +82,7 @@
     mode: '0644'
 
 - name: Create environment file
-  template:
+  ansible.builtin.template:
     src: graph-node.env.j2
     dest: /opt/graph-node/.env
     owner: graph
@@ -90,21 +90,21 @@
     mode: '0600'
 
 - name: Create systemd service
-  template:
+  ansible.builtin.template:
     src: graph-node.service.j2
     dest: /etc/systemd/system/graph-node.service
     mode: '0644'
   notify: Restart graph-node
 
 - name: Enable and start graph-node
-  systemd:
+  ansible.builtin.systemd:
     name: graph-node
     state: started
-    enabled: yes
-    daemon_reload: yes
+    enabled: true
+    daemon_reload: true
 
 - name: Wait for Graph Node to be ready
-  uri:
+  ansible.builtin.uri:
     url: "http://127.0.0.1:{{ graph_node_index_port | default(8030) }}/graphql"
     method: POST
     body_format: json
@@ -115,4 +115,4 @@
   until: graph_health.status == 200
   retries: 30
   delay: 10
-  ignore_errors: yes
+  ignore_errors: true

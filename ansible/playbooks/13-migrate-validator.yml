@@ -28,7 +28,7 @@
   gather_facts: false
   tasks:
     - name: Check required variables
-      assert:
+      ansible.builtin.assert:
         that:
           - source_host is defined
           - target_host is defined
@@ -39,24 +39,24 @@
               -e target_host=<new-node>
 
     - name: Verify source host exists
-      assert:
+      ansible.builtin.assert:
         that:
           - source_host in groups['all']
         fail_msg: "Source host '{{ source_host }}' not found in inventory"
 
     - name: Verify target host exists
-      assert:
+      ansible.builtin.assert:
         that:
           - target_host in groups['all']
         fail_msg: "Target host '{{ target_host }}' not found in inventory"
 
 - name: Verify Target Node is Ready
-  hosts: "{{ target_host }}"
+  hosts: "{{ target_host | default('localhost') }}"
   become: true
   gather_facts: false
   tasks:
     - name: Check P-Chain bootstrap status
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -66,11 +66,11 @@
           method: "info.isBootstrapped"
           params:
             chain: "P"
-        return_content: yes
+        return_content: true
       register: pchain_status
 
     - name: Check X-Chain bootstrap status
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -80,11 +80,11 @@
           method: "info.isBootstrapped"
           params:
             chain: "X"
-        return_content: yes
+        return_content: true
       register: xchain_status
 
     - name: Check C-Chain bootstrap status
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -94,11 +94,11 @@
           method: "info.isBootstrapped"
           params:
             chain: "C"
-        return_content: yes
+        return_content: true
       register: cchain_status
 
     - name: Verify all chains are bootstrapped
-      assert:
+      ansible.builtin.assert:
         that:
           - pchain_status.json.result.isBootstrapped | default(false)
           - xchain_status.json.result.isBootstrapped | default(false)
@@ -112,16 +112,16 @@
           Wait for sync to complete before migrating.
 
     - name: Display target status
-      debug:
+      ansible.builtin.debug:
         msg: "Target node {{ target_host }} is fully synced and ready for migration"
 
 - name: Ensure Staking Keys are Backed Up
-  hosts: "{{ source_host }}"
+  hosts: "{{ source_host | default('localhost') }}"
   become: true
   gather_facts: false
   tasks:
     - name: Check S3 backup exists
-      command: >
+      ansible.builtin.command: >
         aws s3 ls s3://{{ staking_keys_bucket }}/{{ source_host }}/staking-keys.tar.gz
       register: s3_check
       failed_when: false
@@ -131,26 +131,27 @@
       when: s3_check.rc != 0
       block:
         - name: Create backup archive
-          archive:
+          ansible.builtin.archive:
             path: /var/lib/avalanchego/staking/
             dest: /tmp/staking-keys-{{ source_host }}.tar.gz
             format: gz
             mode: '0600'
 
         - name: Upload to S3
-          command: >
+          ansible.builtin.command: >
             aws s3 cp /tmp/staking-keys-{{ source_host }}.tar.gz
             s3://{{ staking_keys_bucket }}/{{ source_host }}/staking-keys.tar.gz
             --sse aws:kms
             --sse-kms-key-id {{ staking_keys_kms_arn }}
+          changed_when: true
 
         - name: Clean up temp file
-          file:
+          ansible.builtin.file:
             path: /tmp/staking-keys-{{ source_host }}.tar.gz
             state: absent
 
     - name: Get source Node ID
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -158,34 +159,34 @@
           jsonrpc: "2.0"
           id: 1
           method: "info.getNodeID"
-        return_content: yes
+        return_content: true
       register: source_node_info
 
     - name: Save source Node ID
-      set_fact:
+      ansible.builtin.set_fact:
         source_node_id: "{{ source_node_info.json.result.nodeID }}"
 
     - name: Display source Node ID
-      debug:
+      ansible.builtin.debug:
         msg: "Source Node ID: {{ source_node_id }}"
 
 - name: Prepare Target for Key Installation
-  hosts: "{{ target_host }}"
+  hosts: "{{ target_host | default('localhost') }}"
   become: true
   gather_facts: false
   tasks:
     - name: Stop avalanchego on target
-      systemd:
+      ansible.builtin.systemd:
         name: avalanchego
         state: stopped
 
     - name: Clear existing staking keys on target
-      file:
+      ansible.builtin.file:
         path: /var/lib/avalanchego/staking/
         state: absent
 
     - name: Recreate staking directory
-      file:
+      ansible.builtin.file:
         path: /var/lib/avalanchego/staking/
         state: directory
         owner: avalanche
@@ -193,64 +194,65 @@
         mode: '0700'
 
     - name: Download staking keys from S3
-      command: >
+      ansible.builtin.command: >
         aws s3 cp s3://{{ staking_keys_bucket }}/{{ source_host }}/staking-keys.tar.gz
         /tmp/staking-keys.tar.gz
       register: s3_download
+      changed_when: s3_download.rc == 0
 
     - name: Extract staking keys
-      unarchive:
+      ansible.builtin.unarchive:
         src: /tmp/staking-keys.tar.gz
         dest: /var/lib/avalanchego/staking/
-        remote_src: yes
+        remote_src: true
         owner: avalanche
         group: avalanche
 
     - name: Clean up downloaded archive
-      file:
+      ansible.builtin.file:
         path: /tmp/staking-keys.tar.gz
         state: absent
 
     - name: Display preparation status
-      debug:
+      ansible.builtin.debug:
         msg: "Target node prepared with staking keys from {{ source_host }}"
 
 - name: Execute Migration (DOWNTIME BEGINS)
-  hosts: "{{ source_host }}"
+  hosts: "{{ source_host | default('localhost') }}"
   become: true
   gather_facts: false
   tasks:
     - name: "MIGRATION: Stopping source validator (downtime begins)"
-      systemd:
+      ansible.builtin.systemd:
         name: avalanchego
         state: stopped
 
     - name: Record migration timestamp
-      debug:
+      ansible.builtin.debug:
         msg: "Source validator stopped at {{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ')) }}"
 
 - name: Start Target Validator (DOWNTIME ENDS)
-  hosts: "{{ target_host }}"
+  hosts: "{{ target_host | default('localhost') }}"
   become: true
   gather_facts: false
   tasks:
     - name: "MIGRATION: Starting target validator (downtime ends)"
-      systemd:
+      ansible.builtin.systemd:
         name: avalanchego
         state: started
 
     - name: Wait for target to be healthy
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/health"
         method: GET
-        return_content: yes
+        return_content: true
       register: health_check
       until: health_check.status == 200 and (health_check.json.healthy | default(false))
       retries: 30
       delay: 10
 
     - name: Get target Node ID
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -258,11 +260,11 @@
           jsonrpc: "2.0"
           id: 1
           method: "info.getNodeID"
-        return_content: yes
+        return_content: true
       register: target_node_info
 
     - name: Display target Node ID
-      debug:
+      ansible.builtin.debug:
         msg: "Target Node ID: {{ target_node_info.json.result.nodeID }}"
 
 - name: Verify Migration Success
@@ -270,12 +272,12 @@
   gather_facts: false
   tasks:
     - name: Get source and target Node IDs
-      set_fact:
+      ansible.builtin.set_fact:
         source_id: "{{ hostvars[source_host]['source_node_id'] }}"
         target_id: "{{ hostvars[target_host]['target_node_info']['json']['result']['nodeID'] }}"
 
     - name: Verify Node IDs match
-      assert:
+      ansible.builtin.assert:
         that:
           - source_id == target_id
         fail_msg: |
@@ -285,7 +287,7 @@
         success_msg: "Node ID verified: {{ source_id }}"
 
     - name: Display migration summary
-      debug:
+      ansible.builtin.debug:
         msg: |
 
           ============================================

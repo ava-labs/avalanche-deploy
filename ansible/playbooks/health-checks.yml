@@ -21,14 +21,14 @@
 
   tasks:
     - name: Check avalanchego service status
-      systemd:
+      ansible.builtin.systemd:
         name: avalanchego
       register: service_status
       become: true
-      ignore_errors: yes
+      failed_when: false
 
     - name: Get node ID
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -36,13 +36,13 @@
           jsonrpc: "2.0"
           id: 1
           method: "info.getNodeID"
-        return_content: yes
+        return_content: true
         timeout: 10
       register: node_id_response
-      ignore_errors: yes
+      failed_when: false
 
     - name: Get node version
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -50,13 +50,13 @@
           jsonrpc: "2.0"
           id: 1
           method: "info.getNodeVersion"
-        return_content: yes
+        return_content: true
         timeout: 10
       register: node_version_response
-      ignore_errors: yes
+      failed_when: false
 
     - name: Check P-Chain bootstrap status
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -66,13 +66,13 @@
           method: "info.isBootstrapped"
           params:
             chain: "P"
-        return_content: yes
+        return_content: true
         timeout: 10
       register: p_chain_status
-      ignore_errors: yes
+      failed_when: false
 
     - name: Check C-Chain bootstrap status
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -82,13 +82,13 @@
           method: "info.isBootstrapped"
           params:
             chain: "C"
-        return_content: yes
+        return_content: true
         timeout: 10
       register: c_chain_status
-      ignore_errors: yes
+      failed_when: false
 
     - name: Check X-Chain bootstrap status
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -98,22 +98,22 @@
           method: "info.isBootstrapped"
           params:
             chain: "X"
-        return_content: yes
+        return_content: true
         timeout: 10
       register: x_chain_status
-      ignore_errors: yes
+      failed_when: false
 
     - name: Get health status
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/health"
         method: GET
-        return_content: yes
+        return_content: true
         timeout: 10
       register: health_response
-      ignore_errors: yes
+      failed_when: false
 
     - name: Check L1 chain RPC (if chain_id provided)
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/bc/{{ l1_chain_id }}/rpc"
         method: POST
         body_format: json
@@ -122,14 +122,14 @@
           id: 1
           method: "eth_blockNumber"
           params: []
-        return_content: yes
+        return_content: true
         timeout: 10
       register: l1_block_response
       when: l1_chain_id != ''
-      ignore_errors: yes
+      failed_when: false
 
     - name: Set node health facts
-      set_fact:
+      ansible.builtin.set_fact:
         node_health:
           hostname: "{{ inventory_hostname }}"
           ip: "{{ ansible_host }}"
@@ -148,11 +148,11 @@
 
   tasks:
     - name: Collect all node health data
-      set_fact:
+      ansible.builtin.set_fact:
         all_nodes_health: "{{ groups['validators'] | default([]) | union(groups['rpc'] | default([])) | map('extract', hostvars, 'node_health') | list }}"
 
     - name: Display validator health
-      debug:
+      ansible.builtin.debug:
         msg: |
 
           ============================================
@@ -174,7 +174,7 @@
           {% endfor %}
 
     - name: Display RPC health
-      debug:
+      ansible.builtin.debug:
         msg: |
 
           ============================================
@@ -196,13 +196,13 @@
           {% endfor %}
 
     - name: Calculate summary statistics
-      set_fact:
+      ansible.builtin.set_fact:
         total_nodes: "{{ all_nodes_health | length }}"
         healthy_nodes: "{{ all_nodes_health | selectattr('health_check_passed') | list | length }}"
         bootstrapped_nodes: "{{ all_nodes_health | selectattr('p_chain_bootstrapped') | list | length }}"
 
     - name: Display summary
-      debug:
+      ansible.builtin.debug:
         msg: |
 
           ============================================

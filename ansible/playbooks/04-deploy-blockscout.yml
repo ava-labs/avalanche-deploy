@@ -16,7 +16,7 @@
 
 - name: Deploy Blockscout Block Explorer
   hosts: rpc
-  become: yes
+  become: true
   vars:
     # Override these in your inventory or via -e
     blockscout_network_name: "{{ l1_name | default('Avalanche L1') }}"
@@ -34,7 +34,7 @@
 
   post_tasks:
     - name: Display access information
-      debug:
+      ansible.builtin.debug:
         msg: |
           ============================================
           Blockscout Block Explorer Deployed!

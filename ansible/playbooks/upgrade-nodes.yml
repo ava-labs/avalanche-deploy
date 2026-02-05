@@ -19,12 +19,12 @@
   gather_facts: false
   tasks:
     - name: Check required version
-      fail:
+      ansible.builtin.fail:
         msg: "Missing required variable: avalanchego_version. Usage: ansible-playbook playbooks/upgrade-nodes.yml -e avalanchego_version=1.12.0"
       when: avalanchego_version is not defined
 
     - name: Display upgrade plan
-      debug:
+      ansible.builtin.debug:
         msg: |
 
           ============================================
@@ -55,62 +55,62 @@
 
   tasks:
     - name: Display upgrade notice
-      debug:
+      ansible.builtin.debug:
         msg: "Upgrading {{ inventory_hostname }} to avalanchego {{ avalanchego_version }}"
 
     - name: Stop avalanchego service
-      systemd:
+      ansible.builtin.systemd:
         name: avalanchego
         state: stopped
 
     - name: Download new avalanchego version
-      get_url:
+      ansible.builtin.get_url:
         url: "https://github.com/ava-labs/avalanchego/releases/download/v{{ avalanchego_version }}/avalanchego-linux-amd64-v{{ avalanchego_version }}.tar.gz"
         dest: /tmp/avalanchego.tar.gz
         mode: '0644'
-        force: yes
+        force: true
 
     - name: Create extraction directory
-      file:
+      ansible.builtin.file:
         path: /tmp/avalanchego-extract
         state: directory
         mode: '0755'
 
     - name: Extract avalanchego
-      unarchive:
+      ansible.builtin.unarchive:
         src: /tmp/avalanchego.tar.gz
         dest: /tmp/avalanchego-extract
-        remote_src: yes
+        remote_src: true
 
     - name: Install avalanchego binary
-      copy:
+      ansible.builtin.copy:
         src: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/avalanchego"
         dest: /opt/avalanche/avalanchego/avalanchego
         mode: '0755'
-        remote_src: yes
-        backup: yes
+        remote_src: true
+        backup: true
 
     - name: Check if bundled subnet-evm exists in release
-      stat:
+      ansible.builtin.stat:
         path: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
       register: bundled_subnet_evm
 
     - name: Install bundled subnet-evm plugin
-      copy:
+      ansible.builtin.copy:
         src: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
         dest: "{{ plugin_dir }}/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
         mode: '0755'
-        remote_src: yes
-        backup: yes
+        remote_src: true
+        backup: true
       when: bundled_subnet_evm.stat.exists
 
     - name: Warn if subnet-evm not bundled (older release)
-      debug:
+      ansible.builtin.debug:
         msg: "WARNING: subnet-evm not found in release tarball. This may be an older avalanchego version. Keeping existing subnet-evm plugin."
       when: not bundled_subnet_evm.stat.exists
 
     - name: Clean up temp files
-      file:
+      ansible.builtin.file:
         path: "{{ item }}"
         state: absent
       loop:
@@ -118,20 +118,20 @@
         - /tmp/avalanchego-extract
 
     - name: Start avalanchego service
-      systemd:
+      ansible.builtin.systemd:
         name: avalanchego
         state: started
-        daemon_reload: yes
+        daemon_reload: true
 
     - name: Wait for service to start
-      pause:
+      ansible.builtin.pause:
         seconds: "{{ wait_seconds }}"
 
     - name: Wait for node to become healthy
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/health"
         method: GET
-        return_content: yes
+        return_content: true
         status_code: 200
       register: health_check
       until: health_check.status == 200
@@ -139,7 +139,7 @@
       delay: "{{ health_delay }}"
 
     - name: Verify P-Chain is bootstrapped
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -149,14 +149,14 @@
           method: "info.isBootstrapped"
           params:
             chain: "P"
-        return_content: yes
+        return_content: true
       register: p_chain_status
       until: p_chain_status.json.result.isBootstrapped | default(false)
       retries: "{{ health_retries }}"
       delay: "{{ health_delay }}"
 
     - name: Verify version upgraded
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -164,11 +164,11 @@
           jsonrpc: "2.0"
           id: 1
           method: "info.getNodeVersion"
-        return_content: yes
+        return_content: true
       register: version_check
 
     - name: Display upgrade status
-      debug:
+      ansible.builtin.debug:
         msg: "{{ inventory_hostname }} upgraded successfully - Version: {{ version_check.json.result.version }}"
 
 - name: Upgrade RPC Nodes (Rolling)
@@ -185,62 +185,62 @@
 
   tasks:
     - name: Display upgrade notice
-      debug:
+      ansible.builtin.debug:
         msg: "Upgrading {{ inventory_hostname }} to avalanchego {{ avalanchego_version }}"
 
     - name: Stop avalanchego service
-      systemd:
+      ansible.builtin.systemd:
         name: avalanchego
         state: stopped
 
     - name: Download new avalanchego version
-      get_url:
+      ansible.builtin.get_url:
         url: "https://github.com/ava-labs/avalanchego/releases/download/v{{ avalanchego_version }}/avalanchego-linux-amd64-v{{ avalanchego_version }}.tar.gz"
         dest: /tmp/avalanchego.tar.gz
         mode: '0644'
-        force: yes
+        force: true
 
     - name: Create extraction directory
-      file:
+      ansible.builtin.file:
         path: /tmp/avalanchego-extract
         state: directory
         mode: '0755'
 
     - name: Extract avalanchego
-      unarchive:
+      ansible.builtin.unarchive:
         src: /tmp/avalanchego.tar.gz
         dest: /tmp/avalanchego-extract
-        remote_src: yes
+        remote_src: true
 
     - name: Install avalanchego binary
-      copy:
+      ansible.builtin.copy:
         src: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/avalanchego"
         dest: /opt/avalanche/avalanchego/avalanchego
         mode: '0755'
-        remote_src: yes
-        backup: yes
+        remote_src: true
+        backup: true
 
     - name: Check if bundled subnet-evm exists in release
-      stat:
+      ansible.builtin.stat:
         path: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
       register: bundled_subnet_evm
 
     - name: Install bundled subnet-evm plugin
-      copy:
+      ansible.builtin.copy:
         src: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
         dest: "{{ plugin_dir }}/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
         mode: '0755'
-        remote_src: yes
-        backup: yes
+        remote_src: true
+        backup: true
       when: bundled_subnet_evm.stat.exists
 
     - name: Warn if subnet-evm not bundled (older release)
-      debug:
+      ansible.builtin.debug:
         msg: "WARNING: subnet-evm not found in release tarball. This may be an older avalanchego version. Keeping existing subnet-evm plugin."
       when: not bundled_subnet_evm.stat.exists
 
     - name: Clean up temp files
-      file:
+      ansible.builtin.file:
         path: "{{ item }}"
         state: absent
       loop:
@@ -248,20 +248,20 @@
         - /tmp/avalanchego-extract
 
     - name: Start avalanchego service
-      systemd:
+      ansible.builtin.systemd:
         name: avalanchego
         state: started
-        daemon_reload: yes
+        daemon_reload: true
 
     - name: Wait for service to start
-      pause:
+      ansible.builtin.pause:
         seconds: "{{ wait_seconds }}"
 
     - name: Wait for node to become healthy
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/health"
         method: GET
-        return_content: yes
+        return_content: true
         status_code: 200
       register: health_check
       until: health_check.status == 200
@@ -269,7 +269,7 @@
       delay: "{{ health_delay }}"
 
     - name: Verify P-Chain is bootstrapped
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -279,14 +279,14 @@
           method: "info.isBootstrapped"
           params:
             chain: "P"
-        return_content: yes
+        return_content: true
       register: p_chain_status
       until: p_chain_status.json.result.isBootstrapped | default(false)
       retries: "{{ health_retries }}"
       delay: "{{ health_delay }}"
 
     - name: Verify version upgraded
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -294,11 +294,11 @@
           jsonrpc: "2.0"
           id: 1
           method: "info.getNodeVersion"
-        return_content: yes
+        return_content: true
       register: version_check
 
     - name: Display upgrade status
-      debug:
+      ansible.builtin.debug:
         msg: "{{ inventory_hostname }} upgraded successfully - Version: {{ version_check.json.result.version }}"
 
 - name: Upgrade Summary
@@ -306,7 +306,7 @@
   gather_facts: false
   tasks:
     - name: Display completion message
-      debug:
+      ansible.builtin.debug:
         msg: |
 
           ============================================

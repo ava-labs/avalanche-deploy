@@ -23,75 +23,77 @@
 
   tasks:
     - name: Verify S3 backup is configured
-      assert:
+      ansible.builtin.assert:
         that:
           - staking_keys_bucket is defined
           - staking_keys_bucket != ""
         fail_msg: "S3 backup not configured. Set staking_keys_bucket in inventory."
 
     - name: Check staking directory exists
-      stat:
+      ansible.builtin.stat:
         path: /var/lib/avalanchego/staking/
       register: staking_dir
 
     - name: Verify staking keys exist
-      assert:
+      ansible.builtin.assert:
         that:
           - staking_dir.stat.exists
           - staking_dir.stat.isdir
         fail_msg: "Staking directory not found. Node may not be initialized yet."
 
     - name: Check for staker.crt
-      stat:
+      ansible.builtin.stat:
         path: /var/lib/avalanchego/staking/staker.crt
       register: staker_crt
 
     - name: Check for staker.key
-      stat:
+      ansible.builtin.stat:
         path: /var/lib/avalanchego/staking/staker.key
       register: staker_key
 
     - name: Verify staking files exist
-      assert:
+      ansible.builtin.assert:
         that:
           - staker_crt.stat.exists
           - staker_key.stat.exists
         fail_msg: "Staking keys not found. Node may not be initialized yet."
 
     - name: Get current timestamp
-      set_fact:
+      ansible.builtin.set_fact:
         backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
 
     - name: Create backup archive
-      archive:
+      ansible.builtin.archive:
         path: /var/lib/avalanchego/staking/
         dest: /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
         format: gz
         mode: '0600'
 
     - name: Upload current backup to S3
-      command: >
+      ansible.builtin.command: >
         aws s3 cp /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
         s3://{{ staking_keys_bucket }}/{{ inventory_hostname }}/staking-keys.tar.gz
         --sse aws:kms
         --sse-kms-key-id {{ staking_keys_kms_arn }}
       register: s3_upload
+      changed_when: s3_upload.rc == 0
 
     - name: Upload timestamped backup to S3
-      command: >
+      ansible.builtin.command: >
         aws s3 cp /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
         s3://{{ staking_keys_bucket }}/{{ inventory_hostname }}/backups/staking-keys-{{ backup_timestamp }}.tar.gz
         --sse aws:kms
         --sse-kms-key-id {{ staking_keys_kms_arn }}
       register: s3_upload_timestamped
+      changed_when: s3_upload_timestamped.rc == 0
 
     - name: Clean up temp file
-      file:
+      ansible.builtin.file:
         path: /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
         state: absent
 
     - name: Display backup status
-      debug:
+      ansible.builtin.debug:
         msg: |
           Staking keys backed up successfully!
           Latest: s3://{{ staking_keys_bucket }}/{{ inventory_hostname }}/staking-keys.tar.gz
@@ -102,7 +104,7 @@
   gather_facts: false
   tasks:
     - name: Show backup summary
-      debug:
+      ansible.builtin.debug:
         msg: |
 
           ============================================

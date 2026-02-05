@@ -4,11 +4,8 @@
 
 - name: Deploy Safe Multisig Infrastructure
   hosts: rpc
-  become: yes
-  vars:
-    # These must be provided via -e or group_vars
-    # chain_id: "<Avalanche chain ID from l1.env>"
-    # evm_chain_id: "<EVM chain ID from genesis.json>"
+  become: true
+  # chain_id and evm_chain_id must be provided via -e or group_vars
 
   pre_tasks:
     - name: Verify chain_id is provided
@@ -22,7 +19,8 @@
       when: evm_chain_id is not defined
 
     - name: Check if avalanchego is running
-      ansible.builtin.command: systemctl is-active avalanchego
+      ansible.builtin.systemd:
+        name: avalanchego
       register: avalanchego_status
       changed_when: false
       failed_when: false
@@ -30,7 +28,7 @@
     - name: Warn if avalanchego is not running
       ansible.builtin.debug:
         msg: "WARNING: avalanchego is not running. Safe services will not be able to connect to the RPC."
-      when: avalanchego_status.rc != 0
+      when: avalanchego_status.status.ActiveState != 'active'
 
   roles:
     - role: safe

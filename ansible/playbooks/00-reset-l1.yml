@@ -6,64 +6,64 @@
 
 - name: Reset L1 chain data
   hosts: all
-  become: yes
+  become: true
   vars:
     avalanche_home: /opt/avalanche
 
   tasks:
     - name: Stop avalanchego service
-      systemd:
+      ansible.builtin.systemd:
         name: avalanchego
         state: stopped
-      ignore_errors: yes
+      failed_when: false
 
     - name: Wait for process to stop
-      wait_for:
+      ansible.builtin.wait_for:
         path: /var/run/avalanchego.pid
         state: absent
       timeout: 30
-      ignore_errors: yes
+      failed_when: false
 
     - name: Find subnet/L1 chain data directories
-      find:
+      ansible.builtin.find:
         paths: "{{ avalanche_home }}/data"
         file_type: directory
-        recurse: no
+        recurse: false
         patterns: "*"
         excludes:
           - "staking"
       register: chain_dirs
 
     - name: Remove L1 chain data (preserving staking keys)
-      file:
+      ansible.builtin.file:
         path: "{{ item.path }}"
         state: absent
       loop: "{{ chain_dirs.files }}"
       when: item.path != avalanche_home + "/data/staking"
 
     - name: Remove subnet tracking config
-      file:
+      ansible.builtin.file:
         path: "{{ avalanche_home }}/configs/node.json.d/subnet-tracking.json"
         state: absent
-      ignore_errors: yes
+      failed_when: false
 
     - name: Remove old genesis files
-      file:
+      ansible.builtin.file:
         path: "{{ avalanche_home }}/configs/genesis.json"
         state: absent
-      ignore_errors: yes
+      failed_when: false
 
     - name: Start avalanchego service
-      systemd:
+      ansible.builtin.systemd:
         name: avalanchego
         state: started
-        enabled: yes
+        enabled: true
 
     - name: Wait for avalanchego to be healthy
-      uri:
+      ansible.builtin.uri:
         url: "http://localhost:9650/ext/health"
         method: GET
-        return_content: yes
+        return_content: true
         status_code: 200
       register: health_check
       until: health_check.status == 200 and (health_check.json.healthy | default(false))
@@ -71,32 +71,38 @@
       delay: 10
 
     - name: Display node status
-      debug:
+      ansible.builtin.debug:
         msg: "Node {{ inventory_hostname }} is healthy and ready for new L1 creation"
 
 - name: Reset Safe infrastructure on RPC node
   hosts: rpc
-  become: yes
+  become: true
   tasks:
     - name: Check if Safe containers exist
-      shell: docker ps -a --format '{{"{{.Names}}"}}' | grep -c safe || true
+      ansible.builtin.shell: set -o pipefail && docker ps -a --format '{{ "{{.Names}}" }}' | grep -c safe || true
+      args:
+        executable: /bin/bash
       register: safe_containers
       changed_when: false
 
     - name: Stop and remove Safe containers
-      shell: |
+      ansible.builtin.shell: |
+        set -o pipefail
         cd /opt/safe 2>/dev/null && docker compose down -v 2>/dev/null || true
-        docker stop $(docker ps -a --format '{{"{{.Names}}"}}' | grep safe) 2>/dev/null || true
-        docker rm $(docker ps -a --format '{{"{{.Names}}"}}' | grep safe) 2>/dev/null || true
+        docker stop $(docker ps -a --format '{{ "{{.Names}}" }}' | grep safe) 2>/dev/null || true
+        docker rm $(docker ps -a --format '{{ "{{.Names}}" }}' | grep safe) 2>/dev/null || true
+      args:
+        executable: /bin/bash
       when: safe_containers.stdout | int > 0
-      ignore_errors: yes
+      failed_when: false
+      changed_when: true
 
     - name: Remove Safe data
-      file:
+      ansible.builtin.file:
         path: /opt/safe
         state: absent
-      ignore_errors: yes
+      failed_when: false
 
     - name: Display Safe reset status
-      debug:
+      ansible.builtin.debug:
         msg: "Safe infrastructure has been reset. Run 04-deploy-safe.yml after creating the new L1."

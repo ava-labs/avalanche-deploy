@@ -128,7 +128,7 @@
       - docker.io
       - docker-compose
     state: present
-    update_cache: yes
+    update_cache: true
   when: docker_check.rc != 0
 
 - name: Install nginx and pip
@@ -137,13 +137,13 @@
       - nginx
       - python3-pip
     state: present
-    update_cache: yes
+    update_cache: true
 
 - name: Ensure Docker service is running
   ansible.builtin.systemd:
     name: docker
     state: started
-    enabled: yes
+    enabled: true
 
 - name: Create Safe directories
   ansible.builtin.file:
@@ -243,7 +243,7 @@
 
 - name: Build patched Safe UI image
   ansible.builtin.shell: |
-    set -e
+    set -eo pipefail
     # Clean up any previous attempts
     rm -rf /tmp/safe-ui-patched
     docker rm -f safe-ui-build 2>/dev/null || true
@@ -280,7 +280,13 @@
     cat > /tmp/Dockerfile.safe-ui << 'EOF'
     FROM nginx:alpine
     COPY safe-ui-patched /usr/share/nginx/html
-    RUN echo 'server { listen 8080; root /usr/share/nginx/html; index index.html; location / { try_files $uri $uri.html $uri/ /index.html; } location /_next { alias /usr/share/nginx/html/_next; expires 1y; add_header Cache-Control "public, immutable"; } }' > /etc/nginx/conf.d/default.conf
+    RUN echo 'server { \
+      listen 8080; \
+      root /usr/share/nginx/html; \
+      index index.html; \
+      location / { try_files $uri $uri.html $uri/ /index.html; } \
+      location /_next { alias /usr/share/nginx/html/_next; expires 1y; add_header Cache-Control "public, immutable"; } \
+    }' > /etc/nginx/conf.d/default.conf
     EXPOSE 8080
     CMD ["nginx", "-g", "daemon off;"]
     EOF
@@ -292,6 +298,7 @@
   when: patched_ui_check.stdout == ""
   register: build_ui
   timeout: 600
+  changed_when: true
 
 - name: Create SSL directory
   ansible.builtin.file:
@@ -315,7 +322,7 @@
       - certbot
       - python3-certbot-nginx
     state: present
-    update_cache: yes
+    update_cache: true
   when: safe_use_letsencrypt | bool
 
 - name: Check if Let's Encrypt certificate exists
@@ -345,13 +352,14 @@
     - safe_use_letsencrypt | bool
     - not letsencrypt_cert.stat.exists | default(true)
   register: certbot_result
+  changed_when: certbot_result.rc == 0
 
 - name: Create symlinks for Let's Encrypt certificates
   ansible.builtin.file:
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
     state: link
-    force: yes
+    force: true
   loop:
     - { src: "/etc/letsencrypt/live/{{ safe_domain }}/fullchain.pem", dest: "/etc/nginx/ssl/safe.crt" }
     - { src: "/etc/letsencrypt/live/{{ safe_domain }}/privkey.pem", dest: "/etc/nginx/ssl/safe.key" }
@@ -386,6 +394,7 @@
     - not (safe_use_letsencrypt | bool)
     - not ssl_cert.stat.exists | default(true)
   notify: Reload nginx
+  changed_when: true
 
 - name: Set SSL key permissions
   ansible.builtin.file:
@@ -438,14 +447,14 @@
   ansible.builtin.systemd:
     name: safe
     state: started
-    enabled: yes
-    daemon_reload: yes
+    enabled: true
+    daemon_reload: true
 
 - name: Ensure nginx is running
   ansible.builtin.systemd:
     name: nginx
     state: started
-    enabled: yes
+    enabled: true
 
 - name: Wait for PostgreSQL (TXS) to be healthy
   ansible.builtin.command:
@@ -637,7 +646,11 @@
         Config Service:      http://{{ ansible_host }}:{{ safe_cfg_port }}/api/v1/about/
         Client Gateway:      http://{{ ansible_host }}:{{ safe_cgw_port }}/health
 
-      SSL: {{ "Let's Encrypt certificate for " ~ safe_domain ~ " (auto-renewal configured)" if safe_use_letsencrypt else "Self-signed certificate - browser will show security warning. Accept to access Safe UI." }}
+      {% if safe_use_letsencrypt %}
+      SSL: Let's Encrypt certificate for {{ safe_domain }} (auto-renewal configured)
+      {% else %}
+      SSL: Self-signed certificate - browser will show security warning.
+      {% endif %}
 
       Chain ID: {{ evm_chain_id }}
       RPC (direct): http://{{ ansible_host }}:9650/ext/bc/{{ chain_id }}/rpc

@@ -23,17 +23,17 @@
 
   pre_tasks:
     - name: Wait for system to become reachable
-      wait_for_connection:
+      ansible.builtin.wait_for_connection:
         timeout: 300
 
     - name: Update apt cache
-      apt:
-        update_cache: yes
+      ansible.builtin.apt:
+        update_cache: true
         cache_valid_time: 3600
       when: ansible_os_family == "Debian"
 
     - name: Install AWS CLI for staking key backup
-      apt:
+      ansible.builtin.apt:
         name: awscli
         state: present
       when:
@@ -49,7 +49,7 @@
 
   post_tasks:
     - name: Get Node ID
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -57,21 +57,21 @@
           jsonrpc: "2.0"
           id: 1
           method: "info.getNodeID"
-        return_content: yes
+        return_content: true
       register: node_info
       until: node_info.status == 200
       retries: 30
       delay: 10
 
     - name: Display Node ID
-      debug:
+      ansible.builtin.debug:
         msg: "{{ inventory_hostname }}: {{ (node_info.json.result.nodeID) }}"
 
     - name: Save node IDs to local file
-      lineinfile:
+      ansible.builtin.lineinfile:
         path: "{{ playbook_dir }}/../node_ids.txt"
         line: "{{ inventory_hostname }}={{ hostvars[inventory_hostname]['ansible_host'] }}={{ node_info.json.result.nodeID }}"
-        create: yes
+        create: true
       delegate_to: localhost
       become: false
 
@@ -81,32 +81,33 @@
   gather_facts: false
   tasks:
     - name: Check if S3 backup is configured
-      set_fact:
+      ansible.builtin.set_fact:
         s3_backup_enabled: "{{ staking_keys_bucket is defined and staking_keys_bucket != '' }}"
 
     - name: Backup staking keys to S3
       when: s3_backup_enabled | bool
       block:
         - name: Create backup archive
-          archive:
+          ansible.builtin.archive:
             path: /var/lib/avalanchego/staking/
             dest: /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
             format: gz
 
         - name: Upload to S3
-          command: >
+          ansible.builtin.command: >
             aws s3 cp /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
             s3://{{ staking_keys_bucket }}/{{ inventory_hostname }}/staking-keys.tar.gz
             --sse aws:kms
             --sse-kms-key-id {{ staking_keys_kms_arn }}
           register: s3_upload
+          changed_when: s3_upload.rc == 0
 
         - name: Display backup status
-          debug:
+          ansible.builtin.debug:
             msg: "Staking keys backed up to s3://{{ staking_keys_bucket }}/{{ inventory_hostname }}/staking-keys.tar.gz"
 
         - name: Clean up temp file
-          file:
+          ansible.builtin.file:
             path: /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
             state: absent
 
@@ -115,7 +116,7 @@
   gather_facts: false
   tasks:
     - name: Show instructions
-      debug:
+      ansible.builtin.debug:
         msg: |
 
           ============================================

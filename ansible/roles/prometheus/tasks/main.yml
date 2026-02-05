@@ -2,20 +2,20 @@
 # Prometheus installation and configuration
 
 - name: Create prometheus group
-  group:
+  ansible.builtin.group:
     name: "{{ prometheus_group }}"
-    system: yes
+    system: true
 
 - name: Create prometheus user
-  user:
+  ansible.builtin.user:
     name: "{{ prometheus_user }}"
     group: "{{ prometheus_group }}"
-    system: yes
+    system: true
     shell: /bin/false
-    create_home: no
+    create_home: false
 
 - name: Create directories
-  file:
+  ansible.builtin.file:
     path: "{{ item }}"
     state: directory
     owner: "{{ prometheus_user }}"
@@ -26,31 +26,31 @@
     - "{{ prometheus_data_dir }}"
 
 - name: Download Prometheus
-  get_url:
+  ansible.builtin.get_url:
     url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
     dest: /tmp/prometheus.tar.gz
     mode: "0644"
 
 - name: Extract Prometheus
-  unarchive:
+  ansible.builtin.unarchive:
     src: /tmp/prometheus.tar.gz
     dest: /tmp/
-    remote_src: yes
+    remote_src: true
 
 - name: Install Prometheus binaries
-  copy:
+  ansible.builtin.copy:
     src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
     dest: /usr/local/bin/{{ item }}
     owner: root
     group: root
     mode: "0755"
-    remote_src: yes
+    remote_src: true
   loop:
     - prometheus
     - promtool
 
 - name: Generate Prometheus configuration
-  template:
+  ansible.builtin.template:
     src: prometheus.yml.j2
     dest: "{{ prometheus_config_dir }}/prometheus.yml"
     owner: "{{ prometheus_user }}"
@@ -59,7 +59,7 @@
   notify: Restart prometheus
 
 - name: Create systemd service
-  template:
+  ansible.builtin.template:
     src: prometheus.service.j2
     dest: /etc/systemd/system/prometheus.service
     owner: root
@@ -70,14 +70,14 @@
     - Restart prometheus
 
 - name: Enable and start Prometheus
-  systemd:
+  ansible.builtin.systemd:
     name: prometheus
-    enabled: yes
+    enabled: true
     state: started
-    daemon_reload: yes
+    daemon_reload: true
 
 - name: Wait for Prometheus to be ready
-  uri:
+  ansible.builtin.uri:
     url: "http://127.0.0.1:{{ prometheus_port }}/-/ready"
     method: GET
   register: prom_ready
@@ -86,7 +86,7 @@
   delay: 5
 
 - name: Clean up temp files
-  file:
+  ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:

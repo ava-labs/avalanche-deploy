@@ -31,14 +31,14 @@
   gather_facts: false
   tasks:
     - name: Validate rpc group exists
-      assert:
+      ansible.builtin.assert:
         that:
           - groups['rpc'] is defined
           - groups['rpc'] | length > 0
         fail_msg: "Inventory must have at least one node in 'rpc' group"
 
     - name: Check required variables
-      fail:
+      ansible.builtin.fail:
         msg: "Missing required variable: {{ item }}"
       when: vars[item] is not defined or vars[item] == ''
       loop:
@@ -53,7 +53,7 @@
 
   pre_tasks:
     - name: Wait for system to become reachable
-      wait_for_connection:
+      ansible.builtin.wait_for_connection:
         timeout: 300
 
   roles:
@@ -66,7 +66,7 @@
 
   post_tasks:
     - name: Wait for faucet to start
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:{{ faucet_port | default(8000) }}/health"
         method: GET
         status_code: 200
@@ -74,18 +74,18 @@
       until: faucet_health.status == 200
       retries: 30
       delay: 5
-      ignore_errors: yes
+      failed_when: false
 
 - name: Display Faucet Information
   hosts: localhost
   gather_facts: false
   tasks:
     - name: Get RPC node IP
-      set_fact:
+      ansible.builtin.set_fact:
         faucet_host: "{{ hostvars[groups['rpc'][0]]['ansible_host'] }}"
 
     - name: Show faucet URL
-      debug:
+      ansible.builtin.debug:
         msg: |
 
           ============================================

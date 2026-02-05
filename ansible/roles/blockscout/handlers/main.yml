@@ -2,10 +2,10 @@
 # Blockscout handlers
 
 - name: Reload systemd
-  systemd:
-    daemon_reload: yes
+  ansible.builtin.systemd:
+    daemon_reload: true
 
 - name: Restart blockscout
-  systemd:
+  ansible.builtin.systemd:
     name: blockscout
     state: restarted

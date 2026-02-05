@@ -42,21 +42,21 @@
   gather_facts: false
   tasks:
     - name: Validate rpc group exists
-      assert:
+      ansible.builtin.assert:
         that:
           - groups['rpc'] is defined
           - groups['rpc'] | length > 0
         fail_msg: "Inventory must have at least one node in 'rpc' group"
 
     - name: Validate validators group exists
-      assert:
+      ansible.builtin.assert:
         that:
           - groups['validators'] is defined
           - groups['validators'] | length > 0
         fail_msg: "Inventory must have at least one node in 'validators' group"
 
     - name: Check required variables
-      fail:
+      ansible.builtin.fail:
         msg: "Missing required variable: {{ item }}"
       when: vars[item] is not defined or vars[item] == ''
       loop:
@@ -67,7 +67,7 @@
         - evm_chain_id
 
     - name: Set default values
-      set_fact:
+      ansible.builtin.set_fact:
         manager_type: "{{ manager_type | default('poa') }}"
         churn_period: "{{ churn_period | default(0) }}"
         max_churn_percent: "{{ max_churn_percent | default(20) }}"
@@ -79,61 +79,62 @@
   gather_facts: true
   tasks:
     - name: Check for private key
-      fail:
+      ansible.builtin.fail:
         msg: "AVALANCHE_PRIVATE_KEY environment variable is required"
       when: lookup('env', 'AVALANCHE_PRIVATE_KEY') == ''
 
     - name: Check for forge (foundry)
-      command: which forge
+      ansible.builtin.command: which forge
       register: forge_check
       changed_when: false
       failed_when: false
 
     - name: Fail if forge not found
-      fail:
+      ansible.builtin.fail:
         msg: |
           Foundry is required but not installed.
           Install with: curl -L https://foundry.paradigm.xyz | bash && foundryup
       when: forge_check.rc != 0
 
     - name: Check for cast (foundry)
-      command: which cast
+      ansible.builtin.command: which cast
       register: cast_check
       changed_when: false
       failed_when: false
 
     - name: Fail if cast not found
-      fail:
+      ansible.builtin.fail:
         msg: |
           Foundry (cast) is required but not installed.
           Install with: curl -L https://foundry.paradigm.xyz | bash && foundryup
       when: cast_check.rc != 0
 
     - name: Check for initialize-validator-manager tool
-      stat:
+      ansible.builtin.stat:
         path: "{{ playbook_dir }}/../../tools/initialize-validator-manager/initialize-validator-manager"
       register: tool_check
 
     - name: Build initialize-validator-manager if needed
-      command: go build -o initialize-validator-manager .
+      ansible.builtin.command: go build -o initialize-validator-manager .
       args:
         chdir: "{{ playbook_dir }}/../../tools/initialize-validator-manager"
       when: not tool_check.stat.exists
+      changed_when: true
 
 - name: Get RPC endpoint
   hosts: localhost
   gather_facts: false
   tasks:
     - name: Get first RPC node IP
-      set_fact:
+      ansible.builtin.set_fact:
         rpc_ip: "{{ hostvars[groups['rpc'][0]]['ansible_host'] }}"
 
     - name: Build RPC URL
-      set_fact:
+      ansible.builtin.set_fact:
         rpc_url: "http://{{ rpc_ip }}:9650/ext/bc/{{ chain_id }}/rpc"
 
     - name: Display configuration
-      debug:
+      ansible.builtin.debug:
         msg: |
           === Validator Manager Initialization ===
           Network:       {{ network }}
@@ -150,11 +151,11 @@
   gather_facts: false
   tasks:
     - name: Build validator IP list
-      set_fact:
+      ansible.builtin.set_fact:
         validator_ips: "{{ groups['validators'] | map('extract', hostvars, 'ansible_host') | join(',') }}"
 
     - name: Display validator IPs
-      debug:
+      ansible.builtin.debug:
         msg: "Validator IPs: {{ validator_ips }}"
 
 - name: Wait for L1 chain to be ready
@@ -162,7 +163,7 @@
   gather_facts: false
   tasks:
     - name: Wait for RPC to respond
-      uri:
+      ansible.builtin.uri:
         url: "{{ rpc_url }}"
         method: POST
         body_format: json
@@ -178,13 +179,13 @@
       until: chain_check.status == 200
 
     - name: Verify chain ID matches
-      assert:
+      ansible.builtin.assert:
         that:
           - chain_check.json.result | int(base=16) == evm_chain_id | int
         fail_msg: "Chain ID mismatch: expected {{ evm_chain_id }}, got {{ chain_check.json.result | int(base=16) }}"
 
     - name: L1 chain is ready
-      debug:
+      ansible.builtin.debug:
         msg: "L1 chain is ready (chainId: {{ evm_chain_id }})"
 
 - name: Initialize Validator Manager
@@ -192,7 +193,7 @@
   gather_facts: false
   tasks:
     - name: Build tool command
-      set_fact:
+      ansible.builtin.set_fact:
         init_cmd: >-
           {{ playbook_dir }}/../../tools/initialize-validator-manager/initialize-validator-manager
           --rpc-url={{ rpc_url }}
@@ -218,7 +219,7 @@
           {% endif %}
 
     - name: Run initialize-validator-manager
-      command: "{{ init_cmd }}"
+      ansible.builtin.command: "{{ init_cmd }}"
       environment:
         AVALANCHE_PRIVATE_KEY: "{{ lookup('env', 'AVALANCHE_PRIVATE_KEY') }}"
         ICM_CONTRACTS_PATH: "{{ icm_contracts_path | default(lookup('env', 'ICM_CONTRACTS_PATH')) }}"
@@ -227,18 +228,19 @@
       changed_when: true
 
     - name: Parse output
-      set_fact:
+      ansible.builtin.set_fact:
         vm_output: "{{ init_result.stdout | from_json }}"
 
     - name: Check for errors
-      fail:
+      ansible.builtin.fail:
         msg: "Validator Manager initialization failed: {{ vm_output.error }}"
       when: not vm_output.success
 
     - name: Save output to file
-      copy:
+      ansible.builtin.copy:
         content: "{{ vm_output | to_nice_json }}"
         dest: "{{ playbook_dir }}/../../validator-manager.json"
+        mode: '0644'
       delegate_to: localhost
 
 - name: Display Results
@@ -246,7 +248,7 @@
   gather_facts: false
   tasks:
     - name: Show completion message
-      debug:
+      ansible.builtin.debug:
         msg: |
 
           ============================================

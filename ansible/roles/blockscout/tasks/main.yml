@@ -2,7 +2,7 @@
 # Blockscout installation using Docker Compose
 
 - name: Install Docker prerequisites
-  apt:
+  ansible.builtin.apt:
     name:
       - apt-transport-https
       - ca-certificates
@@ -10,50 +10,50 @@
       - gnupg
       - lsb-release
     state: present
-    update_cache: yes
+    update_cache: true
 
 - name: Add Docker GPG key
-  apt_key:
+  ansible.builtin.apt_key:
     url: https://download.docker.com/linux/ubuntu/gpg
     state: present
 
 - name: Add Docker repository
-  apt_repository:
+  ansible.builtin.apt_repository:
     repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
     state: present
 
 - name: Install Docker
-  apt:
+  ansible.builtin.apt:
     name:
       - docker-ce
       - docker-ce-cli
       - containerd.io
       - docker-compose-plugin
     state: present
-    update_cache: yes
+    update_cache: true
 
 - name: Start Docker service
-  systemd:
+  ansible.builtin.systemd:
     name: docker
     state: started
-    enabled: yes
+    enabled: true
 
 - name: Create blockscout group
-  group:
+  ansible.builtin.group:
     name: "{{ blockscout_group }}"
-    system: yes
+    system: true
 
 - name: Create blockscout user
-  user:
+  ansible.builtin.user:
     name: "{{ blockscout_user }}"
     group: "{{ blockscout_group }}"
     groups: docker
-    system: yes
+    system: true
     shell: /bin/bash
-    create_home: yes
+    create_home: true
 
 - name: Create directories
-  file:
+  ansible.builtin.file:
     path: "{{ item }}"
     state: directory
     owner: "{{ blockscout_user }}"
@@ -67,7 +67,7 @@
     - "{{ blockscout_data_dir }}/logs"
 
 - name: Generate docker-compose.yml
-  template:
+  ansible.builtin.template:
     src: docker-compose.yml.j2
     dest: "{{ blockscout_install_dir }}/docker-compose.yml"
     owner: "{{ blockscout_user }}"
@@ -76,7 +76,7 @@
   notify: Restart blockscout
 
 - name: Generate backend environment file
-  template:
+  ansible.builtin.template:
     src: backend.env.j2
     dest: "{{ blockscout_install_dir }}/backend.env"
     owner: "{{ blockscout_user }}"
@@ -85,7 +85,7 @@
   notify: Restart blockscout
 
 - name: Generate frontend environment file
-  template:
+  ansible.builtin.template:
     src: frontend.env.j2
     dest: "{{ blockscout_install_dir }}/frontend.env"
     owner: "{{ blockscout_user }}"
@@ -94,7 +94,7 @@
   notify: Restart blockscout
 
 - name: Generate common environment file
-  template:
+  ansible.builtin.template:
     src: common.env.j2
     dest: "{{ blockscout_install_dir }}/common.env"
     owner: "{{ blockscout_user }}"
@@ -103,7 +103,7 @@
   notify: Restart blockscout
 
 - name: Create systemd service for blockscout
-  template:
+  ansible.builtin.template:
     src: blockscout.service.j2
     dest: /etc/systemd/system/blockscout.service
     owner: root
@@ -118,18 +118,18 @@
     project_src: "{{ blockscout_install_dir }}"
     pull: always
     state: present
-  become: yes
+  become: true
   become_user: "{{ blockscout_user }}"
 
 - name: Enable and start Blockscout
-  systemd:
+  ansible.builtin.systemd:
     name: blockscout
-    enabled: yes
+    enabled: true
     state: started
-    daemon_reload: yes
+    daemon_reload: true
 
 - name: Wait for Blockscout to be ready
-  uri:
+  ansible.builtin.uri:
     url: "http://127.0.0.1:{{ blockscout_http_port }}/api/v2/stats"
     method: GET
     status_code: [200, 503]
@@ -137,10 +137,10 @@
   until: blockscout_ready.status == 200
   retries: 60
   delay: 10
-  ignore_errors: yes
+  ignore_errors: true
 
 - name: Display Blockscout URL
-  debug:
+  ansible.builtin.debug:
     msg: |
       Blockscout is available at:
       - Frontend: http://{{ ansible_host }}:{{ blockscout_frontend_port }}

@@ -1,0 +1,22 @@
+# Ansible-lint configuration
+
+# Exclude paths
+exclude_paths:
+  - .cache/
+  - roles/*/molecule/
+
+# Enable offline mode (don't require galaxy collections during lint)
+offline: true
+
+# Profile to use (production = strictest)
+profile: production
+
+# Warn on these (not critical, or false positives in offline mode)
+warn_list:
+  - var-naming[no-role-prefix]  # Variable naming conventions
+
+# Mock modules that ansible-lint can't find in offline mode
+mock_modules:
+  - ansible.builtin.archive
+  - community.general.filesystem
+  - ansible.posix.mount

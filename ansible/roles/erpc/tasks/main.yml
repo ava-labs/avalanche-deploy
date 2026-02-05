@@ -16,7 +16,7 @@
 #   erpc_admin_port: Admin/metrics port (default: 4001)
 
 - name: Install Docker dependencies
-  apt:
+  ansible.builtin.apt:
     name:
       - apt-transport-https
       - ca-certificates
@@ -24,43 +24,43 @@
       - gnupg
       - lsb-release
     state: present
-    update_cache: yes
+    update_cache: true
 
 - name: Add Docker GPG key
-  apt_key:
+  ansible.builtin.apt_key:
     url: https://download.docker.com/linux/ubuntu/gpg
     state: present
 
 - name: Add Docker repository
-  apt_repository:
+  ansible.builtin.apt_repository:
     repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
     state: present
 
 - name: Install Docker
-  apt:
+  ansible.builtin.apt:
     name:
       - docker-ce
       - docker-ce-cli
       - containerd.io
       - docker-compose-plugin
     state: present
-    update_cache: yes
+    update_cache: true
 
 - name: Start Docker service
-  systemd:
+  ansible.builtin.systemd:
     name: docker
     state: started
-    enabled: yes
+    enabled: true
 
 - name: Create erpc user
-  user:
+  ansible.builtin.user:
     name: erpc
     groups: docker
     shell: /bin/bash
-    create_home: yes
+    create_home: true
 
 - name: Create erpc directories
-  file:
+  ansible.builtin.file:
     path: "{{ item }}"
     state: directory
     owner: erpc
@@ -71,7 +71,7 @@
     - /opt/erpc/data
 
 - name: Create eRPC configuration file
-  template:
+  ansible.builtin.template:
     src: erpc.yaml.j2
     dest: /opt/erpc/erpc.yaml
     owner: erpc
@@ -80,7 +80,7 @@
   notify: Restart erpc
 
 - name: Create docker-compose file
-  template:
+  ansible.builtin.template:
     src: docker-compose.yml.j2
     dest: /opt/erpc/docker-compose.yml
     owner: erpc
@@ -88,21 +88,21 @@
     mode: '0644'
 
 - name: Create systemd service
-  template:
+  ansible.builtin.template:
     src: erpc.service.j2
     dest: /etc/systemd/system/erpc.service
     mode: '0644'
   notify: Restart erpc
 
 - name: Enable and start erpc
-  systemd:
+  ansible.builtin.systemd:
     name: erpc
     state: started
-    enabled: yes
-    daemon_reload: yes
+    enabled: true
+    daemon_reload: true
 
 - name: Wait for eRPC to be ready
-  uri:
+  ansible.builtin.uri:
     url: "http://127.0.0.1:{{ erpc_admin_port | default(4001) }}/healthcheck"
     method: GET
     status_code: 200
@@ -110,4 +110,4 @@
   until: erpc_health.status == 200
   retries: 30
   delay: 5
-  ignore_errors: yes
+  ignore_errors: true

@@ -27,24 +27,24 @@
 
   tasks:
     - name: Display restart notice
-      debug:
+      ansible.builtin.debug:
         msg: "Starting rolling restart for {{ inventory_hostname }}"
 
     - name: Restart avalanchego service
-      systemd:
+      ansible.builtin.systemd:
         name: avalanchego
         state: restarted
-        daemon_reload: yes
+        daemon_reload: true
 
     - name: Wait for service to start
-      pause:
+      ansible.builtin.pause:
         seconds: "{{ wait_seconds }}"
 
     - name: Wait for node to become healthy
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/health"
         method: GET
-        return_content: yes
+        return_content: true
         status_code: 200
       register: health_check
       until: health_check.status == 200
@@ -52,7 +52,7 @@
       delay: "{{ health_delay }}"
 
     - name: Verify P-Chain is bootstrapped
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -62,14 +62,14 @@
           method: "info.isBootstrapped"
           params:
             chain: "P"
-        return_content: yes
+        return_content: true
       register: p_chain_status
       until: p_chain_status.json.result.isBootstrapped | default(false)
       retries: "{{ health_retries }}"
       delay: "{{ health_delay }}"
 
     - name: Display health status
-      debug:
+      ansible.builtin.debug:
         msg: "{{ inventory_hostname }} is healthy and bootstrapped"
 
 - name: Rolling Restart - RPC Nodes
@@ -85,24 +85,24 @@
 
   tasks:
     - name: Display restart notice
-      debug:
+      ansible.builtin.debug:
         msg: "Starting rolling restart for {{ inventory_hostname }}"
 
     - name: Restart avalanchego service
-      systemd:
+      ansible.builtin.systemd:
         name: avalanchego
         state: restarted
-        daemon_reload: yes
+        daemon_reload: true
 
     - name: Wait for service to start
-      pause:
+      ansible.builtin.pause:
         seconds: "{{ wait_seconds }}"
 
     - name: Wait for node to become healthy
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/health"
         method: GET
-        return_content: yes
+        return_content: true
         status_code: 200
       register: health_check
       until: health_check.status == 200
@@ -110,7 +110,7 @@
       delay: "{{ health_delay }}"
 
     - name: Verify P-Chain is bootstrapped
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -120,14 +120,14 @@
           method: "info.isBootstrapped"
           params:
             chain: "P"
-        return_content: yes
+        return_content: true
       register: p_chain_status
       until: p_chain_status.json.result.isBootstrapped | default(false)
       retries: "{{ health_retries }}"
       delay: "{{ health_delay }}"
 
     - name: Display health status
-      debug:
+      ansible.builtin.debug:
         msg: "{{ inventory_hostname }} is healthy and bootstrapped"
 
 - name: Rolling Restart Summary
@@ -135,7 +135,7 @@
   gather_facts: false
   tasks:
     - name: Display completion message
-      debug:
+      ansible.builtin.debug:
         msg: |
 
           ============================================

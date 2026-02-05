@@ -1,46 +1,49 @@
 ---
 - name: Create node_exporter user
-  user:
+  ansible.builtin.user:
     name: node_exporter
     shell: /bin/false
-    system: yes
-    create_home: no
+    system: true
+    create_home: false
 
 - name: Download node_exporter
-  get_url:
-    url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+  vars:
+    base_url: "https://github.com/prometheus/node_exporter/releases/download"
+    archive: "node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+  ansible.builtin.get_url:
+    url: "{{ base_url }}/v{{ node_exporter_version }}/{{ archive }}"
     dest: /tmp/node_exporter.tar.gz
     mode: '0644'
 
 - name: Extract node_exporter
-  unarchive:
+  ansible.builtin.unarchive:
     src: /tmp/node_exporter.tar.gz
     dest: /tmp
-    remote_src: yes
+    remote_src: true
 
 - name: Install node_exporter binary
-  copy:
+  ansible.builtin.copy:
     src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
     dest: /usr/local/bin/node_exporter
     mode: '0755'
-    remote_src: yes
+    remote_src: true
 
 - name: Create systemd service
-  template:
+  ansible.builtin.template:
     src: node_exporter.service.j2
     dest: /etc/systemd/system/node_exporter.service
     mode: '0644'
   notify: Restart node_exporter
 
 - name: Enable and start node_exporter
-  systemd:
+  ansible.builtin.systemd:
     name: node_exporter
     state: started
-    enabled: yes
-    daemon_reload: yes
+    enabled: true
+    daemon_reload: true
 
 - name: Clean up temp files
-  file:
+  ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:

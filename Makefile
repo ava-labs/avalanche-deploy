@@ -246,7 +246,16 @@ reset-genesis:
 #
 lint:
 	@echo "Running linters..."
-	@which ansible-lint > /dev/null || (echo "Installing ansible-lint..." && pip install ansible-lint)
+	@which ansible-lint > /dev/null 2>&1 || { \
+		echo "ansible-lint not found. Installing..."; \
+		if command -v brew > /dev/null 2>&1; then \
+			brew install ansible-lint; \
+		elif command -v pipx > /dev/null 2>&1; then \
+			pipx install ansible-lint; \
+		else \
+			pip3 install --user ansible-lint; \
+		fi; \
+	}
 	@cd ansible && ansible-lint playbooks/*.yml || true
 	@echo ""
 	@echo "Checking Terraform format..."

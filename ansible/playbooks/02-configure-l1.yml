@@ -18,7 +18,7 @@
 
   tasks:
     - name: Get NodeID from each validator
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -26,12 +26,12 @@
           jsonrpc: "2.0"
           id: 1
           method: "info.getNodeID"
-        return_content: yes
+        return_content: true
       register: node_id_result
       delegate_to: "{{ inventory_hostname }}"
 
     - name: Store NodeID as fact
-      set_fact:
+      ansible.builtin.set_fact:
         node_id: "{{ node_id_result.json.result.nodeID }}"
 
 - name: Configure Nodes for L1 (Phase 2)
@@ -66,23 +66,23 @@
 
   pre_tasks:
     - name: Validate subnet_id is provided
-      fail:
+      ansible.builtin.fail:
         msg: "subnet_id is required. Run with: -e subnet_id=<YOUR_SUBNET_ID>"
       when: subnet_id is not defined or subnet_id == ""
 
     - name: Build L1 bootstrap lists
-      set_fact:
+      ansible.builtin.set_fact:
         l1_bootstrap_ids: "{{ groups['validators'] | map('extract', hostvars, 'node_id') | list }}"
         l1_bootstrap_ips: "{{ groups['validators'] | map('extract', hostvars, 'ansible_host') | map('regex_replace', '$', ':9651') | list }}"
 
   tasks:
     - name: Load custom node config from repo root
-      set_fact:
+      ansible.builtin.set_fact:
         custom_node_config: "{{ lookup('file', playbook_dir + '/../../' + node_type + '-node-config.json') | from_json }}"
-      ignore_errors: yes
+      failed_when: false
 
     - name: Build base node configuration
-      set_fact:
+      ansible.builtin.set_fact:
         base_node_config:
           network-id: "{{ network_ids[avalanchego_network] }}"
           http-host: "0.0.0.0"
@@ -103,16 +103,16 @@
           track-subnets: "{{ subnet_id }}"
 
     - name: Add L1 bootstrap info to config
-      set_fact:
+      ansible.builtin.set_fact:
         base_node_config: "{{ base_node_config | combine({'bootstrap-ids': l1_bootstrap_ids | join(','), 'bootstrap-ips': l1_bootstrap_ips | join(',')}) }}"
       when: l1_bootstrap_ids is defined and l1_bootstrap_ids | length > 0
 
     - name: Merge custom config with base config
-      set_fact:
+      ansible.builtin.set_fact:
         final_node_config: "{{ base_node_config | combine(custom_node_config | default({})) }}"
 
     - name: Write node configuration
-      copy:
+      ansible.builtin.copy:
         content: "{{ final_node_config | to_nice_json }}"
         dest: "{{ avalanchego_config_dir }}/node.json"
         owner: "{{ avalanchego_user }}"
@@ -121,7 +121,7 @@
       notify: Restart avalanchego
 
     - name: Create chain config directory for L1
-      file:
+      ansible.builtin.file:
         path: "{{ avalanchego_config_dir }}/chains/{{ chain_id }}"
         state: directory
         owner: "{{ avalanchego_user }}"
@@ -130,7 +130,7 @@
       when: chain_id != ""
 
     - name: Determine chain config file for RPC nodes
-      set_fact:
+      ansible.builtin.set_fact:
         chain_config_file: >-
           {%- if node_type == 'rpc' and rpc_type is defined -%}
             rpc-{{ rpc_type }}-chain-config.json
@@ -140,7 +140,7 @@
       when: chain_id != ""
 
     - name: Check if specific chain config exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ playbook_dir }}/../../{{ chain_config_file | trim }}"
       register: specific_config
       delegate_to: localhost
@@ -148,12 +148,12 @@
       when: chain_id != ""
 
     - name: Fallback to generic node type config if specific doesn't exist
-      set_fact:
+      ansible.builtin.set_fact:
         chain_config_file: "{{ node_type }}-chain-config.json"
       when: chain_id != "" and specific_config.stat is defined and not specific_config.stat.exists
 
     - name: Copy chain config (validator or RPC specific)
-      copy:
+      ansible.builtin.copy:
         src: "{{ playbook_dir }}/../../{{ chain_config_file | trim }}"
         dest: "{{ avalanchego_config_dir }}/chains/{{ chain_id }}/config.json"
         owner: "{{ avalanchego_user }}"
@@ -164,13 +164,13 @@
 
   handlers:
     - name: Restart avalanchego
-      systemd:
+      ansible.builtin.systemd:
         name: avalanchego
         state: restarted
 
   post_tasks:
     - name: Wait for node to restart
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
         body_format: json
@@ -178,14 +178,14 @@
           jsonrpc: "2.0"
           id: 1
           method: "info.getNodeID"
-        return_content: yes
+        return_content: true
       register: node_check
       until: node_check.status == 200
       retries: 30
       delay: 5
 
     - name: Wait for L1 chain to be ready
-      uri:
+      ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/bc/{{ chain_id }}/rpc"
         method: POST
         body_format: json
@@ -194,16 +194,16 @@
           id: 1
           method: "eth_chainId"
           params: []
-        return_content: yes
+        return_content: true
       register: l1_check
       until: l1_check.status == 200
       retries: 30
       delay: 5
       when: chain_id != ""
-      ignore_errors: yes
+      failed_when: false
 
     - name: Display status
-      debug:
+      ansible.builtin.debug:
         msg: "{{ inventory_hostname }} is now tracking subnet {{ subnet_id }}{% if chain_id != '' %} (L1 chain ready){% endif %}"
 
 - name: Display completion message
@@ -211,7 +211,7 @@
   gather_facts: false
   tasks:
     - name: Show L1 info
-      debug:
+      ansible.builtin.debug:
         msg: |
 
           ============================================

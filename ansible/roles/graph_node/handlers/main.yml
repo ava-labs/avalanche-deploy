@@ -1,6 +1,6 @@
 ---
 - name: Restart graph-node
-  systemd:
+  ansible.builtin.systemd:
     name: graph-node
     state: restarted
-    daemon_reload: yes
+    daemon_reload: true
