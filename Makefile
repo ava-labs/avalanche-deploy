@@ -101,8 +101,8 @@ deploy-blockscout:
 	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make deploy-blockscout CHAIN_ID=xxx EVM_CHAIN_ID=yyy [CHAIN_NAME=name]"; exit 1; fi
 	@echo "Deploying Blockscout block explorer..."
 	@cd ansible && ansible-playbook playbooks/04-deploy-blockscout.yml \
-		-e "chain_id=$(CHAIN_ID)" \
-		-e "evm_chain_id=$(EVM_CHAIN_ID)" \
+		-e "l1_chain_id=$(CHAIN_ID)" \
+		-e "l1_evm_chain_id=$(EVM_CHAIN_ID)" \
 		-e "l1_name=$(or $(CHAIN_NAME),Avalanche L1)"
 
 #
@@ -114,8 +114,8 @@ faucet:
 	@if [ -z "$(FAUCET_KEY)" ]; then echo "Usage: make faucet CHAIN_ID=xxx EVM_CHAIN_ID=yyy FAUCET_KEY=0x..."; exit 1; fi
 	@echo "Deploying faucet..."
 	@cd ansible && ansible-playbook playbooks/06-deploy-faucet.yml \
-		-e "faucet_chain_id=$(CHAIN_ID)" \
-		-e "faucet_evm_chain_id=$(EVM_CHAIN_ID)" \
+		-e "l1_chain_id=$(CHAIN_ID)" \
+		-e "l1_evm_chain_id=$(EVM_CHAIN_ID)" \
 		-e "faucet_private_key=$(FAUCET_KEY)"
 
 #
@@ -125,7 +125,7 @@ graph-node:
 	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make graph-node CHAIN_ID=xxx [NETWORK_NAME=my-l1]"; exit 1; fi
 	@echo "Deploying The Graph Node..."
 	@cd ansible && ansible-playbook playbooks/07-deploy-graph-node.yml \
-		-e "graph_chain_id=$(CHAIN_ID)" \
+		-e "l1_chain_id=$(CHAIN_ID)" \
 		$(if $(NETWORK_NAME),-e "graph_network_name=$(NETWORK_NAME)",)
 
 erpc:
@@ -133,8 +133,8 @@ erpc:
 	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make erpc CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
 	@echo "Deploying eRPC load balancer..."
 	@cd ansible && ansible-playbook playbooks/08-deploy-erpc.yml \
-		-e "erpc_chain_id=$(CHAIN_ID)" \
-		-e "erpc_evm_chain_id=$(EVM_CHAIN_ID)"
+		-e "l1_chain_id=$(CHAIN_ID)" \
+		-e "l1_evm_chain_id=$(EVM_CHAIN_ID)"
 
 #
 # Validator Manager

@@ -11,15 +11,15 @@
 #
 # Usage:
 #   ansible-playbook playbooks/07-deploy-graph-node.yml \
-#     -e graph_chain_id=xxx
+#     -e l1_chain_id=xxx
 #
 # Or with l1.env loaded:
 #   source ../l1.env
 #   ansible-playbook playbooks/07-deploy-graph-node.yml \
-#     -e graph_chain_id=$CHAIN_ID
+#     -e l1_chain_id=$CHAIN_ID
 #
 # Required variables:
-#   graph_chain_id: L1 chain ID (from create-l1 output)
+#   l1_chain_id: L1 chain ID (from create-l1 output)
 #
 # Optional variables:
 #   graph_network_name: Network name for subgraph manifests (default: avalanche-l1)
@@ -30,12 +30,19 @@
   hosts: localhost
   gather_facts: false
   tasks:
+    - name: Validate rpc group exists
+      assert:
+        that:
+          - groups['rpc'] is defined
+          - groups['rpc'] | length > 0
+        fail_msg: "Inventory must have at least one node in 'rpc' group"
+
     - name: Check required variables
       fail:
         msg: "Missing required variable: {{ item }}"
       when: vars[item] is not defined or vars[item] == ''
       loop:
-        - graph_chain_id
+        - l1_chain_id
 
 - name: Deploy Graph Node
   hosts: rpc[0]  # Deploy to first RPC node
@@ -50,7 +57,7 @@
   roles:
     - role: graph_node
       vars:
-        graph_chain_id: "{{ hostvars['localhost']['graph_chain_id'] }}"
+        graph_chain_id: "{{ hostvars['localhost']['l1_chain_id'] }}"
         graph_network_name: "{{ hostvars['localhost']['graph_network_name'] | default('avalanche-l1') }}"
         graph_rpc_host: "127.0.0.1"
 

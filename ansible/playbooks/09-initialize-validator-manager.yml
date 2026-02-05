@@ -41,6 +41,20 @@
   hosts: localhost
   gather_facts: false
   tasks:
+    - name: Validate rpc group exists
+      assert:
+        that:
+          - groups['rpc'] is defined
+          - groups['rpc'] | length > 0
+        fail_msg: "Inventory must have at least one node in 'rpc' group"
+
+    - name: Validate validators group exists
+      assert:
+        that:
+          - groups['validators'] is defined
+          - groups['validators'] | length > 0
+        fail_msg: "Inventory must have at least one node in 'validators' group"
+
     - name: Check required variables
       fail:
         msg: "Missing required variable: {{ item }}"

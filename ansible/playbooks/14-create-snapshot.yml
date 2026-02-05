@@ -145,6 +145,20 @@
       debug:
         msg: "Snapshot size: {{ (snapshot_stat.stat.size / 1073741824) | round(2) }}GB"
 
+    - name: Generate SHA256 checksum
+      shell: sha256sum {{ temp_dir }}/{{ snapshot_name }}.tar.lz4 | awk '{print $1}'
+      register: snapshot_checksum
+      changed_when: false
+
+    - name: Display checksum
+      debug:
+        msg: "SHA256: {{ snapshot_checksum.stdout }}"
+
+    - name: Save checksum to file
+      copy:
+        content: "{{ snapshot_checksum.stdout }}  {{ snapshot_name }}.tar.lz4\n"
+        dest: "{{ temp_dir }}/{{ snapshot_name }}.sha256"
+
     - name: Upload snapshot to S3
       command: >
         aws s3 cp {{ temp_dir }}/{{ snapshot_name }}.tar.lz4
@@ -163,6 +177,20 @@
         --sse-kms-key-id {{ staking_keys_kms_arn }}
       register: s3_latest
 
+    - name: Upload checksum to S3
+      command: >
+        aws s3 cp {{ temp_dir }}/{{ snapshot_name }}.sha256
+        s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.sha256
+        --sse aws:kms
+        --sse-kms-key-id {{ staking_keys_kms_arn }}
+
+    - name: Update latest checksum
+      command: >
+        aws s3 cp {{ temp_dir }}/{{ snapshot_name }}.sha256
+        s3://{{ staking_keys_bucket }}/snapshots/latest.sha256
+        --sse aws:kms
+        --sse-kms-key-id {{ staking_keys_kms_arn }}
+
     - name: Create snapshot metadata
       copy:
         content: |
@@ -171,6 +199,7 @@
             "created": "{{ ansible_date_time.iso8601 }}",
             "source_host": "{{ inventory_hostname }}",
             "size_bytes": {{ snapshot_stat.stat.size }},
+            "sha256": "{{ snapshot_checksum.stdout }}",
             "network": "{{ network | default('fuji') }}",
             "chains": ["P", "X", "C"]
           }

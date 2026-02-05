@@ -33,6 +33,9 @@ validator-manager.json
 # Local notes
 notes/
 
+# Claude Code config (local only)
+CLAUDE.md
+
 # OS files
 .DS_Store
 Thumbs.db

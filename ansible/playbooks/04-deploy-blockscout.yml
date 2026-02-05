@@ -3,12 +3,14 @@
 #
 # Usage:
 #   ansible-playbook -i inventory.yml 04-deploy-blockscout.yml \
-#     -e "blockscout_rpc_url=http://validator1:9650/ext/bc/CHAIN_ID/rpc" \
-#     -e "blockscout_chain_id=YOUR_CHAIN_ID"
+#     -e "l1_chain_id=YOUR_CHAIN_ID" \
+#     -e "l1_evm_chain_id=12345"
 #
-# Variables (can be set in inventory or via -e):
-#   blockscout_rpc_url: RPC endpoint of your L1 chain
-#   blockscout_chain_id: Chain ID of your L1
+# Required variables:
+#   l1_chain_id: L1 chain ID (from create-l1 output)
+#   l1_evm_chain_id: EVM chain ID (from genesis.json config.chainId)
+#
+# Optional variables:
 #   blockscout_network_name: Display name for your network
 #   blockscout_coin_symbol: Token symbol (default: AVAX)
 
@@ -19,15 +21,13 @@
     # Override these in your inventory or via -e
     blockscout_network_name: "{{ l1_name | default('Avalanche L1') }}"
     blockscout_network_short_name: "{{ l1_short_name | default('AVAX-L1') }}"
-    # chain_id is the Avalanche chain ID (string, used for RPC URL paths)
-    blockscout_chain_id: "{{ chain_id | default('') }}"
-    # evm_chain_id is the numeric EVM chain ID (used for wallet/frontend)
-    blockscout_evm_chain_id: "{{ evm_chain_id | default(43114) }}"
+    blockscout_chain_id: "{{ l1_chain_id }}"
+    blockscout_evm_chain_id: "{{ l1_evm_chain_id }}"
     blockscout_coin_symbol: "{{ coin_symbol | default('AVAX') }}"
     blockscout_coin_name: "{{ coin_name | default('Avalanche') }}"
     # Use host.docker.internal which maps to the host machine from inside Docker
-    blockscout_rpc_url: "{{ rpc_url | default('http://host.docker.internal:9650/ext/bc/' + (chain_id | string) + '/rpc') }}"
-    blockscout_ws_url: "{{ ws_url | default('ws://host.docker.internal:9650/ext/bc/' + (chain_id | string) + '/ws') }}"
+    blockscout_rpc_url: "{{ rpc_url | default('http://host.docker.internal:9650/ext/bc/' + (l1_chain_id | string) + '/rpc') }}"
+    blockscout_ws_url: "{{ ws_url | default('ws://host.docker.internal:9650/ext/bc/' + (l1_chain_id | string) + '/ws') }}"
 
   roles:
     - blockscout

@@ -6,20 +6,20 @@
 #
 # Usage:
 #   ansible-playbook playbooks/06-deploy-faucet.yml \
-#     -e faucet_chain_id=xxx \
-#     -e faucet_evm_chain_id=12345 \
+#     -e l1_chain_id=xxx \
+#     -e l1_evm_chain_id=12345 \
 #     -e faucet_private_key=0x...
 #
 # Or with l1.env loaded:
 #   source ../l1.env
 #   ansible-playbook playbooks/06-deploy-faucet.yml \
-#     -e faucet_chain_id=$CHAIN_ID \
-#     -e faucet_evm_chain_id=12345 \
+#     -e l1_chain_id=$CHAIN_ID \
+#     -e l1_evm_chain_id=$EVM_CHAIN_ID \
 #     -e faucet_private_key=0x...
 #
 # Required variables:
-#   faucet_chain_id: L1 chain ID (from create-l1 output)
-#   faucet_evm_chain_id: EVM chain ID (from genesis.json config.chainId)
+#   l1_chain_id: L1 chain ID (from create-l1 output)
+#   l1_evm_chain_id: EVM chain ID (from genesis.json config.chainId)
 #   faucet_private_key: Private key for faucet wallet (must be funded!)
 #
 # Optional variables:
@@ -30,13 +30,20 @@
   hosts: localhost
   gather_facts: false
   tasks:
+    - name: Validate rpc group exists
+      assert:
+        that:
+          - groups['rpc'] is defined
+          - groups['rpc'] | length > 0
+        fail_msg: "Inventory must have at least one node in 'rpc' group"
+
     - name: Check required variables
       fail:
         msg: "Missing required variable: {{ item }}"
       when: vars[item] is not defined or vars[item] == ''
       loop:
-        - faucet_chain_id
-        - faucet_evm_chain_id
+        - l1_chain_id
+        - l1_evm_chain_id
         - faucet_private_key
 
 - name: Deploy Faucet
@@ -52,8 +59,8 @@
   roles:
     - role: faucet
       vars:
-        faucet_chain_id: "{{ hostvars['localhost']['faucet_chain_id'] }}"
-        faucet_evm_chain_id: "{{ hostvars['localhost']['faucet_evm_chain_id'] }}"
+        faucet_chain_id: "{{ hostvars['localhost']['l1_chain_id'] }}"
+        faucet_evm_chain_id: "{{ hostvars['localhost']['l1_evm_chain_id'] }}"
         faucet_private_key: "{{ hostvars['localhost']['faucet_private_key'] }}"
         faucet_rpc_host: "127.0.0.1"
 
@@ -88,8 +95,8 @@
           Faucet URL: http://{{ faucet_host }}:{{ faucet_port | default(8000) }}
 
           Configuration:
-            Chain ID (L1):     {{ faucet_chain_id }}
-            Chain ID (EVM):    {{ faucet_evm_chain_id }}
+            Chain ID (L1):     {{ l1_chain_id }}
+            Chain ID (EVM):    {{ l1_evm_chain_id }}
             Drop Amount:       {{ faucet_amount | default(1) }} tokens
             Rate Limit:        {{ faucet_rate_limit | default(1) }} request(s)/hour
 

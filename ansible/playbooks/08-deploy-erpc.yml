@@ -6,18 +6,18 @@
 #
 # Usage:
 #   ansible-playbook playbooks/08-deploy-erpc.yml \
-#     -e erpc_chain_id=xxx \
-#     -e erpc_evm_chain_id=12345
+#     -e l1_chain_id=xxx \
+#     -e l1_evm_chain_id=12345
 #
 # Or with l1.env loaded:
 #   source ../l1.env
 #   ansible-playbook playbooks/08-deploy-erpc.yml \
-#     -e erpc_chain_id=$CHAIN_ID \
-#     -e erpc_evm_chain_id=12345
+#     -e l1_chain_id=$CHAIN_ID \
+#     -e l1_evm_chain_id=$EVM_CHAIN_ID
 #
 # Required variables:
-#   erpc_chain_id: L1 chain ID (from create-l1 output)
-#   erpc_evm_chain_id: EVM chain ID (from genesis.json config.chainId)
+#   l1_chain_id: L1 chain ID (from create-l1 output)
+#   l1_evm_chain_id: EVM chain ID (from genesis.json config.chainId)
 #
 # Optional variables:
 #   erpc_port: HTTP port (default: 4000)
@@ -27,13 +27,28 @@
   hosts: localhost
   gather_facts: false
   tasks:
+    - name: Validate RPC groups exist
+      assert:
+        that:
+          - (groups['rpc_archive'] is defined and groups['rpc_archive'] | length > 0) or
+            (groups['rpc_pruned'] is defined and groups['rpc_pruned'] | length > 0) or
+            (groups['rpc'] is defined and groups['rpc'] | length > 0)
+        fail_msg: "Inventory must have at least one node in 'rpc_archive', 'rpc_pruned', or 'rpc' group"
+
+    - name: Validate monitoring or rpc group for eRPC deployment
+      assert:
+        that:
+          - (groups['monitoring'] is defined and groups['monitoring'] | length > 0) or
+            (groups['rpc'] is defined and groups['rpc'] | length > 0)
+        fail_msg: "Inventory must have at least one node in 'monitoring' or 'rpc' group for eRPC deployment"
+
     - name: Check required variables
       fail:
         msg: "Missing required variable: {{ item }}"
       when: vars[item] is not defined or vars[item] == ''
       loop:
-        - erpc_chain_id
-        - erpc_evm_chain_id
+        - l1_chain_id
+        - l1_evm_chain_id
 
 - name: Build upstream list from RPC nodes
   hosts: localhost
@@ -41,7 +56,7 @@
   tasks:
     - name: Build archive upstream endpoints
       set_fact:
-        erpc_upstreams: "{{ erpc_upstreams | default([]) + [{'id': 'rpc-archive-' ~ (idx + 1), 'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ erpc_chain_id ~ '/rpc', 'rpc_type': 'archive'}] }}"
+        erpc_upstreams: "{{ erpc_upstreams | default([]) + [{'id': 'rpc-archive-' ~ (idx + 1), 'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ l1_chain_id ~ '/rpc', 'rpc_type': 'archive'}] }}"
       loop: "{{ groups['rpc_archive'] | default([]) }}"
       loop_control:
         index_var: idx
@@ -49,7 +64,7 @@
 
     - name: Build pruned upstream endpoints
       set_fact:
-        erpc_upstreams: "{{ erpc_upstreams | default([]) + [{'id': 'rpc-pruned-' ~ (idx + 1), 'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ erpc_chain_id ~ '/rpc', 'rpc_type': 'pruned'}] }}"
+        erpc_upstreams: "{{ erpc_upstreams | default([]) + [{'id': 'rpc-pruned-' ~ (idx + 1), 'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ l1_chain_id ~ '/rpc', 'rpc_type': 'pruned'}] }}"
       loop: "{{ groups['rpc_pruned'] | default([]) }}"
       loop_control:
         index_var: idx
@@ -57,7 +72,7 @@
 
     - name: Fallback - build upstream endpoints from generic rpc group
       set_fact:
-        erpc_upstreams: "{{ erpc_upstreams | default([]) + [{'id': 'rpc-' ~ (idx + 1), 'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ erpc_chain_id ~ '/rpc', 'rpc_type': hostvars[item]['rpc_type'] | default('archive')}] }}"
+        erpc_upstreams: "{{ erpc_upstreams | default([]) + [{'id': 'rpc-' ~ (idx + 1), 'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ l1_chain_id ~ '/rpc', 'rpc_type': hostvars[item]['rpc_type'] | default('archive')}] }}"
       loop: "{{ groups['rpc'] | default([]) }}"
       loop_control:
         index_var: idx
@@ -80,8 +95,8 @@
   roles:
     - role: erpc
       vars:
-        erpc_chain_id: "{{ hostvars['localhost']['erpc_chain_id'] }}"
-        erpc_evm_chain_id: "{{ hostvars['localhost']['erpc_evm_chain_id'] }}"
+        erpc_chain_id: "{{ hostvars['localhost']['l1_chain_id'] }}"
+        erpc_evm_chain_id: "{{ hostvars['localhost']['l1_evm_chain_id'] }}"
         erpc_upstreams: "{{ hostvars['localhost']['erpc_upstreams'] }}"
 
 - name: Display eRPC Information
@@ -131,7 +146,7 @@
           ============================================
 
           # Instead of connecting directly to RPC nodes:
-          # curl http://rpc-node:9650/ext/bc/{{ erpc_chain_id }}/rpc
+          # curl http://rpc-node:9650/ext/bc/{{ l1_chain_id }}/rpc
 
           # Connect through eRPC for load balancing:
           curl -X POST http://{{ erpc_host }}:{{ erpc_port | default(4000) }} \

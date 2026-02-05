@@ -17,7 +17,7 @@
 #   - AWS CLI installed on validators
 
 - name: Backup Staking Keys to S3
-  hosts: all_validators
+  hosts: validators:primary_validators
   become: true
   gather_facts: true
 
