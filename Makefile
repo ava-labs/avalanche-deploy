@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots
+.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots lint validate test-e2e-l1 test-e2e-primary
 
 # Default cloud provider
 CLOUD ?= aws
@@ -242,6 +242,46 @@ reset-genesis:
 	@echo "Done! genesis.json reset (Safe contracts removed)"
 
 #
+# Testing & Validation
+#
+lint:
+	@echo "Running linters..."
+	@which ansible-lint > /dev/null || (echo "Installing ansible-lint..." && pip install ansible-lint)
+	@cd ansible && ansible-lint playbooks/*.yml || true
+	@echo ""
+	@echo "Checking Terraform format..."
+	@cd terraform/aws && terraform fmt -check -recursive || true
+	@cd terraform/gcp && terraform fmt -check -recursive || true
+	@cd terraform/azure && terraform fmt -check -recursive || true
+	@echo "Done!"
+
+validate:
+	@echo "Validating Ansible playbooks..."
+	@cd ansible && for f in playbooks/*.yml; do \
+		echo "  Checking $$f..."; \
+		ansible-playbook --syntax-check "$$f" > /dev/null || exit 1; \
+	done
+	@echo "✓ All Ansible playbooks valid"
+	@echo ""
+	@echo "Validating Terraform configurations..."
+	@cd terraform/aws && terraform init -backend=false > /dev/null && terraform validate
+	@echo "✓ AWS terraform valid"
+	@cd terraform/gcp && terraform init -backend=false > /dev/null && terraform validate
+	@echo "✓ GCP terraform valid"
+	@cd terraform/azure && terraform init -backend=false > /dev/null && terraform validate
+	@echo "✓ Azure terraform valid"
+	@echo ""
+	@echo "All validations passed!"
+
+test-e2e-l1:
+	@echo "Running L1 E2E test..."
+	@./tests/e2e-l1.sh
+
+test-e2e-primary:
+	@echo "Running Primary Network E2E test..."
+	@./tests/e2e-primary-network.sh
+
+#
 # Cleanup
 #
 destroy:
@@ -305,6 +345,12 @@ help:
 	@echo "  make safe-genesis Merge Safe contracts into genesis.json (EXPERIMENTAL)"
 	@echo "  make safe         Deploy Safe infrastructure (EXPERIMENTAL)"
 	@echo "  make reset-genesis Reset genesis.json to clean state (no Safe contracts)"
+	@echo ""
+	@echo "Testing:"
+	@echo "  make lint             Run ansible-lint and terraform fmt checks"
+	@echo "  make validate         Validate all Ansible and Terraform configs"
+	@echo "  make test-e2e-l1      Run full L1 E2E test (creates/destroys infra)"
+	@echo "  make test-e2e-primary Run full Primary Network E2E test"
 	@echo ""
 	@echo "Options:"
 	@echo "  CLOUD=aws|gcp|azure  (default: aws)"
