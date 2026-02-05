@@ -129,9 +129,32 @@
         mode: "0755"
       when: chain_id != ""
 
+    - name: Determine chain config file for RPC nodes
+      set_fact:
+        chain_config_file: >-
+          {%- if node_type == 'rpc' and rpc_type is defined -%}
+            rpc-{{ rpc_type }}-chain-config.json
+          {%- else -%}
+            {{ node_type }}-chain-config.json
+          {%- endif -%}
+      when: chain_id != ""
+
+    - name: Check if specific chain config exists
+      stat:
+        path: "{{ playbook_dir }}/../../{{ chain_config_file | trim }}"
+      register: specific_config
+      delegate_to: localhost
+      become: false
+      when: chain_id != ""
+
+    - name: Fallback to generic node type config if specific doesn't exist
+      set_fact:
+        chain_config_file: "{{ node_type }}-chain-config.json"
+      when: chain_id != "" and specific_config.stat is defined and not specific_config.stat.exists
+
     - name: Copy chain config (validator or RPC specific)
       copy:
-        src: "{{ playbook_dir }}/../../{{ node_type }}-chain-config.json"
+        src: "{{ playbook_dir }}/../../{{ chain_config_file | trim }}"
         dest: "{{ avalanchego_config_dir }}/chains/{{ chain_id }}/config.json"
         owner: "{{ avalanchego_user }}"
         group: "{{ avalanchego_group }}"

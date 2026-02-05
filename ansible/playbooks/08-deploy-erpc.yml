@@ -39,16 +39,33 @@
   hosts: localhost
   gather_facts: false
   tasks:
-    - name: Build upstream endpoints
+    - name: Build archive upstream endpoints
       set_fact:
-        erpc_upstreams: "{{ erpc_upstreams | default([]) + [{'id': 'rpc-' ~ (idx + 1), 'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ erpc_chain_id ~ '/rpc'}] }}"
-      loop: "{{ groups['rpc'] }}"
+        erpc_upstreams: "{{ erpc_upstreams | default([]) + [{'id': 'rpc-archive-' ~ (idx + 1), 'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ erpc_chain_id ~ '/rpc', 'rpc_type': 'archive'}] }}"
+      loop: "{{ groups['rpc_archive'] | default([]) }}"
       loop_control:
         index_var: idx
+      when: groups['rpc_archive'] is defined
+
+    - name: Build pruned upstream endpoints
+      set_fact:
+        erpc_upstreams: "{{ erpc_upstreams | default([]) + [{'id': 'rpc-pruned-' ~ (idx + 1), 'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ erpc_chain_id ~ '/rpc', 'rpc_type': 'pruned'}] }}"
+      loop: "{{ groups['rpc_pruned'] | default([]) }}"
+      loop_control:
+        index_var: idx
+      when: groups['rpc_pruned'] is defined
+
+    - name: Fallback - build upstream endpoints from generic rpc group
+      set_fact:
+        erpc_upstreams: "{{ erpc_upstreams | default([]) + [{'id': 'rpc-' ~ (idx + 1), 'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ erpc_chain_id ~ '/rpc', 'rpc_type': hostvars[item]['rpc_type'] | default('archive')}] }}"
+      loop: "{{ groups['rpc'] | default([]) }}"
+      loop_control:
+        index_var: idx
+      when: (groups['rpc_archive'] is not defined or groups['rpc_archive'] | length == 0) and (groups['rpc_pruned'] is not defined or groups['rpc_pruned'] | length == 0)
 
     - name: Display upstream configuration
       debug:
-        msg: "Configured {{ erpc_upstreams | length }} upstream RPC endpoints"
+        msg: "Configured {{ erpc_upstreams | length }} upstream RPC endpoints (archive: {{ erpc_upstreams | selectattr('rpc_type', 'equalto', 'archive') | list | length }}, pruned: {{ erpc_upstreams | selectattr('rpc_type', 'equalto', 'pruned') | list | length }})"
 
 - name: Deploy eRPC
   hosts: monitoring[0]  # Deploy to monitoring server (or first RPC if no monitoring)

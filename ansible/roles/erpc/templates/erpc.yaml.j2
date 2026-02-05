@@ -52,6 +52,11 @@ projects:
         endpoint: {{ upstream.endpoint }}
         evm:
           chainId: {{ erpc_evm_chain_id }}
+{% if upstream.rpc_type | default('archive') == 'pruned' %}
+        ignoreMethods:
+          - "debug_*"
+          - "trace_*"
+{% endif %}
 {% if upstream.rate_limit_budget is defined %}
         rateLimitBudget: {{ upstream.rate_limit_budget }}
 {% endif %}
