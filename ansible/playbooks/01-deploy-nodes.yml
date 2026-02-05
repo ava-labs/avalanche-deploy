@@ -40,7 +40,7 @@
         - ansible_os_family == "Debian"
         - staking_keys_bucket is defined
         - staking_keys_bucket != ""
-        - node_type == "validator"
+        - avalanchego_node_type == "validator"
 
   roles:
     - role: avalanchego

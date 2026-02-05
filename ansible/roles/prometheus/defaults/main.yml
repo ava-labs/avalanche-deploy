@@ -10,8 +10,8 @@ prometheus_data_dir: /var/lib/prometheus
 prometheus_port: 9090
 
 # Scrape interval
-scrape_interval: 15s
-evaluation_interval: 15s
+prometheus_scrape_interval: 15s
+prometheus_evaluation_interval: 15s
 
 # Retention
-retention_time: 15d
+prometheus_retention_time: 15d

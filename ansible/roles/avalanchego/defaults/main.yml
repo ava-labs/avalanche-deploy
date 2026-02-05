@@ -3,13 +3,13 @@
 
 # Versions
 avalanchego_version: "v1.14.1"
-subnet_evm_version: "v0.8.0"
+avalanchego_subnet_evm_version: "v0.8.0"
 
 # Network: fuji or mainnet
 avalanchego_network: "fuji"
 
 # Node type: validator or rpc
-node_type: "validator"
+avalanchego_node_type: "validator"
 
 # Directories
 avalanchego_data_dir: /var/lib/avalanchego
@@ -22,44 +22,44 @@ avalanchego_user: avalanche
 avalanchego_group: avalanche
 
 # Network IDs
-network_ids:
+avalanchego_network_ids:
   fuji: 5
   mainnet: 1
 
 # Bootstrap nodes (official Avalanche nodes)
-bootstrap_nodes:
+avalanchego_bootstrap_nodes:
   fuji:
     - "NodeID-5mb46qkSBj81k9g9e4VFjGGSbaaSLFRzD@bootstrap.fuji.network:9651"
   mainnet:
     - "NodeID-A6onFGyJjA37EZ7kYHvRQC8YR4e5YrkCF@bootstrap.avax.network:9651"
 
 # Ports
-http_port: 9650
-staking_port: 9651
+avalanchego_http_port: 9650
+avalanchego_staking_port: 9651
 
 # API configuration
-api_admin_enabled: false
-api_info_enabled: true
-api_health_enabled: true
+avalanchego_api_admin_enabled: false
+avalanchego_api_info_enabled: true
+avalanchego_api_health_enabled: true
 
 # Logging
-log_level: info
-log_display_level: info
+avalanchego_log_level: info
+avalanchego_log_display_level: info
 
 # Database
-db_type: leveldb
+avalanchego_db_type: leveldb
 
 # Metrics
-metrics_enabled: true
+avalanchego_metrics_enabled: true
 
 # Storage
 # Set to true to auto-detect and mount local NVMe drives (AWS instance store, GCP local SSD, Azure Lsv3)
-use_local_nvme: true
+avalanchego_use_local_nvme: true
 
 # Partial sync - for L1 validators that don't need full primary network state
 # Set to true to only sync P-chain headers (much faster bootstrap)
-partial_sync_primary_network: true
+avalanchego_partial_sync_primary_network: true
 
 # Index settings - RPC nodes need indexing for queries, validators don't
-# This is automatically set based on node_type, but can be overridden
-index_enabled: "{{ true if node_type == 'rpc' else false }}"
+# This is automatically set based on avalanchego_node_type, but can be overridden
+avalanchego_index_enabled: "{{ true if avalanchego_node_type == 'rpc' else false }}"

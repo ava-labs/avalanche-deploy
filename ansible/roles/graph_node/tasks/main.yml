@@ -7,7 +7,7 @@
 # - Graph Node (indexing engine)
 #
 # Required variables:
-#   graph_chain_id: L1 chain ID (blockchain ID from create-l1)
+#   graph_node_chain_id: L1 chain ID (blockchain ID from create-l1)
 #   graph_evm_chain_id: EVM chain ID (from genesis.json)
 #
 # Optional variables:
@@ -111,8 +111,8 @@
     body:
       query: "{ indexingStatuses { subgraph } }"
     status_code: 200
-  register: graph_health
-  until: graph_health.status == 200
+  register: graph_node_health
+  until: graph_node_health.status == 200
   retries: 30
   delay: 10
   ignore_errors: true

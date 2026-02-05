@@ -23,11 +23,11 @@
 
   vars:
     # Primary Network validators need full sync
-    partial_sync_primary_network: false
+    avalanchego_partial_sync_primary_network: false
     # No subnet tracking for Primary Network validators
     track_subnets: []
     # Node type for config loading
-    node_type: "primary-validator"
+    avalanchego_node_type: "primary-validator"
 
   pre_tasks:
     - name: Wait for system to become reachable

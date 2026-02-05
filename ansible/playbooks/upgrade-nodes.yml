@@ -93,7 +93,7 @@
     - name: Check if bundled subnet-evm exists in release
       ansible.builtin.stat:
         path: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
-      register: bundled_subnet_evm
+      register: avalanchego_bundled_subnet_evm
 
     - name: Install bundled subnet-evm plugin
       ansible.builtin.copy:
@@ -102,12 +102,12 @@
         mode: '0755'
         remote_src: true
         backup: true
-      when: bundled_subnet_evm.stat.exists
+      when: avalanchego_bundled_subnet_evm.stat.exists
 
     - name: Warn if subnet-evm not bundled (older release)
       ansible.builtin.debug:
         msg: "WARNING: subnet-evm not found in release tarball. This may be an older avalanchego version. Keeping existing subnet-evm plugin."
-      when: not bundled_subnet_evm.stat.exists
+      when: not avalanchego_bundled_subnet_evm.stat.exists
 
     - name: Clean up temp files
       ansible.builtin.file:
@@ -223,7 +223,7 @@
     - name: Check if bundled subnet-evm exists in release
       ansible.builtin.stat:
         path: "/tmp/avalanchego-extract/avalanchego-v{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
-      register: bundled_subnet_evm
+      register: avalanchego_bundled_subnet_evm
 
     - name: Install bundled subnet-evm plugin
       ansible.builtin.copy:
@@ -232,12 +232,12 @@
         mode: '0755'
         remote_src: true
         backup: true
-      when: bundled_subnet_evm.stat.exists
+      when: avalanchego_bundled_subnet_evm.stat.exists
 
     - name: Warn if subnet-evm not bundled (older release)
       ansible.builtin.debug:
         msg: "WARNING: subnet-evm not found in release tarball. This may be an older avalanchego version. Keeping existing subnet-evm plugin."
-      when: not bundled_subnet_evm.stat.exists
+      when: not avalanchego_bundled_subnet_evm.stat.exists
 
     - name: Clean up temp files
       ansible.builtin.file:

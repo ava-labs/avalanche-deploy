@@ -29,11 +29,11 @@
 
   vars:
     # Full sync for Primary Network
-    partial_sync_primary_network: false
+    avalanchego_partial_sync_primary_network: false
     # No subnet tracking
     track_subnets: []
     # Node type for config loading
-    node_type: "primary-validator"
+    avalanchego_node_type: "primary-validator"
     # This node is a migration target, not an active validator
     is_migration_target: true
     # Use snapshot for faster bootstrap (set via -e use_snapshot=true)

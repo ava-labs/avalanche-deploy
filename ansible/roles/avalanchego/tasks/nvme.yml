@@ -19,43 +19,48 @@
     done
   args:
     executable: /bin/bash
-  register: nvme_device
+  register: avalanchego_nvme_device
   changed_when: false
 
 - name: Display NVMe device status
   ansible.builtin.debug:
-    msg: "{{ 'Found NVMe device: ' ~ nvme_device.stdout if nvme_device.stdout else 'No unmounted NVMe instance store found, using root disk' }}"
+    msg: >-
+      {% if avalanchego_nvme_device.stdout %}
+      Found NVMe device: {{ avalanchego_nvme_device.stdout }}
+      {% else %}
+      No unmounted NVMe instance store found, using root disk
+      {% endif %}
 
 - name: Format NVMe device
-  when: nvme_device.stdout | length > 0
+  when: avalanchego_nvme_device.stdout | length > 0
   block:
     - name: Check if already formatted
-      ansible.builtin.command: "blkid {{ nvme_device.stdout }}"
-      register: blkid_result
+      ansible.builtin.command: "blkid {{ avalanchego_nvme_device.stdout }}"
+      register: avalanchego_blkid_result
       changed_when: false
       failed_when: false
 
     - name: Format NVMe with ext4
       community.general.filesystem:
         fstype: ext4
-        dev: "{{ nvme_device.stdout }}"
-      when: blkid_result.rc != 0
+        dev: "{{ avalanchego_nvme_device.stdout }}"
+      when: avalanchego_blkid_result.rc != 0
 
 - name: Create data directory
   ansible.builtin.file:
     path: "{{ avalanchego_data_dir }}"
     state: directory
     mode: "0755"
-  when: nvme_device.stdout | length > 0
+  when: avalanchego_nvme_device.stdout | length > 0
 
 - name: Mount NVMe device
   ansible.posix.mount:
     path: "{{ avalanchego_data_dir }}"
-    src: "{{ nvme_device.stdout }}"
+    src: "{{ avalanchego_nvme_device.stdout }}"
     fstype: ext4
     opts: defaults,noatime,nodiratime,discard
     state: mounted
-  when: nvme_device.stdout | length > 0
+  when: avalanchego_nvme_device.stdout | length > 0
 
 - name: Set ownership of mounted filesystem
   ansible.builtin.file:
@@ -64,4 +69,4 @@
     group: "{{ avalanchego_group }}"
     mode: "0755"
     state: directory
-  when: nvme_device.stdout | length > 0
+  when: avalanchego_nvme_device.stdout | length > 0

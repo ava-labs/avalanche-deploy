@@ -57,9 +57,9 @@
   roles:
     - role: graph_node
       vars:
-        graph_chain_id: "{{ hostvars['localhost']['l1_chain_id'] }}"
-        graph_network_name: "{{ hostvars['localhost']['graph_network_name'] | default('avalanche-l1') }}"
-        graph_rpc_host: "127.0.0.1"
+        graph_node_chain_id: "{{ hostvars['localhost']['l1_chain_id'] }}"
+        graph_node_network_name: "{{ hostvars['localhost']['graph_network_name'] | default('avalanche-l1') }}"
+        graph_node_rpc_host: "127.0.0.1"
 
 - name: Display Graph Node Information
   hosts: localhost

@@ -12,113 +12,113 @@
 - name: Check for existing DB password
   ansible.builtin.stat:
     path: "{{ safe_install_dir }}/.db_password"
-  register: db_password_file
+  register: safe_db_password_file
 
 - name: Read existing DB password
   ansible.builtin.slurp:
     src: "{{ safe_install_dir }}/.db_password"
-  register: existing_db_password
-  when: db_password_file.stat.exists
+  register: safe_existing_db_password
+  when: safe_db_password_file.stat.exists
 
 - name: Generate new DB password
   ansible.builtin.set_fact:
     safe_db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
-  when: not db_password_file.stat.exists
+  when: not safe_db_password_file.stat.exists
 
 - name: Use existing DB password
   ansible.builtin.set_fact:
-    safe_db_password: "{{ existing_db_password.content | b64decode | trim }}"
-  when: db_password_file.stat.exists
+    safe_db_password: "{{ safe_existing_db_password.content | b64decode | trim }}"
+  when: safe_db_password_file.stat.exists
 
 - name: Check for existing RabbitMQ password
   ansible.builtin.stat:
     path: "{{ safe_install_dir }}/.rabbitmq_password"
-  register: rabbitmq_password_file
+  register: safe_rabbitmq_password_file
 
 - name: Read existing RabbitMQ password
   ansible.builtin.slurp:
     src: "{{ safe_install_dir }}/.rabbitmq_password"
-  register: existing_rabbitmq_password
-  when: rabbitmq_password_file.stat.exists
+  register: safe_existing_rabbitmq_password
+  when: safe_rabbitmq_password_file.stat.exists
 
 - name: Generate new RabbitMQ password
   ansible.builtin.set_fact:
     safe_rabbitmq_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
-  when: not rabbitmq_password_file.stat.exists
+  when: not safe_rabbitmq_password_file.stat.exists
 
 - name: Use existing RabbitMQ password
   ansible.builtin.set_fact:
-    safe_rabbitmq_password: "{{ existing_rabbitmq_password.content | b64decode | trim }}"
-  when: rabbitmq_password_file.stat.exists
+    safe_rabbitmq_password: "{{ safe_existing_rabbitmq_password.content | b64decode | trim }}"
+  when: safe_rabbitmq_password_file.stat.exists
 
 # Django secret key generation - critical for session security
 - name: Check for existing TXS secret key
   ansible.builtin.stat:
     path: "{{ safe_install_dir }}/.txs_secret_key"
-  register: txs_secret_file
+  register: safe_txs_secret_file
 
 - name: Read existing TXS secret key
   ansible.builtin.slurp:
     src: "{{ safe_install_dir }}/.txs_secret_key"
-  register: existing_txs_secret
-  when: txs_secret_file.stat.exists
+  register: safe_existing_txs_secret
+  when: safe_txs_secret_file.stat.exists
 
 - name: Generate new TXS secret key
   ansible.builtin.set_fact:
     safe_txs_secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
-  when: not txs_secret_file.stat.exists and (safe_txs_secret_key == "" or safe_txs_secret_key is not defined)
+  when: not safe_txs_secret_file.stat.exists and (safe_txs_secret_key == "" or safe_txs_secret_key is not defined)
 
 - name: Use existing TXS secret key
   ansible.builtin.set_fact:
-    safe_txs_secret_key: "{{ existing_txs_secret.content | b64decode | trim }}"
-  when: txs_secret_file.stat.exists
+    safe_txs_secret_key: "{{ safe_existing_txs_secret.content | b64decode | trim }}"
+  when: safe_txs_secret_file.stat.exists
 
 - name: Check for existing CFG secret key
   ansible.builtin.stat:
     path: "{{ safe_install_dir }}/.cfg_secret_key"
-  register: cfg_secret_file
+  register: safe_cfg_secret_file
 
 - name: Read existing CFG secret key
   ansible.builtin.slurp:
     src: "{{ safe_install_dir }}/.cfg_secret_key"
-  register: existing_cfg_secret
-  when: cfg_secret_file.stat.exists
+  register: safe_existing_cfg_secret
+  when: safe_cfg_secret_file.stat.exists
 
 - name: Generate new CFG secret key
   ansible.builtin.set_fact:
     safe_cfg_secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
-  when: not cfg_secret_file.stat.exists and (safe_cfg_secret_key == "" or safe_cfg_secret_key is not defined)
+  when: not safe_cfg_secret_file.stat.exists and (safe_cfg_secret_key == "" or safe_cfg_secret_key is not defined)
 
 - name: Use existing CFG secret key
   ansible.builtin.set_fact:
-    safe_cfg_secret_key: "{{ existing_cfg_secret.content | b64decode | trim }}"
-  when: cfg_secret_file.stat.exists
+    safe_cfg_secret_key: "{{ safe_existing_cfg_secret.content | b64decode | trim }}"
+  when: safe_cfg_secret_file.stat.exists
 
 # Webhook token generation for CGW <-> Config Service
 - name: Check for existing webhook token
   ansible.builtin.stat:
     path: "{{ safe_install_dir }}/.webhook_token"
-  register: webhook_token_file
+  register: safe_webhook_token_file
 
 - name: Read existing webhook token
   ansible.builtin.slurp:
     src: "{{ safe_install_dir }}/.webhook_token"
-  register: existing_webhook_token
-  when: webhook_token_file.stat.exists
+  register: safe_existing_webhook_token
+  when: safe_webhook_token_file.stat.exists
 
 - name: Generate new webhook token
   ansible.builtin.set_fact:
     safe_webhook_token: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
-  when: not webhook_token_file.stat.exists and (safe_webhook_token == "" or safe_webhook_token is not defined)
+  when: not safe_webhook_token_file.stat.exists and (safe_webhook_token == "" or safe_webhook_token is not defined)
 
 - name: Use existing webhook token
   ansible.builtin.set_fact:
-    safe_webhook_token: "{{ existing_webhook_token.content | b64decode | trim }}"
-  when: webhook_token_file.stat.exists
+    safe_webhook_token: "{{ safe_existing_webhook_token.content | b64decode | trim }}"
+  when: safe_webhook_token_file.stat.exists
 
 - name: Check if Docker is installed
   ansible.builtin.command: docker --version
-  register: docker_check
+  register: safe_docker_check
   changed_when: false
   failed_when: false
 
@@ -129,7 +129,7 @@
       - docker-compose
     state: present
     update_cache: true
-  when: docker_check.rc != 0
+  when: safe_docker_check.rc != 0
 
 - name: Install nginx and pip
   ansible.builtin.apt:
@@ -237,7 +237,7 @@
 - name: Check if patched Safe UI image exists
   ansible.builtin.command:
     cmd: docker images -q safe-ui-patched:{{ evm_chain_id }}
-  register: patched_ui_check
+  register: safe_patched_ui_check
   changed_when: false
   failed_when: false
 
@@ -295,8 +295,8 @@
     rm -rf /tmp/safe-ui-patched /tmp/Dockerfile.safe-ui
   args:
     executable: /bin/bash
-  when: patched_ui_check.stdout == ""
-  register: build_ui
+  when: safe_patched_ui_check.stdout == ""
+  register: safe_build_ui
   timeout: 600
   changed_when: true
 
@@ -328,7 +328,7 @@
 - name: Check if Let's Encrypt certificate exists
   ansible.builtin.stat:
     path: "/etc/letsencrypt/live/{{ safe_domain }}/fullchain.pem"
-  register: letsencrypt_cert
+  register: safe_letsencrypt_cert
   when: safe_use_letsencrypt | bool
 
 - name: Stop nginx for initial certificate request
@@ -337,7 +337,7 @@
     state: stopped
   when:
     - safe_use_letsencrypt | bool
-    - not letsencrypt_cert.stat.exists | default(true)
+    - not safe_letsencrypt_cert.stat.exists | default(true)
   failed_when: false
 
 - name: Obtain Let's Encrypt certificate
@@ -350,9 +350,9 @@
       --domain {{ safe_domain }}
   when:
     - safe_use_letsencrypt | bool
-    - not letsencrypt_cert.stat.exists | default(true)
-  register: certbot_result
-  changed_when: certbot_result.rc == 0
+    - not safe_letsencrypt_cert.stat.exists | default(true)
+  register: safe_certbot_result
+  changed_when: safe_certbot_result.rc == 0
 
 - name: Create symlinks for Let's Encrypt certificates
   ansible.builtin.file:
@@ -380,7 +380,7 @@
 - name: Check if self-signed SSL certificate exists
   ansible.builtin.stat:
     path: /etc/nginx/ssl/safe.crt
-  register: ssl_cert
+  register: safe_ssl_cert
   when: not (safe_use_letsencrypt | bool)
 
 - name: Generate self-signed SSL certificate
@@ -392,7 +392,7 @@
       -subj "/C=US/ST=State/L=City/O=Organization/CN={{ safe_domain | default(ansible_host) }}"
   when:
     - not (safe_use_letsencrypt | bool)
-    - not ssl_cert.stat.exists | default(true)
+    - not safe_ssl_cert.stat.exists | default(true)
   notify: Reload nginx
   changed_when: true
 
@@ -402,7 +402,7 @@
     mode: '0600'
   when:
     - not (safe_use_letsencrypt | bool)
-    - not ssl_cert.stat.exists | default(true)
+    - not safe_ssl_cert.stat.exists | default(true)
 
 - name: Template nginx configuration
   ansible.builtin.template:
@@ -459,8 +459,8 @@
 - name: Wait for PostgreSQL (TXS) to be healthy
   ansible.builtin.command:
     cmd: docker exec safe-postgres-txs pg_isready -U {{ safe_db_user }} -d {{ safe_txs_db_name }}
-  register: pg_txs_ready
-  until: pg_txs_ready.rc == 0
+  register: safe_pg_txs_ready
+  until: safe_pg_txs_ready.rc == 0
   retries: 30
   delay: 5
   changed_when: false
@@ -468,8 +468,8 @@
 - name: Wait for PostgreSQL (CFG) to be healthy
   ansible.builtin.command:
     cmd: docker exec safe-postgres-cfg pg_isready -U {{ safe_db_user }} -d {{ safe_cfg_db_name }}
-  register: pg_cfg_ready
-  until: pg_cfg_ready.rc == 0
+  register: safe_pg_cfg_ready
+  until: safe_pg_cfg_ready.rc == 0
   retries: 30
   delay: 5
   changed_when: false
@@ -489,8 +489,8 @@
       --env-file {{ safe_install_dir }}/txs.env
       safeglobal/safe-transaction-service:{{ safe_txs_version }}
       python manage.py migrate --noinput
-  register: txs_migrate
-  changed_when: "'Applying' in txs_migrate.stdout"
+  register: safe_txs_migrate
+  changed_when: "'Applying' in safe_txs_migrate.stdout"
   retries: 3
   delay: 10
 
@@ -511,9 +511,9 @@
       -e GUNICORN_BIND_PORT=8000
       safeglobal/safe-config-service:{{ safe_cfg_version }}
       python manage.py migrate --noinput
-  register: cfg_migrate
-  changed_when: "'Applying' in cfg_migrate.stdout"
-  failed_when: "cfg_migrate.rc != 0 and 'No migrations to apply' not in cfg_migrate.stdout"
+  register: safe_cfg_migrate
+  changed_when: "'Applying' in safe_cfg_migrate.stdout"
+  failed_when: "safe_cfg_migrate.rc != 0 and 'No migrations to apply' not in safe_cfg_migrate.stdout"
   retries: 3
   delay: 10
 
@@ -528,8 +528,8 @@
     url: "http://localhost:{{ safe_txs_port }}/api/v1/about/"
     method: GET
     status_code: 200
-  register: txs_health
-  until: txs_health.status == 200
+  register: safe_txs_health
+  until: safe_txs_health.status == 200
   retries: 30
   delay: 10
 
@@ -538,8 +538,8 @@
     url: "http://localhost:{{ safe_cfg_port }}/api/v1/about/"
     method: GET
     status_code: 200
-  register: cfg_health
-  until: cfg_health.status == 200
+  register: safe_cfg_health
+  until: safe_cfg_health.status == 200
   retries: 30
   delay: 10
 
@@ -548,8 +548,8 @@
     url: "http://localhost:{{ safe_cgw_port }}/health"
     method: GET
     status_code: 200
-  register: cgw_health
-  until: cgw_health.status == 200
+  register: safe_cgw_health
+  until: safe_cgw_health.status == 200
   retries: 30
   delay: 10
 
@@ -564,18 +564,18 @@
     cmd: >
       docker exec safe-cfg python /init/init-cfg-chain.py
       --chain-id "{{ evm_chain_id }}"
-      --chain-name "{{ chain_name }}"
-      --short-name "{{ chain_short_name }}"
+      --chain-name "{{ safe_chain_name }}"
+      --short-name "{{ safe_chain_short_name }}"
       --rpc-url "https://{{ safe_host }}/rpc"
       --block-explorer-url "https://{{ safe_host }}/explorer"
-      --currency-name "{{ native_currency_name }}"
-      --currency-symbol "{{ native_currency_symbol }}"
+      --currency-name "{{ safe_native_currency_name }}"
+      --currency-symbol "{{ safe_native_currency_symbol }}"
       --txs-url "http://safe-txs-web:8888"
       --l2 "{{ safe_use_l2 | lower }}"
       --gas-price "{{ safe_gas_price_wei }}"
-  register: cfg_init
-  changed_when: "'Created chain' in cfg_init.stdout"
-  failed_when: cfg_init.rc != 0 and 'already exists' not in cfg_init.stdout
+  register: safe_cfg_init
+  changed_when: "'Created chain' in safe_cfg_init.stdout"
+  failed_when: safe_cfg_init.rc != 0 and 'already exists' not in safe_cfg_init.stdout
 
 # Auto-configure contracts in Transaction Service database
 # Must run via manage.py shell to inherit Django environment
@@ -596,9 +596,9 @@
           {{ safe_use_l2 | lower }}
       )
       "
-  register: txs_init
-  changed_when: "'Created' in txs_init.stdout"
-  failed_when: txs_init.rc != 0
+  register: safe_txs_init
+  changed_when: "'Created' in safe_txs_init.stdout"
+  failed_when: safe_txs_init.rc != 0
 
 # Validation - ensure chain and contracts are properly registered
 - name: Verify chain registered in Config Service
@@ -606,25 +606,25 @@
     url: "http://localhost:{{ safe_cfg_port }}/api/v1/chains/{{ evm_chain_id }}/"
     method: GET
     status_code: 200
-  register: chain_check
+  register: safe_chain_check
   retries: 3
   delay: 5
-  until: chain_check.status == 200
+  until: safe_chain_check.status == 200
 
 - name: Verify contracts registered in Transaction Service
   ansible.builtin.uri:
     url: "http://localhost:{{ safe_txs_port }}/api/v1/about/singletons/"
     method: GET
     status_code: 200
-  register: singletons_check
+  register: safe_singletons_check
   retries: 3
   delay: 5
-  until: singletons_check.status == 200
+  until: safe_singletons_check.status == 200
 
 - name: Check if Safe singleton is registered
   ansible.builtin.assert:
     that:
-      - "safe_contracts.safe_singleton | lower in (singletons_check.json | map(attribute='address') | list | map('lower') | list)"
+      - "safe_contracts.safe_singleton | lower in (safe_singletons_check.json | map(attribute='address') | list | map('lower') | list)"
     fail_msg: "Safe singleton {{ safe_contracts.safe_singleton }} not found in registered singletons"
     success_msg: "Safe singleton registered successfully"
 

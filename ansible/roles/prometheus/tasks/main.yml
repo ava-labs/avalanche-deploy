@@ -80,8 +80,8 @@
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ prometheus_port }}/-/ready"
     method: GET
-  register: prom_ready
-  until: prom_ready.status == 200
+  register: prometheus_ready
+  until: prometheus_ready.status == 200
   retries: 30
   delay: 5
 

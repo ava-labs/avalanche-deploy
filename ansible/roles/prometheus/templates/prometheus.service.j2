@@ -11,7 +11,7 @@ Group={{ prometheus_group }}
 ExecStart=/usr/local/bin/prometheus \
     --config.file={{ prometheus_config_dir }}/prometheus.yml \
     --storage.tsdb.path={{ prometheus_data_dir }} \
-    --storage.tsdb.retention.time={{ retention_time }} \
+    --storage.tsdb.retention.time={{ prometheus_retention_time }} \
     --web.listen-address=0.0.0.0:{{ prometheus_port }} \
     --web.enable-lifecycle
 Restart=always
