@@ -45,7 +45,7 @@ make k8s-help-primary
 cd kubernetes
 
 # 1) Create local cluster
-./scripts/create-kind-cluster.sh --name=avalanche-l1
+./scripts/create-kind-cluster.sh --name=avalanche-l1 --image=kindest/node:v1.35.0
 
 # 2) Deploy L1 validators + RPC
 helm install l1-validators ./helm/avalanche-validator \
@@ -73,6 +73,8 @@ export AVALANCHE_PRIVATE_KEY="PrivateKey-..."
 # 6) Check status
 ./scripts/status.sh --release=l1-validators
 ```
+
+Note: the first `kind` run pulls the node image and can take several minutes depending on network speed.
 
 ### Option B: Existing cluster (non-kind)
 

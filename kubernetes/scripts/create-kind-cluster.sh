@@ -3,11 +3,13 @@
 set -euo pipefail
 
 CLUSTER_NAME="avalanche-l1"
+NODE_IMAGE="${KIND_NODE_IMAGE:-kindest/node:v1.35.0}"
 
 usage() {
     cat <<USAGE
 Usage: $0 [options]
   --name=NAME            kind cluster name (default: avalanche-l1)
+  --image=REF            kind node image (default: ${NODE_IMAGE})
   -h, --help             Show this help
 USAGE
 }
@@ -15,6 +17,7 @@ USAGE
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --name=*) CLUSTER_NAME="${1#*=}"; shift ;;
+        --image=*) NODE_IMAGE="${1#*=}"; shift ;;
         -h|--help)
             usage
             exit 0
@@ -27,7 +30,21 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+for cmd in kind docker kubectl; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "Error: required command not found: $cmd"
+        exit 1
+    fi
+done
+
+if ! docker info >/dev/null 2>&1; then
+    echo "Error: Docker daemon is not reachable."
+    echo "Make sure Docker Desktop is running and your user can access docker.sock."
+    exit 1
+fi
+
 echo "Creating kind cluster: $CLUSTER_NAME"
+echo "Node image: $NODE_IMAGE"
 
 if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
     echo "Cluster $CLUSTER_NAME already exists"
@@ -35,7 +52,10 @@ if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
     exit 1
 fi
 
-cat <<EOF_KIND | kind create cluster --name "$CLUSTER_NAME" --config=-
+echo "Pre-pulling node image (can take several minutes on first run)..."
+docker pull "$NODE_IMAGE"
+
+cat <<EOF_KIND | kind create cluster --name "$CLUSTER_NAME" --image "$NODE_IMAGE" --config=-
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
