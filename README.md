@@ -4,7 +4,7 @@ Deployment toolkit for Avalanche L1 blockchains on AWS, GCP, or Azure, plus Prim
 
 ## L1 Blockchain
 
-Deploy a complete L1 with validators, RPC nodes, and monitoring:
+Deploy a complete L1 with validators, RPC nodes, monitoring, and Blockscout:
 
 ```bash
 make setup && make infra && make deploy
@@ -13,7 +13,7 @@ make create-l1
 source l1.env && make configure-l1 SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID
 ```
 
-**What you get:** 5 validators, archive + pruned RPC, Prometheus/Grafana (~$650/mo)
+**What you get:** 5 validators, archive + pruned RPC, Prometheus/Grafana, Blockscout (~$650/mo)
 
 [Full L1 Deployment Guide →](docs/L1-DEPLOYMENT.md)
 
