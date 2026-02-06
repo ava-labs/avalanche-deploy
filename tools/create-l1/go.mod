@@ -1,12 +1,11 @@
 module github.com/ava-labs/avalanche-deploy/tools/create-l1
 
-go 1.24.11
-
-toolchain go1.24.12
+go 1.24.13
 
 require (
 	github.com/ava-labs/avalanchego v1.14.1
-	github.com/ava-labs/platform-cli v0.0.0-20260203193144-ae0ae8c1b5fe
+	github.com/ava-labs/platform-cli v0.0.0-20260206173307-55db65371c25
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0
 	golang.org/x/crypto v0.45.0
 )
 
@@ -36,7 +35,6 @@ require (
 	github.com/crate-crypto/go-ipa v0.0.0-20231025140028-3c0104f4b233 // indirect
 	github.com/crate-crypto/go-kzg-4844 v1.1.0 // indirect
 	github.com/deckarep/golang-set/v2 v2.1.0 // indirect
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/ethereum/c-kzg-4844 v1.0.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/gballet/go-verkle v0.1.1-0.20231031103413-a67434b50f46 // indirect

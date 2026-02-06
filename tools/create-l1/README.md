@@ -10,7 +10,7 @@ CLI tool to create an Avalanche L1 (formerly Subnet) on Fuji or Mainnet.
 
 2. **Running Validator Nodes**: Your validators must be running and synced with the network
 
-3. **Go 1.21+**: Required to build the tool
+3. **Go 1.24.13+**: Required to build the tool
 
 ## Build
 

@@ -25,7 +25,6 @@ import (
 
 	// Use platform-cli libraries for common functionality
 	"github.com/ava-labs/platform-cli/pkg/network"
-	"github.com/ava-labs/platform-cli/pkg/pchain"
 	pkgwallet "github.com/ava-labs/platform-cli/pkg/wallet"
 )
 
@@ -149,7 +148,10 @@ func run() error {
 	evmChainID := extractEVMChainID(genesisBytes)
 
 	// Get network configuration
-	networkID, rpcEndpoint := getNetworkConfig(networkName)
+	networkID, rpcEndpoint, err := getNetworkConfig(networkName)
+	if err != nil {
+		return fmt.Errorf("failed to get network config: %w", err)
+	}
 
 	fmt.Println("=== Create Avalanche L1 ===")
 	fmt.Printf("Network:    %s (ID: %d)\n", networkName, networkID)
@@ -772,7 +774,7 @@ func parseValidatorIPs() ([]string, error) {
 	return ips, nil
 }
 
-func getNetworkConfig(networkName string) (uint32, string) {
+func getNetworkConfig(networkName string) (uint32, string, error) {
 	// Use platform-cli network package for configuration
 	return network.GetNetworkIDAndRPC(networkName)
 }
@@ -800,8 +802,21 @@ func parseFloat64(s string) (float64, error) {
 // validateChainName checks that the chain name contains only alphanumeric characters
 // Avalanche P-Chain rejects chain names with hyphens, spaces, or special characters
 func validateChainName(name string) error {
-	// Use platform-cli pchain package for validation
-	return pchain.ValidateChainName(name)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("chain name cannot be empty")
+	}
+
+	for _, ch := range name {
+		isLower := ch >= 'a' && ch <= 'z'
+		isUpper := ch >= 'A' && ch <= 'Z'
+		isDigit := ch >= '0' && ch <= '9'
+		if !isLower && !isUpper && !isDigit {
+			return fmt.Errorf("invalid chain name %q: use only letters and numbers", name)
+		}
+	}
+
+	return nil
 }
 
 func findGenesisFile() (string, error) {
