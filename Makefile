@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup doctor infra infra-plan deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help
+.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
 
 # Default cloud provider
 CLOUD ?= aws
@@ -289,7 +289,7 @@ safe-genesis:
 	@echo "=============================================="
 	@echo "  EXPERIMENTAL: Safe Multisig Genesis Merge"
 	@echo "=============================================="
-	@./shared/safe/merge-genesis.sh "$(L1_GENESIS_FILE)"
+	@./scripts/safe/merge-genesis.sh "$(L1_GENESIS_FILE)"
 
 reset-genesis:
 	@echo "Resetting $(L1_GENESIS_FILE) to clean state..."
@@ -322,10 +322,10 @@ lint:
 	@echo ""
 	@echo "Checking shell scripts..."
 	@if command -v shellcheck > /dev/null 2>&1; then \
-		for f in scripts/*.sh tests/*.sh kubernetes/scripts/*.sh; do bash -n "$$f"; shellcheck -S error "$$f"; done; \
+		for f in $$(find scripts tests kubernetes/scripts -type f -name '*.sh' | sort); do bash -n "$$f"; shellcheck -S error "$$f"; done; \
 	else \
 		echo "shellcheck not found. Running syntax checks only."; \
-		for f in scripts/*.sh tests/*.sh kubernetes/scripts/*.sh; do bash -n "$$f"; done; \
+		for f in $$(find scripts tests kubernetes/scripts -type f -name '*.sh' | sort); do bash -n "$$f"; done; \
 	fi
 	@echo "Done!"
 
@@ -444,7 +444,62 @@ clean:
 # Help
 #
 help:
-	@echo "Avalanche L1 Deploy"
+	@echo "Avalanche Deploy"
+	@echo ""
+	@echo "Two primary workflows:"
+	@echo "  1) L1 setup + add-ons (AWS/GCP/Azure)"
+	@echo "  2) Primary Network validator ops (AWS-only)"
+	@echo ""
+	@echo "Run one of:"
+	@echo "  make help-l1"
+	@echo "  make help-primary"
+	@echo "  make help-all         # full command reference"
+	@echo ""
+	@echo "Guardrails:"
+	@echo "  make doctor"
+	@echo "  make test-incremental"
+
+help-l1:
+	@echo "L1 Workflow (Setup + Add-ons)"
+	@echo ""
+	@echo "Core flow:"
+	@echo "  make setup"
+	@echo "  make infra CLOUD=aws|gcp|azure"
+	@echo "  make deploy CLOUD=aws|gcp|azure NETWORK=fuji|mainnet"
+	@echo "  make create-l1"
+	@echo "  make configure-l1 CLOUD=<provider> SUBNET_ID=... CHAIN_ID=..."
+	@echo "  make status CLOUD=<provider>"
+	@echo ""
+	@echo "Add-ons:"
+	@echo "  make deploy-blockscout CHAIN_ID=... EVM_CHAIN_ID=... [CHAIN_NAME=...]"
+	@echo "  make faucet CHAIN_ID=... EVM_CHAIN_ID=... FAUCET_KEY=0x..."
+	@echo "  make graph-node CHAIN_ID=... [NETWORK_NAME=...]"
+	@echo "  make erpc CHAIN_ID=... EVM_CHAIN_ID=..."
+	@echo "  make safe-genesis | make safe ... | make reset-genesis"
+	@echo ""
+	@echo "Ops:"
+	@echo "  make monitoring | make health-checks | make rolling-restart | make upgrade VERSION=x.y.z"
+
+help-primary:
+	@echo "Primary Network Workflow (AWS-only)"
+	@echo ""
+	@echo "Core flow:"
+	@echo "  make setup"
+	@echo "  make primary-infra CLOUD=aws"
+	@echo "  make primary-deploy CLOUD=aws NETWORK=fuji|mainnet"
+	@echo "  make primary-status CLOUD=aws"
+	@echo ""
+	@echo "Maintenance + security:"
+	@echo "  make backup-keys CLOUD=aws"
+	@echo "  make restore-keys CLOUD=aws SOURCE=... TARGET_IP=..."
+	@echo "  make create-snapshot CLOUD=aws NODE=..."
+	@echo "  make list-snapshots CLOUD=aws"
+	@echo "  make restore-snapshot CLOUD=aws TARGET=... [SNAPSHOT=...]"
+	@echo "  make prepare-migration CLOUD=aws NODE=... [SNAPSHOT=true]"
+	@echo "  make migrate-validator CLOUD=aws SOURCE=... TARGET=..."
+
+help-all:
+	@echo "Avalanche Deploy - Full Command Reference"
 	@echo ""
 	@echo "Quick start (L1):"
 	@echo "  make setup        Install dependencies (terraform, ansible, aws-cli, jq, go, shellcheck)"

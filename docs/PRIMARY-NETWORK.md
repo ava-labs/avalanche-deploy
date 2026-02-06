@@ -118,7 +118,8 @@ make restore-snapshot CLOUD=aws TARGET=migration-target
 make restore-snapshot CLOUD=aws TARGET=migration-target SNAPSHOT=mainnet-2025-02
 
 # Restore with integrity verification (slower but safer)
-ansible-playbook playbooks/15-restore-snapshot.yml --limit migration-target \
+cd ansible && ansible-playbook -i inventory/aws_hosts playbooks/15-restore-snapshot.yml \
+  --limit migration-target \
   -e verify_integrity=true
 ```
 

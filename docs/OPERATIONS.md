@@ -2,6 +2,9 @@
 
 Day-2 operations for your Avalanche infrastructure.
 
+For workflow-first onboarding, start with [WORKFLOWS.md](WORKFLOWS.md).
+For command-focused CLI help, use `make help-l1`, `make help-primary`, or `make help-all`.
+
 ## Health Checks
 
 ```bash
@@ -94,9 +97,9 @@ make reset-l1
 
 | Command | Description |
 |---------|-------------|
-| `make create-snapshot` | Create database snapshot from synced node |
-| `make restore-snapshot` | Restore database snapshot to a node |
-| `make list-snapshots` | List available snapshots in S3 |
+| `make create-snapshot CLOUD=aws` | Create database snapshot from synced node (AWS-only) |
+| `make restore-snapshot CLOUD=aws` | Restore database snapshot to a node (AWS-only) |
+| `make list-snapshots CLOUD=aws` | List available snapshots in S3 (AWS-only) |
 
 ### Operations
 
@@ -131,6 +134,8 @@ make reset-l1
 | Command | Description |
 |---------|-------------|
 | `make doctor` | Verify local dependencies and config layout |
+| `make help-l1` | Show L1-focused command map |
+| `make help-primary` | Show Primary Network-focused command map |
 | `make validate-config-layout` | Verify required config JSON files exist and parse |
 | `make test-unit` | Run Go unit tests for local tools |
 | `make test-e2e-dry` | Run both E2E scripts in dry-run mode (no infra changes) |
