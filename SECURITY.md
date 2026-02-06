@@ -33,10 +33,10 @@ This security policy applies to:
 When using this project:
 
 1. **Never commit secrets** - Use environment variables or secret managers
-2. **Restrict SSH access** - Limit `allowed_ips` in terraform.tfvars
+2. **Restrict SSH access** - Limit `operator_ip` in `terraform/<provider>/terraform.tfvars`
 3. **Use private keys securely** - Store in secure locations, never commit
 4. **Keep dependencies updated** - Run `go mod tidy` and update terraform providers
-5. **Review genesis.json** - Ensure pre-funded addresses are intended
+5. **Review `configs/l1/genesis/genesis.json`** - Ensure pre-funded addresses are intended
 
 ## Known Security Considerations
 

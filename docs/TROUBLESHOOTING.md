@@ -78,7 +78,7 @@ ssh ubuntu@<node-ip> "curl -s localhost:9650/ext/health"
 
 **Symptom:** Chain fails to start with warp activation error
 
-**Solution:** Add Durango timestamp to genesis.json:
+**Solution:** Add Durango timestamp to your genesis file (default: `configs/l1/genesis/genesis.json`):
 ```json
 {
   "config": {

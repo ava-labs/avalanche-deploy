@@ -1,18 +1,18 @@
 #!/bin/bash
 # =============================================================================
-# Merge Safe v1.4.1 contracts into genesis.json
+# Merge Safe v1.4.1 contracts into an L1 genesis file
 #
 # EXPERIMENTAL: Safe support is not production-ready.
 #
-# This script merges pre-deployed Safe contract bytecode into your genesis.json
+# This script merges pre-deployed Safe contract bytecode into your genesis
 # file. This allows Safe multisig wallets to work on your L1 without requiring
 # contract deployment transactions after chain creation.
 #
 # Usage:
-#   ./merge-genesis.sh <genesis.json>
-#   ./merge-genesis.sh                    # defaults to genesis.json
+#   ./merge-genesis.sh <genesis-file>
+#   ./merge-genesis.sh                    # defaults to configs/l1/genesis/genesis.json
 #
-# To reset genesis.json to clean state:
+# To reset the default genesis file to clean state:
 #   make reset-genesis
 #
 # Safe contracts added:
@@ -29,7 +29,7 @@
 
 set -e
 
-GENESIS_FILE="${1:-genesis.json}"
+GENESIS_FILE="${1:-configs/l1/genesis/genesis.json}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTRACTS_FILE="$SCRIPT_DIR/genesis-contracts.json"
 
@@ -82,4 +82,4 @@ echo "  SimulateTxAccessor:       0x3d4BA2E0884aa488718476ca2FB8Efc291A46199"
 echo ""
 echo "Done! Safe contracts merged into $GENESIS_FILE"
 echo ""
-echo "To reset genesis.json to clean state: make reset-genesis"
+echo "To reset the default genesis file to clean state: make reset-genesis"

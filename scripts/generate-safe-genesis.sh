@@ -1,7 +1,7 @@
 #!/bin/bash
 # Generate Safe v1.4.1 genesis entries with correct runtime bytecode
 # This script fetches the correct bytecode from Ethereum mainnet and outputs
-# JSON that can be merged into your genesis.json alloc section
+# JSON that can be merged into your genesis alloc section
 
 set -e
 
@@ -121,8 +121,8 @@ EOF
 echo ""
 echo "Safe genesis entries written to: $OUTPUT_FILE"
 echo ""
-echo "To add these to your genesis.json, merge the alloc entries:"
-echo "  jq -s '.[0] * {alloc: (.[0].alloc + .[1])}' genesis.json $OUTPUT_FILE > genesis-new.json"
+echo "To add these to your genesis, merge the alloc entries:"
+echo "  jq -s '.[0] * {alloc: (.[0].alloc + .[1])}' configs/l1/genesis/genesis.json $OUTPUT_FILE > configs/l1/genesis/genesis.new.json"
 echo ""
 echo "Contract addresses (use these in Safe infrastructure config):"
 echo "  SafeProxyFactory:    $SAFE_PROXY_FACTORY"

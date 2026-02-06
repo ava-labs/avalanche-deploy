@@ -11,13 +11,19 @@
 #   - Disaster recovery
 #   - Spinning up new nodes quickly
 
-set -e
+set -euo pipefail
 
 HOSTNAME="${1:-}"
 SNAPSHOT_NAME="${2:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-INVENTORY="$REPO_ROOT/ansible/inventory/aws_hosts"
+CLOUD="${CLOUD:-aws}"
+INVENTORY="$REPO_ROOT/ansible/inventory/${CLOUD}_hosts"
+
+if [ "$CLOUD" != "aws" ]; then
+    echo "Error: snapshot creation is currently supported only for CLOUD=aws."
+    exit 1
+fi
 
 if [ -z "$HOSTNAME" ]; then
     echo "Usage: $0 <validator-hostname> [snapshot-name]"
@@ -41,12 +47,12 @@ cd "$REPO_ROOT/ansible"
 
 if [ -n "$SNAPSHOT_NAME" ]; then
     echo "Creating snapshot '$SNAPSHOT_NAME' from $HOSTNAME..."
-    ansible-playbook playbooks/14-create-snapshot.yml --limit "$HOSTNAME" -e "snapshot_name=$SNAPSHOT_NAME"
+    ansible-playbook -i "$INVENTORY" playbooks/14-create-snapshot.yml --limit "$HOSTNAME" -e "snapshot_name=$SNAPSHOT_NAME"
 else
     echo "Creating snapshot from $HOSTNAME..."
-    ansible-playbook playbooks/14-create-snapshot.yml --limit "$HOSTNAME"
+    ansible-playbook -i "$INVENTORY" playbooks/14-create-snapshot.yml --limit "$HOSTNAME"
 fi
 
 echo ""
 echo "List all snapshots:"
-echo "  aws s3 ls s3://\$(terraform -chdir=../terraform/aws output -raw staking_keys_bucket)/snapshots/"
+echo "  aws s3 ls s3://\$(terraform -chdir=../terraform/$CLOUD output -raw staking_keys_bucket)/snapshots/"

@@ -41,7 +41,7 @@ safe_rabbitmq_user: "safe"
 safe_rabbitmq_password: ""
 
 # Safe contract addresses - canonical CREATE2 addresses from @safe-global/safe-deployments v1.4.1
-# These are pre-deployed in genesis.json via shared/safe/genesis-contracts.json
+# These are pre-deployed in configs/l1/genesis/genesis.json via shared/safe/genesis-contracts.json
 #
 # To use custom addresses (e.g., for non-L2 Safe), override these in your playbook:
 #   safe_contracts:

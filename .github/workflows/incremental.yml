@@ -29,7 +29,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ansible jq
+          sudo apt-get install -y ansible jq shellcheck
 
       - name: Install ansible-lint
         run: |

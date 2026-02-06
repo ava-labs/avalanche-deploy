@@ -8,7 +8,7 @@
 #
 # Required variables:
 #   graph_node_chain_id: L1 chain ID (blockchain ID from create-l1)
-#   graph_evm_chain_id: EVM chain ID (from genesis.json)
+#   graph_evm_chain_id: EVM chain ID (from genesis file)
 #
 # Optional variables:
 #   graph_node_port: GraphQL HTTP port (default: 8000)

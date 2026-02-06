@@ -32,7 +32,7 @@ Safe is a smart contract wallet that requires multiple signatures to execute tra
 
 ### Step 1: Add Safe Contracts to Genesis
 
-> **Note:** Safe contracts are NOT included in genesis.json by default. You must explicitly merge them before creating your L1.
+> **Note:** Safe contracts are NOT included in `configs/l1/genesis/genesis.json` by default. You must explicitly merge them before creating your L1.
 
 Before creating your L1, merge Safe contracts into your genesis file:
 
@@ -40,7 +40,7 @@ Before creating your L1, merge Safe contracts into your genesis file:
 make safe-genesis
 ```
 
-To reset genesis.json back to clean state (removes Safe contracts):
+To reset `configs/l1/genesis/genesis.json` back to clean state (removes Safe contracts):
 ```bash
 make reset-genesis
 ```
@@ -76,7 +76,7 @@ source l1.env  # Sets SUBNET_ID and CHAIN_ID from tool output
 make safe CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=<your-evm-chain-id>
 ```
 
-The EVM chain ID should match the `chainId` field in your `genesis.json`.
+The EVM chain ID should match the `chainId` field in your genesis file (`configs/l1/genesis/genesis.json` by default).
 
 ## Architecture
 

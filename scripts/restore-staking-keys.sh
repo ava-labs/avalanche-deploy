@@ -9,13 +9,19 @@
 # This downloads keys from S3 and copies them to the target node.
 # The target node should have avalanchego stopped before running this.
 
-set -e
+set -euo pipefail
 
 SOURCE_HOST="${1:-}"
 TARGET_IP="${2:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-INVENTORY="$REPO_ROOT/ansible/inventory/aws_hosts"
+CLOUD="${CLOUD:-aws}"
+INVENTORY="$REPO_ROOT/ansible/inventory/${CLOUD}_hosts"
+
+if [ "$CLOUD" != "aws" ]; then
+    echo "Error: staking key restore is currently supported only for CLOUD=aws."
+    exit 1
+fi
 
 if [ -z "$SOURCE_HOST" ] || [ -z "$TARGET_IP" ]; then
     echo "Usage: $0 <source-hostname> <target-ip>"
@@ -41,9 +47,8 @@ if [ -z "$SOURCE_HOST" ] || [ -z "$TARGET_IP" ]; then
 fi
 
 # Get bucket name from Terraform
-cd "$REPO_ROOT/terraform/aws"
+cd "$REPO_ROOT/terraform/$CLOUD"
 BUCKET=$(terraform output -raw staking_keys_bucket 2>/dev/null || echo "")
-KMS_ARN=$(terraform output -raw staking_keys_kms_key_arn 2>/dev/null || echo "")
 
 if [ -z "$BUCKET" ]; then
     echo "Error: Could not get staking_keys_bucket from Terraform"
@@ -69,7 +74,7 @@ if [ ! -f "$TEMP_DIR/staking-keys.tar.gz" ]; then
 fi
 
 # Get SSH key from inventory
-SSH_KEY=$(grep "ansible_ssh_private_key_file" "$REPO_ROOT/ansible/inventory/aws_hosts" | head -1 | sed 's/.*=//')
+SSH_KEY=$(grep "ansible_ssh_private_key_file" "$INVENTORY" | head -1 | sed 's/.*=//')
 SSH_OPTS="-o StrictHostKeyChecking=no"
 
 if [ -n "$SSH_KEY" ] && [ -f "$SSH_KEY" ]; then

@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/hex"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/ava-labs/avalanchego/utils/crypto/secp256k1"
@@ -77,5 +79,95 @@ func TestCheckGenesisFunding(t *testing.T) {
 	}
 	if balance != "0xde0b6b3a7640000" {
 		t.Fatalf("unexpected balance: %s", balance)
+	}
+}
+
+func TestFindGenesisFilePrefersConfigsPath(t *testing.T) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	genesisDir := filepath.Join(tmpDir, "configs", "l1", "genesis")
+	if err := os.MkdirAll(genesisDir, 0o755); err != nil {
+		t.Fatalf("failed to create genesis dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(genesisDir, "genesis.json"), []byte(`{"config":{"chainId":1}}`), 0o644); err != nil {
+		t.Fatalf("failed to write config genesis: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "genesis.json"), []byte(`{"config":{"chainId":2}}`), 0o644); err != nil {
+		t.Fatalf("failed to write fallback genesis: %v", err)
+	}
+
+	originalWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get current dir: %v", err)
+	}
+	defer func() {
+		if chdirErr := os.Chdir(originalWD); chdirErr != nil {
+			t.Fatalf("failed to restore working dir: %v", chdirErr)
+		}
+	}()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change dir: %v", err)
+	}
+
+	got, err := findGenesisFile()
+	if err != nil {
+		t.Fatalf("findGenesisFile returned error: %v", err)
+	}
+	want := filepath.Join(tmpDir, "configs", "l1", "genesis", "genesis.json")
+	assertSameFile(t, got, want)
+}
+
+func TestFindGenesisFileFindsParentConfigsPath(t *testing.T) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	genesisDir := filepath.Join(tmpDir, "configs", "l1", "genesis")
+	if err := os.MkdirAll(genesisDir, 0o755); err != nil {
+		t.Fatalf("failed to create genesis dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(genesisDir, "genesis.json"), []byte(`{"config":{"chainId":99999}}`), 0o644); err != nil {
+		t.Fatalf("failed to write genesis file: %v", err)
+	}
+
+	nestedDir := filepath.Join(tmpDir, "tools", "create-l1")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatalf("failed to create nested dir: %v", err)
+	}
+
+	originalWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get current dir: %v", err)
+	}
+	defer func() {
+		if chdirErr := os.Chdir(originalWD); chdirErr != nil {
+			t.Fatalf("failed to restore working dir: %v", chdirErr)
+		}
+	}()
+	if err := os.Chdir(nestedDir); err != nil {
+		t.Fatalf("failed to change dir: %v", err)
+	}
+
+	got, err := findGenesisFile()
+	if err != nil {
+		t.Fatalf("findGenesisFile returned error: %v", err)
+	}
+	want := filepath.Join(tmpDir, "configs", "l1", "genesis", "genesis.json")
+	assertSameFile(t, got, want)
+}
+
+func assertSameFile(t *testing.T, gotPath, wantPath string) {
+	t.Helper()
+
+	gotInfo, err := os.Stat(gotPath)
+	if err != nil {
+		t.Fatalf("failed to stat got path %q: %v", gotPath, err)
+	}
+	wantInfo, err := os.Stat(wantPath)
+	if err != nil {
+		t.Fatalf("failed to stat want path %q: %v", wantPath, err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
+		t.Fatalf("paths do not reference the same file: got %q want %q", gotPath, wantPath)
 	}
 }

@@ -95,7 +95,7 @@ func main() {
 	flag.StringVar(&configFile, "config", "", "Config file (YAML/JSON)")
 	flag.StringVar(&outputFile, "output", "l1.env", "Output file for subnet/chain IDs")
 	flag.StringVar(&validatorIPs, "validators", "", "Comma-separated validator IPs")
-	flag.StringVar(&genesisFile, "genesis", "", "Genesis file path (default: genesis.json in current or parent dir)")
+	flag.StringVar(&genesisFile, "genesis", "", "Genesis file path (default: configs/l1/genesis/genesis.json in current or parent dirs)")
 	flag.StringVar(&chainName, "chain-name", "my-l1", "Name for the L1 chain")
 	flag.Float64Var(&balanceAVAX, "validator-balance", 1.0, "Initial balance per validator in AVAX (supports decimals, e.g., 0.1)")
 	flag.BoolVar(&deployValidatorManager, "deploy-validator-manager", false, "Deploy ValidatorManager contracts (requires forge)")
@@ -208,9 +208,9 @@ func run() error {
 		fmt.Printf("  Genesis funding: ✓ (balance: %s)\n", balance)
 	} else {
 		fmt.Printf("  Genesis funding: ✗ (address not in genesis alloc)\n")
-		fmt.Println("  WARNING: Your EVM address is not funded in genesis.json")
+		fmt.Println("  WARNING: Your EVM address is not funded in the selected genesis file")
 		fmt.Println("           You won't be able to deploy contracts or send transactions on the L1")
-		fmt.Println("           Update genesis.json alloc to include your address before proceeding")
+		fmt.Println("           Update the genesis alloc to include your address before proceeding")
 	}
 
 	// Create subnet
@@ -820,29 +820,42 @@ func validateChainName(name string) error {
 }
 
 func findGenesisFile() (string, error) {
-	// Check current directory first
-	if _, err := os.Stat("genesis.json"); err == nil {
-		abs, _ := filepath.Abs("genesis.json")
-		return abs, nil
+	candidates := []string{
+		filepath.Join("configs", "l1", "genesis", "genesis.json"),
+		"genesis.json", // Backward-compatibility fallback
 	}
 
-	// Walk up parent directories (up to 5 levels)
+	// Check current directory first
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			abs, _ := filepath.Abs(candidate)
+			return abs, nil
+		}
+	}
+
+	// Walk up parent directories (up to 7 levels)
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
 
 	dir := cwd
-	for i := 0; i < 5; i++ {
-		dir = filepath.Dir(dir)
-		genesisPath := filepath.Join(dir, "genesis.json")
+	for i := 0; i < 7; i++ {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
 
-		if _, err := os.Stat(genesisPath); err == nil {
-			return genesisPath, nil
+		for _, candidate := range candidates {
+			genesisPath := filepath.Join(dir, candidate)
+			if _, err := os.Stat(genesisPath); err == nil {
+				return genesisPath, nil
+			}
 		}
 	}
 
-	return "", fmt.Errorf("genesis.json not found in current or parent directories. Use --genesis flag to specify path")
+	return "", fmt.Errorf("genesis file not found in current or parent directories (looked for configs/l1/genesis/genesis.json and genesis.json). Use --genesis flag to specify path")
 }
 
 // deriveEthAddress derives an Ethereum address from a secp256k1 private key

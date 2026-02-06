@@ -26,7 +26,7 @@
 #   chain_id: L1 blockchain ID (from create-l1 output)
 #   conversion_tx: ConvertSubnetToL1Tx hash (from create-l1 output)
 #   proxy_address: Genesis proxy address for validator manager
-#   evm_chain_id: EVM chain ID (from genesis.json config.chainId)
+#   evm_chain_id: EVM chain ID (from genesis file config.chainId)
 #
 # Optional variables:
 #   manager_type: poa (default), native-staking, or erc20-staking

@@ -9,12 +9,18 @@
 #
 # This is a wrapper around the Ansible playbook for quick CLI access.
 
-set -e
+set -euo pipefail
 
 HOSTNAME="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-INVENTORY="$REPO_ROOT/ansible/inventory/aws_hosts"
+CLOUD="${CLOUD:-aws}"
+INVENTORY="$REPO_ROOT/ansible/inventory/${CLOUD}_hosts"
+
+if [ "$CLOUD" != "aws" ]; then
+    echo "Error: staking key backup is currently supported only for CLOUD=aws."
+    exit 1
+fi
 
 if [ -z "$HOSTNAME" ]; then
     echo "Backing up staking keys for ALL validators..."
@@ -29,13 +35,13 @@ if [ -z "$HOSTNAME" ]; then
     echo ""
 
     cd "$REPO_ROOT/ansible"
-    ansible-playbook playbooks/11-backup-staking-keys.yml
+    ansible-playbook -i "$INVENTORY" playbooks/11-backup-staking-keys.yml
 else
     echo "Backing up staking keys for $HOSTNAME..."
     cd "$REPO_ROOT/ansible"
-    ansible-playbook playbooks/11-backup-staking-keys.yml --limit "$HOSTNAME"
+    ansible-playbook -i "$INVENTORY" playbooks/11-backup-staking-keys.yml --limit "$HOSTNAME"
 fi
 
 echo ""
 echo "Backup complete! List backups with:"
-echo "  aws s3 ls s3://\$(terraform -chdir=../terraform/aws output -raw staking_keys_bucket)/"
+echo "  aws s3 ls s3://\$(terraform -chdir=../terraform/$CLOUD output -raw staking_keys_bucket)/"

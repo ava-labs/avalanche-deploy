@@ -194,6 +194,9 @@ primary_validator_count = 1    # Number of Primary Network validators
 enable_staking_key_backup = true  # S3 backup for staking keys
 ```
 
+Primary validator runtime config is stored at:
+`configs/primary-network/node/primary-validator-node-config.json`
+
 ## Next Steps
 
 - [Operations guide](OPERATIONS.md) (upgrades, monitoring, health checks)

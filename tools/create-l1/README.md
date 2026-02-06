@@ -32,7 +32,7 @@ export VALIDATOR_2_IP=1.2.3.5
 export VALIDATOR_3_IP=1.2.3.6
 
 # Create L1 on Fuji
-./create-l1 --network=fuji --genesis=genesis.json --chain-name=my-l1
+./create-l1 --network=fuji --genesis=../../configs/l1/genesis/genesis.json --chain-name=my-l1
 ```
 
 ### All Options
@@ -42,12 +42,14 @@ export VALIDATOR_3_IP=1.2.3.6
   --network=fuji \                    # fuji or mainnet
   --private-key=PrivateKey-... \      # Or use --private-key-file or AVALANCHE_PRIVATE_KEY
   --validators=1.2.3.4,1.2.3.5 \      # Or use VALIDATOR_*_IP env vars
-  --genesis=genesis.json \            # Genesis file for your L1
+  --genesis=../../configs/l1/genesis/genesis.json \
   --chain-name=my-l1 \                # Name for your L1
   --validator-balance=1 \             # AVAX per validator (default: 1)
   --output=l1.env \                   # Output file (default: l1.env)
   --json                              # Optional machine-readable output
 ```
+
+Default genesis path: `../../configs/l1/genesis/genesis.json`
 
 ### Private Key Options
 
@@ -106,7 +108,7 @@ RPC_3_URL=http://1.2.3.6:9650/ext/bc/.../rpc
 
 ## Genesis File
 
-Edit `genesis.json` in the repo root, or create your own:
+Edit `configs/l1/genesis/genesis.json`, or create your own and pass it to `--genesis`:
 
 ```json
 {

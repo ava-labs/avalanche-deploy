@@ -48,11 +48,14 @@ flowchart TB
     Prometheus -.-> Grafana
 ```
 
+> This architecture diagram reflects the AWS topology with archive + pruned RPC split.
+> GCP/Azure currently use a generic `rpc` pool.
+
 ## Infrastructure Sizing
 
 | Component | Instance | Disk | Purpose |
 |-----------|----------|------|---------|
-| Validators (5x) | c6a.xlarge | 500GB EBS | Block production, consensus |
+| Validators (default: 3, common production: 5) | c6a.xlarge | 500GB EBS | Block production, consensus |
 | Archive RPC | c6a.xlarge | 1TB EBS | Full history, debug APIs, Blockscout |
 | Pruned RPC | c6a.large | 500GB EBS | State-sync, transaction workloads |
 | Monitoring | t3.small | 50GB EBS | Prometheus, Grafana |
@@ -70,7 +73,7 @@ flowchart TB
 
 ```bash
 # macOS
-brew install terraform ansible awscli jq go
+brew install terraform ansible awscli jq go shellcheck
 
 # Or use make
 make setup
@@ -134,7 +137,7 @@ make create-l1
   --output=l1.env
 ```
 
-`l1.env` includes `SUBNET_ID`, `CHAIN_ID`, `CONVERSION_TX`, and `EVM_CHAIN_ID` (when `chainId` exists in `genesis.json`).
+`l1.env` includes `SUBNET_ID`, `CHAIN_ID`, `CONVERSION_TX`, and `EVM_CHAIN_ID` (when `chainId` exists in your genesis file, default `configs/l1/genesis/genesis.json`).
 
 ### 6. Configure Nodes for L1
 
@@ -169,7 +172,7 @@ make initialize-validator-manager \
 
 ## Genesis Configuration
 
-Use the **[Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain)** to generate your `genesis.json` visually.
+Use the **[Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain)** to generate your genesis JSON visually, then save it at `configs/l1/genesis/genesis.json`.
 
 Key settings:
 - `chainId` - Unique EVM chain ID ([check availability](https://chainlist.org/))

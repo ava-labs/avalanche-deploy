@@ -17,10 +17,12 @@ Thank you for your interest in contributing to Avalanche Deploy!
 
 ### Prerequisites
 
-- Go 1.21+
-- Terraform 1.0+
-- Ansible 2.10+
+- Go 1.24.13+
+- Terraform 1.5+
+- Ansible 2.15+
 - AWS CLI (for AWS deployments)
+- `jq`
+- `shellcheck`
 
 ### Building
 
@@ -30,16 +32,31 @@ cd tools/create-l1
 go build -o create-l1 .
 ```
 
+### Configuration Layout
+
+- L1 config: `configs/l1/`
+- Primary Network config: `configs/primary-network/`
+- Keep new config files under these folders instead of repo root.
+
 ### Testing Locally
 
 ```bash
-# Validate terraform
-cd terraform/aws
-terraform validate
+# Prerequisites + config sanity
+make doctor
 
-# Check ansible syntax
-cd ansible
-ansible-playbook --syntax-check playbooks/*.yml
+# Full incremental suite (recommended before PR)
+make test-incremental
+
+# If your environment cannot reach registry.terraform.io:
+make test-incremental SKIP_TERRAFORM_VALIDATE=true
+```
+
+### Pre-commit (Recommended)
+
+```bash
+pipx install pre-commit
+pre-commit install
+pre-commit run --all-files
 ```
 
 ## Code Style
@@ -48,6 +65,7 @@ ansible-playbook --syntax-check playbooks/*.yml
 - Terraform: Use `terraform fmt`
 - YAML: 2-space indentation
 - Shell scripts: Use shellcheck for linting
+- Keep Terraform lockfiles (`.terraform.lock.hcl`) committed for reproducibility
 
 ## Pull Request Guidelines
 

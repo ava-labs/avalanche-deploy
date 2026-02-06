@@ -71,7 +71,7 @@ make reset-l1
 
 | Command | Description |
 |---------|-------------|
-| `make setup` | Install terraform, ansible, aws-cli, jq, go |
+| `make setup` | Install terraform, ansible, aws-cli, jq, go, shellcheck |
 | `make infra` | Create L1 cloud infrastructure |
 | `make deploy` | Install avalanchego on L1 nodes |
 | `make create-l1` | Build the L1 creation tool |
@@ -130,6 +130,8 @@ make reset-l1
 
 | Command | Description |
 |---------|-------------|
+| `make doctor` | Verify local dependencies and config layout |
+| `make validate-config-layout` | Verify required config JSON files exist and parse |
 | `make test-unit` | Run Go unit tests for local tools |
 | `make test-e2e-dry` | Run both E2E scripts in dry-run mode (no infra changes) |
 | `make test-incremental` | Run lint + validate + unit tests + E2E dry-runs |
@@ -160,8 +162,11 @@ make deploy NETWORK=mainnet # Production
 
 | File | Purpose |
 |------|---------|
-| `genesis.json` | L1 chain config (chainId, alloc, fees) |
-| `validator-chain-config.json` | L1 validator settings (pruning on, fast sync) |
-| `rpc-archive-chain-config.json` | Archive RPC settings (no pruning, debug APIs) |
-| `rpc-pruned-chain-config.json` | Pruned RPC settings (state-sync, minimal APIs) |
-| `primary-network-node-config.json` | Primary Network validator settings |
+| `configs/l1/genesis/genesis.json` | L1 chain config (chainId, alloc, fees) |
+| `configs/l1/node/validator-node-config.json` | Validator node runtime settings |
+| `configs/l1/node/rpc-node-config.json` | RPC node runtime settings |
+| `configs/l1/chain/validator-chain-config.json` | L1 validator chain settings (pruning on, fast sync) |
+| `configs/l1/chain/rpc-archive-chain-config.json` | Archive RPC chain settings (no pruning, debug APIs) |
+| `configs/l1/chain/rpc-pruned-chain-config.json` | Pruned RPC chain settings (state-sync, minimal APIs) |
+| `configs/primary-network/node/primary-network-node-config.json` | Primary Network validator settings |
+| `configs/primary-network/node/primary-validator-node-config.json` | Primary validator runtime settings (used by playbooks) |

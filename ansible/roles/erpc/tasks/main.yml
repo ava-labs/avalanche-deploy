@@ -9,7 +9,7 @@
 #
 # Required variables:
 #   erpc_chain_id: L1 chain ID (blockchain ID from create-l1)
-#   erpc_evm_chain_id: EVM chain ID (from genesis.json)
+#   erpc_evm_chain_id: EVM chain ID (from genesis file)
 #
 # Optional variables:
 #   erpc_port: HTTP port (default: 4000)

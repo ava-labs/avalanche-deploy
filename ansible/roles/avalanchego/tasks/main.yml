@@ -112,9 +112,19 @@
     remote_src: true
   when: not avalanchego_bundled_subnet_evm.stat.exists and avalanchego_subnet_evm_version is defined
 
-- name: Load custom node config from repo root
+- name: Resolve custom node config path
   ansible.builtin.set_fact:
-    avalanchego_custom_node_config: "{{ lookup('file', playbook_dir + '/../../' + avalanchego_node_type + '-node-config.json') | from_json }}"
+    avalanchego_custom_node_config_path: >-
+      {{
+        (playbook_dir + '/../../configs/primary-network/node/' + avalanchego_node_type + '-node-config.json')
+        if avalanchego_node_type in ['primary-validator', 'primary-network']
+        else
+        (playbook_dir + '/../../configs/l1/node/' + avalanchego_node_type + '-node-config.json')
+      }}
+
+- name: Load custom node config from repository config directory
+  ansible.builtin.set_fact:
+    avalanchego_custom_node_config: "{{ lookup('file', avalanchego_custom_node_config_path) | from_json }}"
   failed_when: false
 
 - name: Build base node configuration

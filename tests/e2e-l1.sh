@@ -33,7 +33,7 @@
 #   GLACIER_API_KEY (for signature aggregation, or uses local sig-agg)
 #
 # Genesis Configuration:
-#   The genesis.json must have a pre-deployed TransparentProxy at:
+#   The genesis file (default: configs/l1/genesis/genesis.json) must have a pre-deployed TransparentProxy at:
 #     0xfacade0000000000000000000000000000000000
 #   With ProxyAdmin at:
 #     0xdad0000000000000000000000000000000000000
@@ -325,7 +325,7 @@ log "Getting validator IPs..."
 VALIDATOR_IPS=$(cd terraform/$CLOUD && terraform output -json validator_ips | jq -r 'join(",")')
 log "Validators: $VALIDATOR_IPS"
 
-# Genesis proxy address (pre-deployed TransparentProxy in genesis.json)
+# Genesis proxy address (pre-deployed TransparentProxy in genesis file)
 GENESIS_PROXY_ADDRESS="0xfacade0000000000000000000000000000000000"
 
 log "Creating L1 blockchain..."

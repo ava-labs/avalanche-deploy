@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots lint validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud
+.PHONY: setup doctor infra infra-plan deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help
 
 # Default cloud provider
 CLOUD ?= aws
@@ -19,6 +19,10 @@ TF_INIT_RETRIES ?= 3
 SKIP_TERRAFORM_VALIDATE ?= false
 ANSIBLE_INVENTORY = inventory/$(CLOUD)_hosts
 ANSIBLE_SYNTAX_INVENTORY ?= ../tests/fixtures/syntax_inventory.ini
+L1_CONFIG_DIR ?= configs/l1
+PRIMARY_NETWORK_CONFIG_DIR ?= configs/primary-network
+L1_GENESIS_FILE ?= $(L1_CONFIG_DIR)/genesis/genesis.json
+L1_GENESIS_TEMPLATE ?= $(L1_CONFIG_DIR)/genesis/genesis-clean.json
 export ANSIBLE_LOCAL_TEMP ?= $(CURDIR)/.ansible/tmp
 export ANSIBLE_REMOTE_TMP ?= /tmp/.ansible-tmp
 export GOCACHE ?= $(CURDIR)/.cache/go-build
@@ -43,8 +47,35 @@ setup:
 	@which aws > /dev/null || brew install awscli
 	@which jq > /dev/null || brew install jq
 	@which go > /dev/null || brew install go
+	@which shellcheck > /dev/null || brew install shellcheck
 	@which ansible-galaxy > /dev/null && ansible-galaxy collection install -r ansible/requirements.yml || true
 	@echo "Done! Run 'make infra' next."
+
+doctor:
+	@echo "Checking local development prerequisites..."
+	@for cmd in terraform ansible-playbook ansible-lint jq go shellcheck; do \
+		if ! command -v $$cmd > /dev/null 2>&1; then \
+			echo "Missing dependency: $$cmd"; \
+			exit 1; \
+		fi; \
+	done
+	@for f in \
+		$(L1_GENESIS_FILE) \
+		$(L1_GENESIS_TEMPLATE) \
+		$(L1_CONFIG_DIR)/node/validator-node-config.json \
+		$(L1_CONFIG_DIR)/node/rpc-node-config.json \
+		$(L1_CONFIG_DIR)/chain/validator-chain-config.json \
+		$(L1_CONFIG_DIR)/chain/rpc-chain-config.json \
+		$(L1_CONFIG_DIR)/chain/rpc-archive-chain-config.json \
+		$(L1_CONFIG_DIR)/chain/rpc-pruned-chain-config.json \
+		$(PRIMARY_NETWORK_CONFIG_DIR)/node/primary-network-node-config.json \
+		$(PRIMARY_NETWORK_CONFIG_DIR)/node/primary-validator-node-config.json; do \
+		if [ ! -f "$$f" ]; then \
+			echo "Missing config file: $$f"; \
+			exit 1; \
+		fi; \
+	done
+	@echo "✓ Prerequisites and config layout look good"
 
 #
 # Infrastructure
@@ -258,12 +289,13 @@ safe-genesis:
 	@echo "=============================================="
 	@echo "  EXPERIMENTAL: Safe Multisig Genesis Merge"
 	@echo "=============================================="
-	@./shared/safe/merge-genesis.sh genesis.json
+	@./shared/safe/merge-genesis.sh "$(L1_GENESIS_FILE)"
 
 reset-genesis:
-	@echo "Resetting genesis.json to clean state..."
-	@cp shared/genesis-templates/genesis-clean.json genesis.json
-	@echo "Done! genesis.json reset (Safe contracts removed)"
+	@echo "Resetting $(L1_GENESIS_FILE) to clean state..."
+	@mkdir -p "$(dir $(L1_GENESIS_FILE))"
+	@cp "$(L1_GENESIS_TEMPLATE)" "$(L1_GENESIS_FILE)"
+	@echo "Done! $(L1_GENESIS_FILE) reset (Safe contracts removed)"
 
 #
 # Testing & Validation
@@ -288,11 +320,39 @@ lint:
 	@cd terraform/gcp && terraform fmt -check -recursive
 	@cd terraform/azure && terraform fmt -check -recursive
 	@echo ""
-	@echo "Checking shell script syntax..."
-	@for f in scripts/*.sh tests/*.sh; do bash -n "$$f"; done
+	@echo "Checking shell scripts..."
+	@if command -v shellcheck > /dev/null 2>&1; then \
+		for f in scripts/*.sh tests/*.sh kubernetes/scripts/*.sh; do bash -n "$$f"; shellcheck -S error "$$f"; done; \
+	else \
+		echo "shellcheck not found. Running syntax checks only."; \
+		for f in scripts/*.sh tests/*.sh kubernetes/scripts/*.sh; do bash -n "$$f"; done; \
+	fi
 	@echo "Done!"
 
-validate:
+validate-config-layout:
+	@echo "Validating configuration layout..."
+	@for f in \
+		$(L1_GENESIS_FILE) \
+		$(L1_GENESIS_TEMPLATE) \
+		$(L1_CONFIG_DIR)/node/validator-node-config.json \
+		$(L1_CONFIG_DIR)/node/rpc-node-config.json \
+		$(L1_CONFIG_DIR)/chain/validator-chain-config.json \
+		$(L1_CONFIG_DIR)/chain/rpc-chain-config.json \
+		$(L1_CONFIG_DIR)/chain/rpc-archive-chain-config.json \
+		$(L1_CONFIG_DIR)/chain/rpc-pruned-chain-config.json \
+		$(PRIMARY_NETWORK_CONFIG_DIR)/node/primary-network-node-config.json \
+		$(PRIMARY_NETWORK_CONFIG_DIR)/node/primary-validator-node-config.json; do \
+		if [ ! -f "$$f" ]; then \
+			echo "Missing config file: $$f"; \
+			exit 1; \
+		fi; \
+	done
+	@for f in $(L1_CONFIG_DIR)/genesis/*.json $(L1_CONFIG_DIR)/node/*.json $(L1_CONFIG_DIR)/chain/*.json $(PRIMARY_NETWORK_CONFIG_DIR)/node/*.json; do \
+		jq -e . "$$f" > /dev/null || { echo "Invalid JSON: $$f"; exit 1; }; \
+	done
+	@echo "✓ Config files are present and valid JSON"
+
+validate: validate-config-layout
 	@echo "Validating Ansible playbooks..."
 	@mkdir -p "$(ANSIBLE_LOCAL_TEMP)"
 	@cd ansible && for f in playbooks/*.yml; do \
@@ -387,7 +447,7 @@ help:
 	@echo "Avalanche L1 Deploy"
 	@echo ""
 	@echo "Quick start (L1):"
-	@echo "  make setup        Install dependencies (terraform, ansible, aws-cli)"
+	@echo "  make setup        Install dependencies (terraform, ansible, aws-cli, jq, go, shellcheck)"
 	@echo "  make infra        Create cloud infrastructure"
 	@echo "  make deploy       Deploy avalanchego to nodes"
 	@echo "  make status       Check node sync status"
@@ -425,12 +485,14 @@ help:
 	@echo "  make initialize-validator-manager Deploy and initialize validator manager contract"
 	@echo ""
 	@echo "Safe Multisig (EXPERIMENTAL):"
-	@echo "  make safe-genesis Merge Safe contracts into genesis.json (EXPERIMENTAL)"
+	@echo "  make safe-genesis Merge Safe contracts into $(L1_GENESIS_FILE) (EXPERIMENTAL)"
 	@echo "  make safe         Deploy Safe infrastructure (EXPERIMENTAL)"
-	@echo "  make reset-genesis Reset genesis.json to clean state (no Safe contracts)"
+	@echo "  make reset-genesis Reset $(L1_GENESIS_FILE) to clean state (no Safe contracts)"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make lint             Run ansible-lint and terraform fmt checks"
+	@echo "  make doctor           Verify local prerequisites and config layout"
+	@echo "  make validate-config-layout Verify config files exist and are valid JSON"
 	@echo "  make validate         Validate all Ansible and Terraform configs"
 	@echo "  make test-unit        Run Go unit tests for local tools"
 	@echo "  make test-e2e-dry     Run both E2E scripts in dry-run mode (no infra changes)"

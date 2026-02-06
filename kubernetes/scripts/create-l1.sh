@@ -72,10 +72,13 @@ echo "Validators: $VALIDATOR_IPS"
 
 # Find genesis file
 if [ -z "$GENESIS" ]; then
-    if [ -f "$ROOT_DIR/genesis.json" ]; then
+    if [ -f "$ROOT_DIR/configs/l1/genesis/genesis.json" ]; then
+        GENESIS="$ROOT_DIR/configs/l1/genesis/genesis.json"
+    elif [ -f "$ROOT_DIR/genesis.json" ]; then
+        # Backward-compatible fallback for older checkouts.
         GENESIS="$ROOT_DIR/genesis.json"
     else
-        echo "Error: No genesis file found. Create genesis.json in repo root."
+        echo "Error: No genesis file found. Create configs/l1/genesis/genesis.json."
         exit 1
     fi
 fi

@@ -8,13 +8,19 @@
 #
 # This restores the 'latest' snapshot by default, or a specific named snapshot.
 
-set -e
+set -euo pipefail
 
 TARGET="${1:-}"
 SNAPSHOT_NAME="${2:-latest}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-INVENTORY="$REPO_ROOT/ansible/inventory/aws_hosts"
+CLOUD="${CLOUD:-aws}"
+INVENTORY="$REPO_ROOT/ansible/inventory/${CLOUD}_hosts"
+
+if [ "$CLOUD" != "aws" ]; then
+    echo "Error: snapshot restore is currently supported only for CLOUD=aws."
+    exit 1
+fi
 
 if [ -z "$TARGET" ]; then
     echo "Usage: $0 <target-hostname> [snapshot-name]"
@@ -31,11 +37,11 @@ if [ -z "$TARGET" ]; then
     grep -E "^primary-validator|^validator-|^migration" "$INVENTORY" 2>/dev/null | cut -d' ' -f1 | sed 's/^/  /' || echo "  (none found)"
     echo ""
     echo "List available snapshots:"
-    echo "  aws s3 ls s3://\$(terraform -chdir=terraform/aws output -raw staking_keys_bucket)/snapshots/"
+    echo "  aws s3 ls s3://\$(terraform -chdir=terraform/$CLOUD output -raw staking_keys_bucket)/snapshots/"
     exit 1
 fi
 
 echo "Restoring snapshot '$SNAPSHOT_NAME' to $TARGET..."
 cd "$REPO_ROOT/ansible"
 
-ansible-playbook playbooks/15-restore-snapshot.yml --limit "$TARGET" -e "snapshot_name=$SNAPSHOT_NAME"
+ansible-playbook -i "$INVENTORY" playbooks/15-restore-snapshot.yml --limit "$TARGET" -e "snapshot_name=$SNAPSHOT_NAME"

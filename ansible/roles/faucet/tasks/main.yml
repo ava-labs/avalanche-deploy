@@ -6,7 +6,7 @@
 #
 # Required variables:
 #   faucet_chain_id: The L1 chain ID (blockchain ID from create-l1)
-#   faucet_evm_chain_id: The EVM chain ID (from genesis.json)
+#   faucet_evm_chain_id: The EVM chain ID (from genesis file)
 #   faucet_private_key: Private key for the faucet wallet (must be funded)
 #
 # Optional variables:

@@ -4,13 +4,19 @@
 # Usage:
 #   ./list-snapshots.sh
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CLOUD="${CLOUD:-aws}"
+
+if [ "$CLOUD" != "aws" ]; then
+    echo "Error: snapshot listing is currently supported only for CLOUD=aws."
+    exit 1
+fi
 
 # Get bucket name from Terraform
-cd "$REPO_ROOT/terraform/aws"
+cd "$REPO_ROOT/terraform/$CLOUD"
 BUCKET=$(terraform output -raw staking_keys_bucket 2>/dev/null || echo "")
 
 if [ -z "$BUCKET" ]; then
@@ -29,7 +35,7 @@ aws s3 ls "s3://$BUCKET/snapshots/" 2>/dev/null | grep -E "\.tar\.lz4$" | while 
     name=$(echo "$line" | awk '{print $4}')
     size_gb=$(echo "scale=2; $size / 1073741824" | bc 2>/dev/null || echo "?")
     echo "  $name (${size_gb}GB)"
-done
+done || true
 
 echo ""
 

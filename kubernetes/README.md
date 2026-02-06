@@ -353,13 +353,13 @@ kubectl port-forward svc/l1-rpc-l1-rpc 9650:9650
 
 ## Genesis Configuration
 
-Use the **[Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain)** to generate your `genesis.json`, or copy the template from `../genesis.json`.
+Use the **[Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain)** to generate your genesis file, or copy the template from `../configs/l1/genesis/genesis.json`.
 
 ---
 
 ## Links
 
-- [Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain) - Generate genesis.json
+- [Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain) - Generate genesis JSON
 - [Fuji Faucet](https://build.avax.network/tools/faucet) - Get test AVAX
 - [Avalanche Docs](https://docs.avax.network/) - Official documentation
 - [Main README](../README.md) - Terraform + Ansible deployment

@@ -13,7 +13,10 @@ make create-l1
 source l1.env && make configure-l1 SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID
 ```
 
-**What you get:** 5 validators, archive + pruned RPC, Prometheus/Grafana, Blockscout (~$650/mo)
+**What you get:** validators, RPC nodes, Prometheus/Grafana, and optional add-ons.
+
+- AWS supports dedicated `rpc_archive` + `rpc_pruned` groups.
+- GCP and Azure currently use a single `rpc` group (no archive/pruned split).
 
 `l1.env` includes `SUBNET_ID`, `CHAIN_ID`, `CONVERSION_TX`, and (when present in genesis) `EVM_CHAIN_ID`.
 
@@ -59,6 +62,7 @@ make destroy             # Tear down (stops billing!)
 ## Testing
 
 ```bash
+make doctor              # Prereqs + config layout checks
 make test-unit           # Go unit tests
 make test-e2e-dry        # E2E script dry-runs (no infra changes)
 make test-incremental    # lint + validate + unit + e2e dry-run
@@ -73,15 +77,52 @@ make test-e2e-primary    # full Primary Network E2E
 - [Primary Network](docs/PRIMARY-NETWORK.md) - Validator deployment and migration
 - [Operations](docs/OPERATIONS.md) - Upgrades, monitoring, commands reference
 - [Add-ons](docs/ADD-ONS.md) - Blockscout, faucet, eRPC, The Graph
-- [Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain) - Visual genesis.json generator
+- [Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain) - Visual genesis generator for `configs/l1/genesis/genesis.json`
 - [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and solutions
 
 ## Prerequisites
 
 ```bash
-brew install terraform ansible awscli jq go
+# Required versions:
+# - Go 1.24.13+
+# - Terraform 1.5+
+# - Ansible 2.15+
+brew install terraform ansible awscli jq go shellcheck
 # Or: make setup
 ```
+
+## Config Layout
+
+```text
+configs/
+  l1/
+    genesis/
+      genesis.json
+      genesis-clean.json
+    node/
+      validator-node-config.json
+      rpc-node-config.json
+    chain/
+      validator-chain-config.json
+      rpc-chain-config.json
+      rpc-archive-chain-config.json
+      rpc-pruned-chain-config.json
+  primary-network/
+    node/
+      primary-network-node-config.json
+      primary-validator-node-config.json
+```
+
+Use `make validate-config-layout` (or `make doctor`) after editing configs.
+
+## Extending Safely
+
+When adding new services or changing existing behavior:
+
+1. Keep service config under `configs/` instead of adding new root-level files.
+2. Add/update a `Makefile` target so workflows stay discoverable.
+3. Add dry-run coverage in `tests/e2e-l1.sh` or `tests/e2e-primary-network.sh` when relevant.
+4. Run `make test-incremental` before pushing.
 
 ## Cloud Providers
 
@@ -95,6 +136,10 @@ make primary-infra CLOUD=aws
 make primary-deploy CLOUD=aws
 ```
 
+Provider topology note:
+- `CLOUD=aws` inventories include `rpc_archive` and `rpc_pruned`.
+- `CLOUD=gcp|azure` inventories include a single `rpc` group.
+
 ## Getting AVAX for Testing
 
 1. Install [Core Wallet](https://core.app/) and switch to Fuji testnet
@@ -103,6 +148,6 @@ make primary-deploy CLOUD=aws
 
 ## Links
 
-- [Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain) - Generate genesis.json visually
+- [Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain) - Generate genesis JSON visually
 - [Avalanche Docs](https://docs.avax.network/)
 - [Chain List](https://chainlist.org/) - Check chain ID availability

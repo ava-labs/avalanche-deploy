@@ -153,7 +153,7 @@
              export AVALANCHE_PRIVATE_KEY=PrivateKey-...
              ./create-l1 --network={{ network | default('fuji') }} \
                --validators=<ip1>,<ip2>,<ip3> \
-               --genesis=../../genesis.json
+               --genesis=../../configs/l1/genesis/genesis.json
 
           3. Configure nodes with your L1:
              SUBNET_ID=<from-create-l1-output>

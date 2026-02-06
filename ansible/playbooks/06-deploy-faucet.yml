@@ -19,7 +19,7 @@
 #
 # Required variables:
 #   l1_chain_id: L1 chain ID (from create-l1 output)
-#   l1_evm_chain_id: EVM chain ID (from genesis.json config.chainId)
+#   l1_evm_chain_id: EVM chain ID (from genesis file config.chainId)
 #   faucet_private_key: Private key for faucet wallet (must be funded!)
 #
 # Optional variables:
