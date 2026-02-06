@@ -26,6 +26,7 @@ L1_GENESIS_TEMPLATE ?= $(L1_CONFIG_DIR)/genesis/genesis-clean.json
 K8S_DIR ?= kubernetes
 K8S_CLUSTER_NAME ?= avalanche-l1
 K8S_KIND_IMAGE ?= kindest/node:v1.35.0
+K8S_KIND_WORKERS ?= 3
 K8S_L1_RELEASE ?= l1-validators
 K8S_L1_RPC_RELEASE ?= l1-rpc
 K8S_PRIMARY_RELEASE ?= primary-validators
@@ -349,7 +350,8 @@ k8s-primary: k8s-help-primary
 k8s-kind:
 	@cd "$(K8S_DIR)" && ./scripts/create-kind-cluster.sh \
 		--name="$(K8S_CLUSTER_NAME)" \
-		--image="$(K8S_KIND_IMAGE)"
+		--image="$(K8S_KIND_IMAGE)" \
+		--workers="$(K8S_KIND_WORKERS)"
 
 k8s-l1-deploy:
 	@cd "$(K8S_DIR)" && helm upgrade --install "$(K8S_L1_RELEASE)" ./helm/avalanche-validator \
@@ -686,6 +688,7 @@ help-all:
 	@echo "  SKIP_TERRAFORM_VALIDATE=true Skip Terraform validation (air-gapped/local only)"
 	@echo "  K8S_DIR=kubernetes   Kubernetes working directory"
 	@echo "  K8S_KIND_IMAGE=...   kind node image for make k8s-kind"
+	@echo "  K8S_KIND_WORKERS=3   worker count for make k8s-kind"
 	@echo "  K8S_* variables      Release names/replicas for k8s wrapper targets"
 	@echo ""
 	@echo "Examples:"
