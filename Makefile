@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
+.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
 
 # Default cloud provider
 CLOUD ?= aws
@@ -23,6 +23,18 @@ L1_CONFIG_DIR ?= configs/l1
 PRIMARY_NETWORK_CONFIG_DIR ?= configs/primary-network
 L1_GENESIS_FILE ?= $(L1_CONFIG_DIR)/genesis/genesis.json
 L1_GENESIS_TEMPLATE ?= $(L1_CONFIG_DIR)/genesis/genesis-clean.json
+K8S_DIR ?= kubernetes
+K8S_CLUSTER_NAME ?= avalanche-l1
+K8S_L1_RELEASE ?= l1-validators
+K8S_L1_RPC_RELEASE ?= l1-rpc
+K8S_PRIMARY_RELEASE ?= primary-validators
+K8S_PRIMARY_RPC_RELEASE ?= primary-rpc
+K8S_L1_VALIDATOR_REPLICAS ?= 3
+K8S_L1_RPC_REPLICAS ?= 2
+K8S_PRIMARY_VALIDATOR_REPLICAS ?= 2
+K8S_PRIMARY_RPC_REPLICAS ?= 2
+K8S_L1_ENV_FILE ?= l1.env
+K8S_CHAIN_NAME ?= mychain
 export ANSIBLE_LOCAL_TEMP ?= $(CURDIR)/.ansible/tmp
 export ANSIBLE_REMOTE_TMP ?= /tmp/.ansible-tmp
 export GOCACHE ?= $(CURDIR)/.cache/go-build
@@ -298,6 +310,91 @@ reset-genesis:
 	@echo "Done! $(L1_GENESIS_FILE) reset (Safe contracts removed)"
 
 #
+# Kubernetes
+#
+k8s-help:
+	@echo "Kubernetes Workflows"
+	@echo ""
+	@echo "Use one of:"
+	@echo "  make k8s-help-l1"
+	@echo "  make k8s-help-primary"
+	@echo ""
+	@echo "Common wrappers:"
+	@echo "  make k8s-kind        # Create local kind cluster"
+	@echo "  make k8s-monitoring  # Install/upgrade monitoring chart"
+	@echo "  make k8s-cleanup     # Cleanup releases + optional PVC/kind"
+
+k8s-help-l1:
+	@echo "Kubernetes L1 Workflow"
+	@echo ""
+	@echo "  make k8s-kind"
+	@echo "  make k8s-l1-deploy NETWORK=fuji"
+	@echo "  make k8s-l1-wait"
+	@echo "  export AVALANCHE_PRIVATE_KEY=PrivateKey-..."
+	@echo "  make k8s-l1-create NETWORK=fuji K8S_CHAIN_NAME=mychain"
+	@echo "  make k8s-l1-configure"
+	@echo "  make k8s-l1-status"
+
+k8s-help-primary:
+	@echo "Kubernetes Primary Network Workflow"
+	@echo ""
+	@echo "  make k8s-primary-deploy NETWORK=fuji"
+	@echo "  make k8s-primary-wait"
+	@echo "  make k8s-primary-status"
+
+k8s-l1: k8s-help-l1
+k8s-primary: k8s-help-primary
+
+k8s-kind:
+	@cd "$(K8S_DIR)" && ./scripts/create-kind-cluster.sh --name="$(K8S_CLUSTER_NAME)"
+
+k8s-l1-deploy:
+	@cd "$(K8S_DIR)" && helm upgrade --install "$(K8S_L1_RELEASE)" ./helm/avalanche-validator \
+		--set "l1_validator_replicas=$(K8S_L1_VALIDATOR_REPLICAS)" \
+		--set "network=$(NETWORK)"
+	@cd "$(K8S_DIR)" && helm upgrade --install "$(K8S_L1_RPC_RELEASE)" ./helm/avalanche-rpc \
+		--set "l1_rpc_replicas=$(K8S_L1_RPC_REPLICAS)" \
+		--set "network=$(NETWORK)"
+
+k8s-l1-wait:
+	@cd "$(K8S_DIR)" && ./scripts/wait-for-sync.sh --release="$(K8S_L1_RELEASE)"
+
+k8s-l1-create:
+	@cd "$(K8S_DIR)" && ./scripts/create-l1.sh \
+		--release="$(K8S_L1_RELEASE)" \
+		--network="$(NETWORK)" \
+		--chain-name="$(K8S_CHAIN_NAME)" \
+		--output="$(K8S_L1_ENV_FILE)"
+
+k8s-l1-configure:
+	@cd "$(K8S_DIR)" && ./scripts/configure-l1.sh \
+		--release="$(K8S_L1_RELEASE)" \
+		--env="$(K8S_L1_ENV_FILE)"
+
+k8s-l1-status:
+	@cd "$(K8S_DIR)" && ./scripts/status.sh --release="$(K8S_L1_RELEASE)"
+
+k8s-primary-deploy:
+	@cd "$(K8S_DIR)" && helm upgrade --install "$(K8S_PRIMARY_RELEASE)" ./helm/primary-network-validator \
+		--set "primary_validator_replicas=$(K8S_PRIMARY_VALIDATOR_REPLICAS)" \
+		--set "network=$(NETWORK)"
+	@cd "$(K8S_DIR)" && helm upgrade --install "$(K8S_PRIMARY_RPC_RELEASE)" ./helm/primary-network-rpc \
+		--set "primary_rpc_replicas=$(K8S_PRIMARY_RPC_REPLICAS)" \
+		--set "network=$(NETWORK)"
+
+k8s-primary-wait:
+	@cd "$(K8S_DIR)" && ./scripts/wait-for-sync.sh --release="$(K8S_PRIMARY_RELEASE)"
+
+k8s-primary-status:
+	@cd "$(K8S_DIR)" && ./scripts/status.sh --release="$(K8S_PRIMARY_RELEASE)"
+
+k8s-monitoring:
+	@cd "$(K8S_DIR)" && helm upgrade --install monitoring ./helm/monitoring
+
+k8s-cleanup:
+	@cd "$(K8S_DIR)" && ./scripts/cleanup.sh
+
+#
 # Testing & Validation
 #
 lint:
@@ -446,13 +543,15 @@ clean:
 help:
 	@echo "Avalanche Deploy"
 	@echo ""
-	@echo "Two primary workflows:"
+	@echo "Primary workflows:"
 	@echo "  1) L1 setup + add-ons (AWS/GCP/Azure)"
 	@echo "  2) Primary Network validator ops (AWS-only)"
+	@echo "  3) Kubernetes workflows (L1 + Primary Network)"
 	@echo ""
 	@echo "Run one of:"
 	@echo "  make help-l1"
 	@echo "  make help-primary"
+	@echo "  make k8s-help"
 	@echo "  make help-all         # full command reference"
 	@echo ""
 	@echo "Guardrails:"
@@ -479,6 +578,9 @@ help-l1:
 	@echo ""
 	@echo "Ops:"
 	@echo "  make monitoring | make health-checks | make rolling-restart | make upgrade VERSION=x.y.z"
+	@echo ""
+	@echo "Kubernetes equivalent:"
+	@echo "  make k8s-help-l1"
 
 help-primary:
 	@echo "Primary Network Workflow (AWS-only)"
@@ -497,6 +599,9 @@ help-primary:
 	@echo "  make restore-snapshot CLOUD=aws TARGET=... [SNAPSHOT=...]"
 	@echo "  make prepare-migration CLOUD=aws NODE=... [SNAPSHOT=true]"
 	@echo "  make migrate-validator CLOUD=aws SOURCE=... TARGET=..."
+	@echo ""
+	@echo "Kubernetes equivalent:"
+	@echo "  make k8s-help-primary"
 
 help-all:
 	@echo "Avalanche Deploy - Full Command Reference"
@@ -522,6 +627,20 @@ help-all:
 	@echo "  make create-snapshot    Create database snapshot from synced node"
 	@echo "  make restore-snapshot   Restore database snapshot to a node"
 	@echo "  make list-snapshots     List available snapshots in S3"
+	@echo ""
+	@echo "Kubernetes Wrappers:"
+	@echo "  make k8s-help           Kubernetes wrapper overview"
+	@echo "  make k8s-kind           Create kind cluster"
+	@echo "  make k8s-l1-deploy      Install/upgrade L1 validator + RPC charts"
+	@echo "  make k8s-l1-wait        Wait for L1 validator sync"
+	@echo "  make k8s-l1-create      Create L1 from Kubernetes validators"
+	@echo "  make k8s-l1-configure   Configure L1 tracking on validators"
+	@echo "  make k8s-l1-status      Check L1 release status"
+	@echo "  make k8s-primary-deploy Install/upgrade Primary validator + RPC charts"
+	@echo "  make k8s-primary-wait   Wait for Primary validator sync"
+	@echo "  make k8s-primary-status Check Primary release status"
+	@echo "  make k8s-monitoring     Install/upgrade monitoring chart"
+	@echo "  make k8s-cleanup        Cleanup Kubernetes resources"
 	@echo ""
 	@echo "Operations:"
 	@echo "  make rolling-restart   Restart nodes one-at-a-time (zero downtime)"
@@ -562,6 +681,8 @@ help-all:
 	@echo "  AUTO_APPROVE=true    Auto-confirm terraform destroy (use with care)"
 	@echo "  TF_INIT_RETRIES=3    Terraform init/validate retry count"
 	@echo "  SKIP_TERRAFORM_VALIDATE=true Skip Terraform validation (air-gapped/local only)"
+	@echo "  K8S_DIR=kubernetes   Kubernetes working directory"
+	@echo "  K8S_* variables      Release names/replicas for k8s wrapper targets"
 	@echo ""
 	@echo "Examples:"
 	@echo "  # L1 Deployment"

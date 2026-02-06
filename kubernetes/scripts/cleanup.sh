@@ -1,47 +1,56 @@
-#!/bin/bash
-# Cleanup Avalanche Kubernetes resources
-set -e
+#!/usr/bin/env bash
+# Cleanup Avalanche Kubernetes resources.
+set -euo pipefail
 
-echo "Cleaning up Avalanche K8s resources..."
+echo "Cleaning up Avalanche Kubernetes resources..."
 
-# Uninstall helm releases
+# Release names (new + backward-compatible old names)
+releases=(
+  "l1-validators"
+  "l1-rpc"
+  "primary-validators"
+  "primary-rpc"
+  "monitoring"
+  "validators"
+  "rpc"
+)
+
 echo "Removing Helm releases..."
-helm uninstall validators 2>/dev/null || true
-helm uninstall rpc 2>/dev/null || true
-helm uninstall monitoring 2>/dev/null || true
+for release in "${releases[@]}"; do
+  helm uninstall "$release" >/dev/null 2>&1 || true
+done
 
-# Delete ConfigMaps
 echo "Removing ConfigMaps..."
-kubectl delete configmap l1-config 2>/dev/null || true
+kubectl delete configmap l1-config >/dev/null 2>&1 || true
 
-# Delete PVCs (optional - prompts first)
-PVCS=$(kubectl get pvc -l app.kubernetes.io/name=avalanche-validator -o name 2>/dev/null)
-if [ -n "$PVCS" ]; then
+pvcs="$(kubectl get pvc \
+  -l 'app.kubernetes.io/name in (l1-validator,l1-rpc,primary-network-validator,primary-network-rpc,avalanche-validator,avalanche-rpc)' \
+  -o name 2>/dev/null || true)"
+
+if [[ -n "$pvcs" ]]; then
     echo ""
     echo "Found PersistentVolumeClaims:"
-    echo "$PVCS"
+    echo "$pvcs"
     echo ""
-    read -p "Delete PVCs? This will delete all chain data! (y/N) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        kubectl delete pvc -l app.kubernetes.io/name=avalanche-validator
-        kubectl delete pvc -l app.kubernetes.io/name=avalanche-rpc 2>/dev/null || true
+    read -r -p "Delete PVCs? This will delete chain data. (y/N) " reply
+    if [[ "$reply" =~ ^[Yy]$ ]]; then
+        kubectl delete pvc \
+          -l 'app.kubernetes.io/name in (l1-validator,l1-rpc,primary-network-validator,primary-network-rpc,avalanche-validator,avalanche-rpc)' \
+          >/dev/null 2>&1 || true
         echo "PVCs deleted."
     else
         echo "PVCs preserved."
     fi
 fi
 
-# Delete kind cluster (if exists)
-if kind get clusters 2>/dev/null | grep -q "avalanche-l1"; then
+if kind get clusters 2>/dev/null | grep -q '^avalanche-l1$'; then
     echo ""
-    read -p "Delete kind cluster 'avalanche-l1'? (y/N) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    read -r -p "Delete kind cluster 'avalanche-l1'? (y/N) " reply
+    if [[ "$reply" =~ ^[Yy]$ ]]; then
         kind delete cluster --name avalanche-l1
         echo "kind cluster deleted."
     fi
 fi
 
 echo ""
-echo "Cleanup complete!"
+echo "Cleanup complete."

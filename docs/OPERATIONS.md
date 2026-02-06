@@ -3,7 +3,7 @@
 Day-2 operations for your Avalanche infrastructure.
 
 For workflow-first onboarding, start with [WORKFLOWS.md](WORKFLOWS.md).
-For command-focused CLI help, use `make help-l1`, `make help-primary`, or `make help-all`.
+For command-focused CLI help, use `make help-l1`, `make help-primary`, `make k8s-help`, or `make help-all`.
 
 ## Health Checks
 
@@ -136,6 +136,7 @@ make reset-l1
 | `make doctor` | Verify local dependencies and config layout |
 | `make help-l1` | Show L1-focused command map |
 | `make help-primary` | Show Primary Network-focused command map |
+| `make k8s-help` | Show Kubernetes wrapper command map |
 | `make validate-config-layout` | Verify required config JSON files exist and parse |
 | `make test-unit` | Run Go unit tests for local tools |
 | `make test-e2e-dry` | Run both E2E scripts in dry-run mode (no infra changes) |

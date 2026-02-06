@@ -130,6 +130,7 @@ make test-incremental SKIP_TERRAFORM_VALIDATE=true
 make help
 make help-l1
 make help-primary
+make k8s-help
 make help-all
 ```
 
