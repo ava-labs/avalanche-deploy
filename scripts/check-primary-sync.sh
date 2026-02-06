@@ -8,28 +8,32 @@
 #
 # Returns 0 when all chains are bootstrapped, 1 otherwise.
 
-set -e
+set -euo pipefail
 
 NODE_IP="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CLOUD="${CLOUD:-aws}"
+INVENTORY="${INVENTORY:-$REPO_ROOT/ansible/inventory/${CLOUD}_hosts}"
 
 check_chain() {
     local ip=$1
     local chain=$2
+    local result
+    local bootstrapped
 
     result=$(curl -s --connect-timeout 5 "http://$ip:9650/ext/info" \
         -X POST \
         -H 'Content-Type: application/json' \
         -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.isBootstrapped\",\"params\":{\"chain\":\"$chain\"}}" \
-        2>/dev/null)
+        2>/dev/null || true)
 
     if [ -z "$result" ]; then
         echo "UNREACHABLE"
         return 1
     fi
 
-    bootstrapped=$(echo "$result" | jq -r '.result.isBootstrapped // false' 2>/dev/null)
+    bootstrapped=$(printf '%s' "$result" | jq -r '.result.isBootstrapped // false' 2>/dev/null || echo "false")
     if [ "$bootstrapped" = "true" ]; then
         echo "SYNCED"
         return 0
@@ -46,9 +50,10 @@ check_node() {
     echo "=== $name ($ip) ==="
 
     local all_synced=true
+    local status
 
     for chain in P X C; do
-        status=$(check_chain "$ip" "$chain")
+        status="$(check_chain "$ip" "$chain" || true)"
         printf "  %s-Chain: %s\n" "$chain" "$status"
         if [ "$status" != "SYNCED" ]; then
             all_synced=false
@@ -71,11 +76,9 @@ if [ -n "$NODE_IP" ]; then
 fi
 
 # Check all primary validators from inventory
-INVENTORY="$REPO_ROOT/ansible/inventory/aws_hosts"
-
 if [ ! -f "$INVENTORY" ]; then
     echo "Error: Inventory not found at $INVENTORY"
-    echo "Run 'make infra' first to create infrastructure."
+    echo "Run 'make infra CLOUD=$CLOUD' first to create infrastructure."
     exit 1
 fi
 
@@ -87,7 +90,7 @@ while IFS= read -r line; do
     if [[ "$line" =~ ^primary-validator ]]; then
         FOUND_VALIDATORS=true
         name=$(echo "$line" | awk '{print $1}')
-        ip=$(echo "$line" | grep -oP 'ansible_host=\K[^ ]+')
+        ip=$(echo "$line" | awk '{for (i=1; i<=NF; i++) if ($i ~ /^ansible_host=/) {sub(/^ansible_host=/, "", $i); print $i; break}}')
 
         if [ -n "$ip" ]; then
             echo ""

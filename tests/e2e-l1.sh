@@ -77,12 +77,12 @@ log() {
 
 log_success() {
     echo -e "${GREEN}[$(date '+%H:%M:%S')] ✓ $1${NC}"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 }
 
 log_error() {
     echo -e "${RED}[$(date '+%H:%M:%S')] ✗ $1${NC}"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 }
 
 log_warning() {
@@ -232,8 +232,10 @@ fi
 log "Waiting for P-Chain bootstrap (this may take a few minutes)..."
 MAX_WAIT=600  # 10 minutes
 WAITED=0
+FIRST_VALIDATOR_IP=$(cd terraform/$CLOUD && terraform output -json validator_ips | jq -r '.[0]')
 while [ $WAITED -lt $MAX_WAIT ]; do
-    if make status 2>&1 | grep -q "P:OK"; then
+    BOOTSTRAP_STATUS=$(curl -sf -X POST --data '{"jsonrpc":"2.0","id":1,"method":"info.isBootstrapped","params":{"chain":"P"}}' -H 'content-type:application/json' "http://$FIRST_VALIDATOR_IP:9650/ext/info" 2>/dev/null || echo '{}')
+    if echo "$BOOTSTRAP_STATUS" | jq -e '.result.isBootstrapped == true' > /dev/null 2>&1; then
         log_success "P-Chain bootstrapped"
         break
     fi
@@ -270,41 +272,43 @@ log "  Using genesis proxy address: $GENESIS_PROXY_ADDRESS"
 log "  This address will be used in ConvertSubnetToL1Tx as the ValidatorManager"
 
 # Run create-l1 with JSON output to capture all values including conversion_tx_id
-CREATE_L1_OUTPUT=$(./tools/create-l1/create-l1 \
+CREATE_L1_JSON=$(mktemp)
+if ./tools/create-l1/create-l1 \
     --network=$NETWORK \
     --validators=$VALIDATOR_IPS \
     --chain-name=e2etest \
     --genesis-proxy-address=$GENESIS_PROXY_ADDRESS \
     --output=l1.env \
-    --json 2>&1)
-
-CREATE_L1_EXIT_CODE=$?
-
-if [ $CREATE_L1_EXIT_CODE -eq 0 ]; then
+    --json > "$CREATE_L1_JSON" 2>&1; then
     log_success "L1 created"
+else
+    log_error "L1 creation failed"
+    cat "$CREATE_L1_JSON"
+    rm -f "$CREATE_L1_JSON"
+    exit 1
+fi
 
-    # Parse JSON output to extract values
-    SUBNET_ID=$(echo "$CREATE_L1_OUTPUT" | jq -r '.subnet_id // empty')
-    CHAIN_ID=$(echo "$CREATE_L1_OUTPUT" | jq -r '.chain_id // empty')
-    CONVERSION_TX=$(echo "$CREATE_L1_OUTPUT" | jq -r '.conversion_tx_id // empty')
+# Try to parse JSON output; fall back to l1.env
+SUBNET_ID=$(jq -r '.subnet_id // empty' "$CREATE_L1_JSON" 2>/dev/null || true)
+CHAIN_ID=$(jq -r '.chain_id // empty' "$CREATE_L1_JSON" 2>/dev/null || true)
+CONVERSION_TX=$(jq -r '.conversion_tx_id // empty' "$CREATE_L1_JSON" 2>/dev/null || true)
+rm -f "$CREATE_L1_JSON"
 
-    # Also source l1.env for any additional vars
+# Fall back to l1.env if JSON parsing didn't work
+if [ -z "$SUBNET_ID" ] || [ -z "$CHAIN_ID" ]; then
+    log_warning "JSON parsing failed, falling back to l1.env"
     if [ -f "l1.env" ]; then
         source l1.env
     fi
+fi
 
-    log "  Subnet ID: $SUBNET_ID"
-    log "  Chain ID: $CHAIN_ID"
-    log "  Conversion TX: ${CONVERSION_TX:-not captured}"
+log "  Subnet ID: $SUBNET_ID"
+log "  Chain ID: $CHAIN_ID"
+log "  Conversion TX: ${CONVERSION_TX:-not captured}"
 
-    # Save conversion TX to l1.env if not already there
-    if [ -n "$CONVERSION_TX" ] && ! grep -q "CONVERSION_TX" l1.env 2>/dev/null; then
-        echo "CONVERSION_TX=$CONVERSION_TX" >> l1.env
-    fi
-else
-    log_error "L1 creation failed"
-    echo "$CREATE_L1_OUTPUT"
-    exit 1
+# Save conversion TX to l1.env if not already there
+if [ -n "$CONVERSION_TX" ] && ! grep -q "CONVERSION_TX" l1.env 2>/dev/null; then
+    echo "CONVERSION_TX=$CONVERSION_TX" >> l1.env
 fi
 
 # L1 Configuration

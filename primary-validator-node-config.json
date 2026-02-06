@@ -1,0 +1,9 @@
+{
+  "state-sync-enabled": true,
+  "state-sync-min-blocks": 100000,
+  "api-admin-enabled": false,
+  "api-info-enabled": true,
+  "api-health-enabled": true,
+  "index-enabled": false,
+  "log-level": "info"
+}

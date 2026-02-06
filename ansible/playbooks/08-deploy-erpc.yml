@@ -102,18 +102,32 @@
       ansible.builtin.debug:
         msg: "Configured {{ erpc_upstreams | length }} upstream RPC endpoints (archive: {{ archive_count }}, pruned: {{ pruned_count }})"
 
+    - name: Select eRPC deployment host
+      ansible.builtin.set_fact:
+        erpc_deploy_host: "{{ 'monitoring[0]' if (groups.get('monitoring', []) | length) > 0 else 'rpc[0]' }}"
+
+    - name: Show selected eRPC deployment host
+      ansible.builtin.debug:
+        msg: "Deploying eRPC on {{ erpc_deploy_host }}"
+
 - name: Deploy eRPC
-  hosts: monitoring[0]  # Deploy to monitoring server (or first RPC if no monitoring)
+  hosts: monitoring[0]:rpc[0]
   become: true
-  gather_facts: true
+  gather_facts: false
 
   pre_tasks:
+    - name: Determine whether this host should run eRPC deployment
+      ansible.builtin.set_fact:
+        deploy_erpc_here: "{{ inventory_hostname == (groups['monitoring'][0] if (groups.get('monitoring', []) | length) > 0 else groups['rpc'][0]) }}"
+
     - name: Wait for system to become reachable
       ansible.builtin.wait_for_connection:
         timeout: 300
+      when: deploy_erpc_here
 
   roles:
     - role: erpc
+      when: deploy_erpc_here
       vars:
         erpc_chain_id: "{{ hostvars['localhost']['l1_chain_id'] }}"
         erpc_evm_chain_id: "{{ hostvars['localhost']['l1_evm_chain_id'] }}"
@@ -125,7 +139,10 @@
   tasks:
     - name: Get eRPC host
       ansible.builtin.set_fact:
-        erpc_host: "{{ hostvars[groups['monitoring'][0]]['ansible_host'] | default(hostvars[groups['rpc'][0]]['ansible_host']) }}"
+        erpc_host: >-
+          {{ hostvars[groups['monitoring'][0]]['ansible_host']
+            if (groups.get('monitoring', []) | length) > 0
+            else hostvars[groups['rpc'][0]]['ansible_host'] }}
 
     - name: Show eRPC information
       ansible.builtin.debug:

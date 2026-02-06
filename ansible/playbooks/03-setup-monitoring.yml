@@ -5,7 +5,7 @@
 #   ansible-playbook playbooks/03-setup-monitoring.yml
 
 - name: Install Node Exporter on all Avalanche nodes
-  hosts: validators:rpc
+  hosts: validators:rpc:primary_validators
   become: true
   gather_facts: true
   roles:

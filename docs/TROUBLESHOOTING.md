@@ -9,7 +9,7 @@ Common issues and solutions.
 **Symptom:** SSH connection timeouts or permission denied
 
 **Solutions:**
-1. Check SSH key path in `ansible/inventory/aws_hosts`
+1. Check SSH key path in `ansible/inventory/<cloud>_hosts` (for example, `ansible/inventory/aws_hosts`)
 2. Verify security group allows SSH (port 22) from your IP
 3. Check that the instance is running: `make status`
 
@@ -118,7 +118,7 @@ ssh ubuntu@<node-ip> "curl -s localhost:9650/ext/health"
 ./scripts/check-primary-sync.sh <target-ip>
 ```
 
-All chains must show "Bootstrapped: true"
+All chains must show `SYNCED`
 
 ### Source validator still running after migration
 

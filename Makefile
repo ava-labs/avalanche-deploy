@@ -14,6 +14,7 @@ SHELL := /bin/bash
 # Default cloud provider
 CLOUD ?= aws
 NETWORK ?= fuji
+ANSIBLE_INVENTORY = inventory/$(CLOUD)_hosts
 
 #
 # Setup
@@ -43,35 +44,35 @@ infra-plan:
 #
 deploy:
 	@echo "Deploying nodes..."
-	@cd ansible && ansible-playbook playbooks/01-deploy-nodes.yml -e network=$(NETWORK)
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/01-deploy-nodes.yml -e network=$(NETWORK)
 	@echo ""
 	@echo "Done! Run 'make status' to check sync progress."
 
 configure-l1:
 	@if [ -z "$(SUBNET_ID)" ]; then echo "Usage: make configure-l1 SUBNET_ID=xxx CHAIN_ID=yyy"; exit 1; fi
-	@cd ansible && ansible-playbook playbooks/02-configure-l1.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/02-configure-l1.yml \
 		-e subnet_id=$(SUBNET_ID) \
 		-e chain_id=$(CHAIN_ID)
 
 reset-l1:
 	@echo "Resetting L1 chain data on all nodes..."
-	@cd ansible && ansible-playbook playbooks/00-reset-l1.yml
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/00-reset-l1.yml
 
 monitoring:
-	@cd ansible && ansible-playbook playbooks/03-setup-monitoring.yml
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/03-setup-monitoring.yml
 
 rolling-restart:
 	@echo "Performing rolling restart of all nodes..."
-	@cd ansible && ansible-playbook playbooks/rolling-restart.yml
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/rolling-restart.yml
 
 health-checks:
-	@cd ansible && ansible-playbook playbooks/health-checks.yml $(if $(CHAIN_ID),-e chain_id=$(CHAIN_ID),)
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/health-checks.yml $(if $(CHAIN_ID),-e chain_id=$(CHAIN_ID),)
 
 upgrade:
 	@if [ -z "$(VERSION)" ]; then echo "Usage: make upgrade VERSION=1.12.0"; exit 1; fi
 	@echo "Upgrading nodes to avalanchego $(VERSION)..."
 	@echo "NOTE: subnet-evm is bundled with avalanchego and will be updated automatically."
-	@cd ansible && ansible-playbook playbooks/upgrade-nodes.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/upgrade-nodes.yml \
 		-e "avalanchego_version=$(VERSION)"
 
 #
@@ -100,7 +101,7 @@ deploy-blockscout:
 	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make deploy-blockscout CHAIN_ID=xxx EVM_CHAIN_ID=yyy [CHAIN_NAME=name]"; exit 1; fi
 	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make deploy-blockscout CHAIN_ID=xxx EVM_CHAIN_ID=yyy [CHAIN_NAME=name]"; exit 1; fi
 	@echo "Deploying Blockscout block explorer..."
-	@cd ansible && ansible-playbook playbooks/04-deploy-blockscout.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/04-deploy-blockscout.yml \
 		-e "l1_chain_id=$(CHAIN_ID)" \
 		-e "l1_evm_chain_id=$(EVM_CHAIN_ID)" \
 		-e "l1_name=$(or $(CHAIN_NAME),Avalanche L1)"
@@ -113,7 +114,7 @@ faucet:
 	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make faucet CHAIN_ID=xxx EVM_CHAIN_ID=yyy FAUCET_KEY=0x..."; exit 1; fi
 	@if [ -z "$(FAUCET_KEY)" ]; then echo "Usage: make faucet CHAIN_ID=xxx EVM_CHAIN_ID=yyy FAUCET_KEY=0x..."; exit 1; fi
 	@echo "Deploying faucet..."
-	@cd ansible && ansible-playbook playbooks/06-deploy-faucet.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/06-deploy-faucet.yml \
 		-e "l1_chain_id=$(CHAIN_ID)" \
 		-e "l1_evm_chain_id=$(EVM_CHAIN_ID)" \
 		-e "faucet_private_key=$(FAUCET_KEY)"
@@ -124,7 +125,7 @@ faucet:
 graph-node:
 	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make graph-node CHAIN_ID=xxx [NETWORK_NAME=my-l1]"; exit 1; fi
 	@echo "Deploying The Graph Node..."
-	@cd ansible && ansible-playbook playbooks/07-deploy-graph-node.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/07-deploy-graph-node.yml \
 		-e "l1_chain_id=$(CHAIN_ID)" \
 		$(if $(NETWORK_NAME),-e "graph_network_name=$(NETWORK_NAME)",)
 
@@ -132,7 +133,7 @@ erpc:
 	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make erpc CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
 	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make erpc CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
 	@echo "Deploying eRPC load balancer..."
-	@cd ansible && ansible-playbook playbooks/08-deploy-erpc.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/08-deploy-erpc.yml \
 		-e "l1_chain_id=$(CHAIN_ID)" \
 		-e "l1_evm_chain_id=$(EVM_CHAIN_ID)"
 
@@ -151,7 +152,7 @@ initialize-validator-manager:
 	@if [ -z "$(PROXY_ADDRESS)" ]; then echo "Usage: make initialize-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
 	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make initialize-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
 	@echo "Initializing Validator Manager..."
-	@cd ansible && ansible-playbook playbooks/09-initialize-validator-manager.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/09-initialize-validator-manager.yml \
 		-e "subnet_id=$(SUBNET_ID)" \
 		-e "chain_id=$(CHAIN_ID)" \
 		-e "conversion_tx=$(CONVERSION_TX)" \
@@ -164,23 +165,27 @@ initialize-validator-manager:
 # Primary Network Validators
 #
 primary-infra:
-	@echo "Creating Primary Network validator infrastructure..."
-	@cd terraform/$(CLOUD) && terraform init && terraform apply -var="primary_validator_count=1"
+	@echo "Creating Primary Network validator infrastructure (no L1 validators/RPC)..."
+	@cd terraform/$(CLOUD) && terraform init && terraform apply \
+		-var="validator_count=0" \
+		-var="rpc_archive_count=0" \
+		-var="rpc_pruned_count=0" \
+		-var="primary_validator_count=1"
 	@echo ""
 	@echo "Done! Run 'make primary-deploy' next."
 
 primary-deploy:
 	@echo "Deploying Primary Network validators..."
-	@cd ansible && ansible-playbook playbooks/10-deploy-primary-network.yml -e network=$(NETWORK)
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/10-deploy-primary-network.yml -e network=$(NETWORK)
 	@echo ""
 	@echo "Done! Run 'make primary-status' to check sync progress."
 
 primary-status:
-	@./scripts/check-primary-sync.sh
+	@CLOUD=$(CLOUD) ./scripts/check-primary-sync.sh
 
 backup-keys:
 	@echo "Backing up staking keys to S3 (L1 + Primary Network validators)..."
-	@cd ansible && ansible-playbook playbooks/11-backup-staking-keys.yml
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/11-backup-staking-keys.yml
 
 restore-keys:
 	@if [ -z "$(SOURCE)" ]; then echo "Usage: make restore-keys SOURCE=primary-validator-1 TARGET_IP=10.0.1.50"; exit 1; fi
@@ -190,7 +195,7 @@ restore-keys:
 prepare-migration:
 	@if [ -z "$(NODE)" ]; then echo "Usage: make prepare-migration NODE=migration-target [SNAPSHOT=true] [SNAPSHOT_NAME=latest]"; exit 1; fi
 	@echo "Preparing migration node $(NODE)..."
-	@cd ansible && ansible-playbook playbooks/12-prepare-migration-node.yml --limit $(NODE) \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/12-prepare-migration-node.yml --limit $(NODE) \
 		$(if $(SNAPSHOT),-e "use_snapshot=$(SNAPSHOT)",) \
 		$(if $(SNAPSHOT_NAME),-e "snapshot_name=$(SNAPSHOT_NAME)",)
 
@@ -198,7 +203,7 @@ migrate-validator:
 	@if [ -z "$(SOURCE)" ]; then echo "Usage: make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target"; exit 1; fi
 	@if [ -z "$(TARGET)" ]; then echo "Usage: make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target"; exit 1; fi
 	@echo "Migrating validator from $(SOURCE) to $(TARGET)..."
-	@cd ansible && ansible-playbook playbooks/13-migrate-validator.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/13-migrate-validator.yml \
 		-e "source_host=$(SOURCE)" \
 		-e "target_host=$(TARGET)"
 
@@ -208,13 +213,13 @@ migrate-validator:
 create-snapshot:
 	@if [ -z "$(NODE)" ]; then echo "Usage: make create-snapshot NODE=primary-validator-1 [NAME=my-snapshot]"; exit 1; fi
 	@echo "Creating database snapshot from $(NODE)..."
-	@cd ansible && ansible-playbook playbooks/14-create-snapshot.yml --limit $(NODE) \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/14-create-snapshot.yml --limit $(NODE) \
 		$(if $(NAME),-e "snapshot_name=$(NAME)",)
 
 restore-snapshot:
 	@if [ -z "$(TARGET)" ]; then echo "Usage: make restore-snapshot TARGET=migration-target [SNAPSHOT=latest]"; exit 1; fi
 	@echo "Restoring snapshot to $(TARGET)..."
-	@cd ansible && ansible-playbook playbooks/15-restore-snapshot.yml --limit $(TARGET) \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/15-restore-snapshot.yml --limit $(TARGET) \
 		$(if $(SNAPSHOT),-e "snapshot_name=$(SNAPSHOT)",)
 
 list-snapshots:
@@ -226,7 +231,7 @@ list-snapshots:
 safe:
 	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make safe CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
 	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make safe CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
-	@cd ansible && ansible-playbook playbooks/05-deploy-safe.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/05-deploy-safe.yml \
 		-e "chain_id=$(CHAIN_ID)" \
 		-e "evm_chain_id=$(EVM_CHAIN_ID)"
 

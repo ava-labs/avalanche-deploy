@@ -1,6 +1,6 @@
 # Avalanche Deploy
 
-One-command deployment for Avalanche L1 blockchains and Primary Network validators on AWS, GCP, or Azure.
+Deployment toolkit for Avalanche L1 blockchains on AWS, GCP, or Azure, plus Primary Network validator workflows on AWS.
 
 ## L1 Blockchain
 
@@ -8,7 +8,9 @@ Deploy a complete L1 with validators, RPC nodes, and monitoring:
 
 ```bash
 make setup && make infra && make deploy
-make create-l1 && make configure-l1 SUBNET_ID=xxx CHAIN_ID=yyy
+make create-l1
+./tools/create-l1/create-l1 --network=fuji --validators=<ip,ip,...> --chain-name=<name> --output=l1.env
+source l1.env && make configure-l1 SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID
 ```
 
 **What you get:** 5 validators, archive + pruned RPC, Prometheus/Grafana (~$650/mo)
@@ -23,7 +25,7 @@ Deploy high-performance validators for the Avalanche Primary Network:
 make setup && make primary-infra && make primary-deploy
 ```
 
-**What you get:** i4i.xlarge with NVMe, S3 key backup, migration support (~$310/mo)
+**What you get:** 1x i4i.xlarge primary validator + monitoring + S3 key backup/migration tooling (~$326/mo)
 
 [Full Primary Network Guide →](docs/PRIMARY-NETWORK.md)
 

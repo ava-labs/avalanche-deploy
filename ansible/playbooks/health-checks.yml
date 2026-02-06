@@ -12,7 +12,7 @@
 #   chain_id: L1 chain ID to check (optional, will try to read from l1.env)
 
 - name: Health Checks - Gather Node Information
-  hosts: validators:rpc
+  hosts: validators:rpc:primary_validators
   become: false
   gather_facts: false
 
@@ -149,7 +149,7 @@
   tasks:
     - name: Collect all node health data
       ansible.builtin.set_fact:
-        all_nodes_health: "{{ groups['validators'] | default([]) | union(groups['rpc'] | default([])) | map('extract', hostvars, 'node_health') | list }}"
+        all_nodes_health: "{{ groups['validators'] | default([]) | union(groups['rpc'] | default([])) | union(groups['primary_validators'] | default([])) | map('extract', hostvars, 'node_health') | list }}"
 
     - name: Display validator health
       ansible.builtin.debug:
@@ -182,6 +182,28 @@
           ============================================
           {% for node in all_nodes_health %}
           {% if node.hostname in groups.get('rpc', []) %}
+
+          {{ node.hostname }} ({{ node.ip }}):
+            Service:     {{ 'RUNNING' if node.service_running else 'STOPPED' }}
+            NodeID:      {{ node.node_id }}
+            Version:     {{ node.version }}
+            P-Chain:     {{ 'READY' if node.p_chain_bootstrapped else 'SYNCING' }}
+            C-Chain:     {{ 'READY' if node.c_chain_bootstrapped else 'SYNCING' }}
+            X-Chain:     {{ 'READY' if node.x_chain_bootstrapped else 'SYNCING' }}
+            Health:      {{ 'HEALTHY' if node.health_check_passed else 'UNHEALTHY' }}
+            L1 Block:    {{ node.l1_block_number }}
+          {% endif %}
+          {% endfor %}
+
+    - name: Display primary validator health
+      ansible.builtin.debug:
+        msg: |
+
+          ============================================
+          Primary Validator Health Status
+          ============================================
+          {% for node in all_nodes_health %}
+          {% if node.hostname in groups.get('primary_validators', []) %}
 
           {{ node.hostname }} ({{ node.ip }}):
             Service:     {{ 'RUNNING' if node.service_running else 'STOPPED' }}

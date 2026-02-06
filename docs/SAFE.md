@@ -62,7 +62,12 @@ This adds 8 Safe v1.4.1 contracts at canonical CREATE2 addresses:
 
 ```bash
 make create-l1
-source l1.env  # Sets SUBNET_ID and CHAIN_ID
+./tools/create-l1/create-l1 \
+  --network=fuji \
+  --validators=<ip,ip,...> \
+  --chain-name=<name> \
+  --output=l1.env
+source l1.env  # Sets SUBNET_ID and CHAIN_ID from tool output
 ```
 
 ### Step 3: Deploy Safe Infrastructure
@@ -116,7 +121,9 @@ Works with IP addresses.
 For production deployments with a domain name, use Let's Encrypt for trusted SSL:
 
 ```bash
-make safe CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999 \
+cd ansible && ansible-playbook -i "inventory/${CLOUD:-aws}_hosts" playbooks/05-deploy-safe.yml \
+  -e "chain_id=$CHAIN_ID" \
+  -e "evm_chain_id=99999" \
   -e "safe_use_letsencrypt=true" \
   -e "safe_domain=safe.yourdomain.com" \
   -e "safe_letsencrypt_email=admin@yourdomain.com"

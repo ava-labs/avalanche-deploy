@@ -67,12 +67,12 @@ log() {
 
 log_success() {
     echo -e "${GREEN}[$(date '+%H:%M:%S')] ✓ $1${NC}"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 }
 
 log_error() {
     echo -e "${RED}[$(date '+%H:%M:%S')] ✗ $1${NC}"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 }
 
 log_warning() {
@@ -226,7 +226,7 @@ else
     MAX_WAIT=1800  # 30 minutes
     WAITED=0
     while [ $WAITED -lt $MAX_WAIT ]; do
-        if ./scripts/check-primary-sync.sh "$PRIMARY_IP_1" 2>&1 | grep -q "P-Chain.*true"; then
+        if ./scripts/check-primary-sync.sh "$PRIMARY_IP_1" 2>&1 | grep -q "P-Chain: SYNCED"; then
             log_success "P-Chain bootstrapped on primary-validator-1"
             break
         fi
@@ -242,13 +242,13 @@ else
 
     # Check X and C chains
     log "Checking X-Chain and C-Chain..."
-    if ./scripts/check-primary-sync.sh "$PRIMARY_IP_1" 2>&1 | grep -q "X-Chain.*true"; then
+    if ./scripts/check-primary-sync.sh "$PRIMARY_IP_1" 2>&1 | grep -q "X-Chain: SYNCED"; then
         log_success "X-Chain bootstrapped"
     else
         log_warning "X-Chain not yet bootstrapped"
     fi
 
-    if ./scripts/check-primary-sync.sh "$PRIMARY_IP_1" 2>&1 | grep -q "C-Chain.*true"; then
+    if ./scripts/check-primary-sync.sh "$PRIMARY_IP_1" 2>&1 | grep -q "C-Chain: SYNCED"; then
         log_success "C-Chain bootstrapped"
     else
         log_warning "C-Chain not yet bootstrapped"
@@ -269,7 +269,7 @@ fi
 log "Verifying backup in S3..."
 S3_BUCKET=$(cd terraform/$CLOUD && terraform output -raw staking_keys_bucket 2>/dev/null || echo "")
 if [ -n "$S3_BUCKET" ]; then
-    if aws s3 ls "s3://$S3_BUCKET/" | grep -q "staking"; then
+    if aws s3 ls "s3://$S3_BUCKET/" --recursive | grep -q "staking-keys.tar.gz"; then
         log_success "Staking keys found in S3"
     else
         log_error "Staking keys not found in S3"

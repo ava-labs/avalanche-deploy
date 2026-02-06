@@ -15,9 +15,10 @@ vpc_cidr = "10.0.0.0/16"
 # Operator IP (leave empty to auto-detect, or specify e.g., "1.2.3.4/32")
 operator_ip = ""
 
-# Node counts (2 validators + 1 RPC is minimum recommended)
-validator_count = 2
-rpc_count       = 1
+# Node counts (2 validators + 1 archive RPC + 1 pruned RPC minimum recommended)
+validator_count   = 2
+rpc_archive_count = 1
+rpc_pruned_count  = 1
 
 # Instance types - using "d" variants for LOCAL NVMe storage (not network-attached EBS!)
 #
@@ -26,19 +27,24 @@ rpc_count       = 1
 #
 # Testing/Fuji (smaller, cost-effective):
 #   Validators: m6id.xlarge (4 vCPU, 16GB, 1x237GB NVMe)
-#   RPC: m6id.large (2 vCPU, 8GB, 1x118GB NVMe)
+#   Archive RPC: m6id.xlarge (4 vCPU, 16GB, 1x237GB NVMe)
+#   Pruned RPC: m6id.large (2 vCPU, 8GB, 1x118GB NVMe)
 #
 # Production/Mainnet (recommended):
 #   Validators: m6id.2xlarge (8 vCPU, 32GB, 1x474GB NVMe) or i3.xlarge (4 vCPU, 30GB, 1x950GB NVMe)
-#   RPC: m6id.xlarge (4 vCPU, 16GB, 1x237GB NVMe)
+#   Archive RPC: m6id.2xlarge (8 vCPU, 32GB, 1x474GB NVMe)
+#   Pruned RPC: m6id.xlarge (4 vCPU, 16GB, 1x237GB NVMe)
 #
-validator_instance_type = "m6id.xlarge"   # 4 vCPU, 16GB, 1x237GB NVMe - good for testing
-rpc_instance_type       = "m6id.large"    # 2 vCPU, 8GB, 1x118GB NVMe - good for testing
+validator_instance_type   = "m6id.xlarge"  # 4 vCPU, 16GB, 1x237GB NVMe - good for testing
+rpc_archive_instance_type = "m6id.xlarge"  # Archive RPC needs more resources (debug/history APIs)
+rpc_pruned_instance_type  = "m6id.large"   # 2 vCPU, 8GB, 1x118GB NVMe - good for testing
 
 # Disk configuration (root EBS - data goes on local NVMe)
-disk_size_gb    = 100  # GB - smaller root disk, data on NVMe
-disk_iops       = 3000
-disk_throughput = 250  # MB/s
+disk_size_gb            = 100  # Validators
+rpc_archive_disk_size_gb = 500 # Archive RPC (more headroom for logs/snapshots)
+rpc_pruned_disk_size_gb  = 250 # Pruned RPC
+disk_iops               = 3000
+disk_throughput         = 250  # MB/s
 
 # SSH - provide ONE of these:
 # Option 1: Content of your public key (creates new key pair)
