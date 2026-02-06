@@ -67,7 +67,7 @@
   post_tasks:
     - name: Wait for faucet to start
       ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ faucet_port | default(8000) }}/health"
+        url: "http://127.0.0.1:{{ faucet_port | default(8010) }}/health"
         method: GET
         status_code: 200
       register: faucet_health
@@ -92,7 +92,7 @@
           Faucet Deployed Successfully
           ============================================
 
-          Faucet URL: http://{{ faucet_host }}:{{ faucet_port | default(8000) }}
+          Faucet URL: http://{{ faucet_host }}:{{ faucet_port | default(8010) }}
 
           Configuration:
             Chain ID (L1):     {{ l1_chain_id }}

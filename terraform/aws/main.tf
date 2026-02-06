@@ -486,8 +486,9 @@ locals {
 }
 
 resource "aws_s3_bucket" "staking_keys" {
-  count  = local.enable_key_backup ? 1 : 0
-  bucket = "${var.name_prefix}-validator-keys"
+  count         = local.enable_key_backup ? 1 : 0
+  bucket        = "${var.name_prefix}-validator-keys"
+  force_destroy = true
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-validator-keys"

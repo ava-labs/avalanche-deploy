@@ -134,6 +134,8 @@ make create-l1
   --output=l1.env
 ```
 
+`l1.env` includes `SUBNET_ID`, `CHAIN_ID`, `CONVERSION_TX`, and `EVM_CHAIN_ID` (when `chainId` exists in `genesis.json`).
+
 ### 6. Configure Nodes for L1
 
 ```bash
@@ -162,7 +164,7 @@ make initialize-validator-manager \
   CHAIN_ID=$CHAIN_ID \
   CONVERSION_TX=$CONVERSION_TX \
   PROXY_ADDRESS=0x... \
-  EVM_CHAIN_ID=99999
+  EVM_CHAIN_ID=$EVM_CHAIN_ID
 ```
 
 ## Genesis Configuration

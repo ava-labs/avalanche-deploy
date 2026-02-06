@@ -150,6 +150,7 @@ curl -s http://<new-ip>:9650/ext/info -X POST \
 1. Fund the faucet wallet on your L1
 2. Check faucet logs: `docker logs -f faucet`
 3. Verify chain ID matches
+4. Verify you're using the faucet endpoint on port `8010`
 
 ### eRPC returning errors
 
@@ -165,4 +166,4 @@ curl -s http://<new-ip>:9650/ext/info -X POST \
 - Check node logs: `make logs`
 - Run health checks: `make health-checks`
 - [Avalanche Discord](https://discord.gg/avalanche)
-- [Open an issue](https://github.com/your-repo/avalanche-deploy/issues)
+- [Open an issue](https://github.com/ava-labs/avalanche-deploy/issues)

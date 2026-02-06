@@ -18,11 +18,14 @@
 #   ./tests/e2e-l1.sh --skip-infra       # Skip infra creation (use existing)
 #   ./tests/e2e-l1.sh --skip-destroy     # Don't destroy at end (for debugging)
 #   ./tests/e2e-l1.sh --skip-addons      # Skip add-on deployments
+#   ./tests/e2e-l1.sh --dry-run          # Local preflight only (no cloud changes)
 #
 # Required environment variables:
 #   AWS_ACCESS_KEY_ID
 #   AWS_SECRET_ACCESS_KEY
 #   AVALANCHE_PRIVATE_KEY (funded P-Chain key for Fuji, hex or PrivateKey- format)
+#
+# Note: In --dry-run mode, these credentials are not required.
 #
 # Optional:
 #   FAUCET_PRIVATE_KEY (funded key on your L1 for faucet testing)
@@ -53,6 +56,7 @@ NC='\033[0m' # No Color
 SKIP_INFRA=false
 SKIP_DESTROY=false
 SKIP_ADDONS=false
+DRY_RUN=false
 CLOUD="${CLOUD:-aws}"
 NETWORK="${NETWORK:-fuji}"
 
@@ -62,6 +66,12 @@ for arg in "$@"; do
         --skip-infra) SKIP_INFRA=true ;;
         --skip-destroy) SKIP_DESTROY=true ;;
         --skip-addons) SKIP_ADDONS=true ;;
+        --dry-run)
+            DRY_RUN=true
+            SKIP_INFRA=true
+            SKIP_DESTROY=true
+            SKIP_ADDONS=true
+            ;;
         *) echo "Unknown option: $arg"; exit 1 ;;
     esac
 done
@@ -101,7 +111,7 @@ cleanup() {
     if [ "$SKIP_DESTROY" = false ]; then
         section "Cleanup"
         log "Destroying infrastructure..."
-        make destroy CLOUD=$CLOUD || log_warning "Destroy failed (may already be destroyed)"
+        make destroy CLOUD=$CLOUD AUTO_APPROVE=true || log_warning "Destroy failed (may already be destroyed)"
     else
         log_warning "Skipping destroy (--skip-destroy)"
     fi
@@ -125,17 +135,37 @@ trap cleanup EXIT
 # Preflight checks
 section "Preflight Checks"
 
-if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
-    log_error "AWS_ACCESS_KEY_ID not set"
-    exit 1
+if [ "$DRY_RUN" = true ]; then
+    log_warning "Dry-run mode enabled: skipping cloud operations and destructive actions"
 fi
-log_success "AWS credentials configured"
 
-if [ -z "${AVALANCHE_PRIVATE_KEY:-}" ]; then
-    log_error "AVALANCHE_PRIVATE_KEY not set (need funded Fuji P-Chain key)"
-    exit 1
+if [ "$DRY_RUN" = false ]; then
+    if [ "$CLOUD" != "aws" ]; then
+        log_error "This E2E workflow currently supports CLOUD=aws only"
+        exit 1
+    fi
+    if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
+        log_error "AWS_ACCESS_KEY_ID not set"
+        exit 1
+    fi
+    if [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+        log_error "AWS_SECRET_ACCESS_KEY not set"
+        exit 1
+    fi
+    log_success "AWS credentials configured"
+else
+    log_success "Dry-run: skipping AWS credential requirement"
 fi
-log_success "Avalanche private key configured"
+
+if [ "$DRY_RUN" = false ]; then
+    if [ -z "${AVALANCHE_PRIVATE_KEY:-}" ]; then
+        log_error "AVALANCHE_PRIVATE_KEY not set (need funded Fuji P-Chain key)"
+        exit 1
+    fi
+    log_success "Avalanche private key configured"
+else
+    log_success "Dry-run: skipping funded P-Chain key requirement"
+fi
 
 # Check for ICM contracts path (needed for ValidatorManager)
 if [ -z "${ICM_CONTRACTS_PATH:-}" ]; then
@@ -175,15 +205,46 @@ if ! command -v ansible-playbook &> /dev/null; then
 fi
 log_success "ansible installed"
 
+if ! command -v go &> /dev/null; then
+    log_error "go not installed"
+    exit 1
+fi
+log_success "go installed"
+
 # Validate configurations
 section "Validation"
 
-log "Validating Ansible playbooks..."
-if make validate > /dev/null 2>&1; then
-    log_success "All configurations valid"
+if [ "$DRY_RUN" = true ]; then
+    log_warning "Dry-run: skipping make validate (covered by incremental test target)"
 else
-    log_error "Validation failed"
-    exit 1
+    log "Validating Ansible playbooks..."
+    if make validate > /dev/null 2>&1; then
+        log_success "All configurations valid"
+    else
+        log_error "Validation failed"
+        exit 1
+    fi
+fi
+
+if [ "$DRY_RUN" = true ]; then
+    section "Dry Run"
+    log "Building local tools as a fast E2E preflight..."
+    if make create-l1 > /dev/null 2>&1; then
+        log_success "create-l1 build check passed"
+    else
+        log_error "create-l1 build check failed"
+        exit 1
+    fi
+    if make init-validator-manager > /dev/null 2>&1; then
+        log_success "initialize-validator-manager build check passed"
+    else
+        log_error "initialize-validator-manager build check failed"
+        exit 1
+    fi
+    log_warning "Skipping infrastructure, deployment, chain creation, add-ons, and reset in dry-run mode"
+    section "E2E Dry Run Complete"
+    log_success "L1 dry-run checks passed"
+    exit 0
 fi
 
 # Infrastructure

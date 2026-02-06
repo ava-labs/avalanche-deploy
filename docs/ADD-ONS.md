@@ -13,7 +13,7 @@ make deploy-blockscout CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999 CHAIN_NAME="My L1"
 
 Access: `http://<archive-rpc-ip>:4001`
 
-> **Note:** Blockscout is deployed on the archive RPC node which has full history and debug APIs.
+> **Note:** Blockscout is deployed to the first `rpc_archive` host when available; otherwise it falls back to the first `rpc` host.
 
 ## Faucet (Token Distribution)
 
@@ -24,7 +24,7 @@ source l1.env
 make faucet CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999 FAUCET_KEY=0x...
 ```
 
-Access: `http://<rpc-ip>:8000`
+Access: `http://<rpc-ip>:8010`
 
 > **Note:** The faucet wallet must be funded on your L1.
 

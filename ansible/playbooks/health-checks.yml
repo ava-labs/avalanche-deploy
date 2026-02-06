@@ -149,7 +149,14 @@
   tasks:
     - name: Collect all node health data
       ansible.builtin.set_fact:
-        all_nodes_health: "{{ groups['validators'] | default([]) | union(groups['rpc'] | default([])) | union(groups['primary_validators'] | default([])) | map('extract', hostvars, 'node_health') | list }}"
+        all_nodes_health: >-
+          {{
+            groups['validators'] | default([])
+            | union(groups['rpc'] | default([]))
+            | union(groups['primary_validators'] | default([]))
+            | map('extract', hostvars, 'node_health')
+            | list
+          }}
 
     - name: Display validator health
       ansible.builtin.debug:

@@ -131,11 +131,13 @@
       when: s3_check.rc != 0
       block:
         - name: Create backup archive
-          ansible.builtin.archive:
-            path: /var/lib/avalanchego/staking/
-            dest: /tmp/staking-keys-{{ source_host }}.tar.gz
-            format: gz
-            mode: '0600'
+          ansible.builtin.shell: |
+            set -euo pipefail
+            tar -czf /tmp/staking-keys-{{ source_host }}.tar.gz -C /var/lib/avalanchego/staking .
+            chmod 600 /tmp/staking-keys-{{ source_host }}.tar.gz
+          args:
+            executable: /bin/bash
+          changed_when: true
 
         - name: Upload to S3
           ansible.builtin.command: >

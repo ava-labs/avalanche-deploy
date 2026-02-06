@@ -77,6 +77,7 @@
         path: "{{ playbook_dir }}/../primary_validator_node_ids.txt"
         line: "{{ inventory_hostname }}={{ hostvars[inventory_hostname]['ansible_host'] }}={{ node_info.json.result.nodeID }}"
         create: true
+        mode: "0644"
       delegate_to: localhost
       become: false
 
@@ -93,10 +94,13 @@
       when: s3_backup_enabled | bool
       block:
         - name: Create backup archive
-          ansible.builtin.archive:
-            path: /var/lib/avalanchego/staking/
-            dest: /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
-            format: gz
+          ansible.builtin.shell: |
+            set -euo pipefail
+            tar -czf /tmp/staking-keys-{{ inventory_hostname }}.tar.gz -C /var/lib/avalanchego/staking .
+            chmod 600 /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
+          args:
+            executable: /bin/bash
+          changed_when: true
 
         - name: Upload to S3
           ansible.builtin.command: >

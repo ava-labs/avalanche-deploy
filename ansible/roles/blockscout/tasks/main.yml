@@ -114,12 +114,11 @@
     - Restart blockscout
 
 - name: Pull Docker images
-  community.docker.docker_compose_v2:
-    project_src: "{{ blockscout_install_dir }}"
-    pull: always
-    state: present
-  become: true
-  become_user: "{{ blockscout_user }}"
+  ansible.builtin.command: docker compose pull
+  args:
+    chdir: "{{ blockscout_install_dir }}"
+  register: blockscout_pull
+  changed_when: "'Pulled' in blockscout_pull.stdout or 'Downloaded' in blockscout_pull.stdout"
 
 - name: Enable and start Blockscout
   ansible.builtin.systemd:

@@ -18,5 +18,7 @@ warn_list:
 # Mock modules that ansible-lint can't find in offline mode
 mock_modules:
   - ansible.builtin.archive
+  - community.general.archive
   - community.general.filesystem
   - ansible.posix.mount
+  - community.docker.docker_compose_v2

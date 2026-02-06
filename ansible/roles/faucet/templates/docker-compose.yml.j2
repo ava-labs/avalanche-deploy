@@ -6,7 +6,7 @@ services:
     container_name: avalanche-faucet
     restart: unless-stopped
     ports:
-      - "{{ faucet_port | default(8000) }}:8000"
+      - "{{ faucet_port | default(8010) }}:8000"
     environment:
       - RPC_URL=http://{{ faucet_rpc_host | default(ansible_host) }}:9650/ext/bc/{{ faucet_chain_id }}/rpc
       - CHAIN_ID={{ faucet_evm_chain_id }}

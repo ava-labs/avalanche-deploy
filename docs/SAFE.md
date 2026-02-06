@@ -150,18 +150,18 @@ Auto-renewal is configured via cron (daily at 3am).
 
 ```bash
 # Transaction Service
-curl http://<ip>:8080/txs/api/v1/about/
+curl -k https://<ip>/txs/api/v1/about/
 
 # Config Service
-curl http://<ip>:8080/cfg/api/v1/about/
+curl -k https://<ip>/cfg/api/v1/about/
 
 # Client Gateway
-curl http://<ip>:8080/cgw/health
+curl -k https://<ip>/cgw/health
 ```
 
 ## Creating a Safe
 
-1. Open `http://<rpc-node-ip>:8080/` in your browser
+1. Open `https://<rpc-node-ip>/` in your browser
 2. Connect your wallet (MetaMask, WalletConnect, etc.)
 3. Click "Create new Safe"
 4. Add owner addresses and set threshold
@@ -173,7 +173,8 @@ curl http://<ip>:8080/cgw/health
 
 | Service | Port |
 |---------|------|
-| Nginx (external) | 8080 |
+| Nginx HTTP redirect | 8080 |
+| Nginx HTTPS (external) | 443 |
 | Transaction Service | 8001 |
 | Config Service | 8002 |
 | Client Gateway | 8003 |

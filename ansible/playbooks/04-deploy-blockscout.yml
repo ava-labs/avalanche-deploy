@@ -14,8 +14,34 @@
 #   blockscout_network_name: Display name for your network
 #   blockscout_coin_symbol: Token symbol (default: AVAX)
 
+- name: Validate Blockscout deployment inputs
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Validate required variables
+      ansible.builtin.fail:
+        msg: "Missing required variable: {{ item }}"
+      when: vars[item] is not defined or vars[item] == ''
+      loop:
+        - l1_chain_id
+        - l1_evm_chain_id
+
+    - name: Ensure at least one RPC group is available
+      ansible.builtin.assert:
+        that:
+          - (groups['rpc_archive'] | default([]) | length) > 0 or (groups['rpc'] | default([]) | length) > 0
+        fail_msg: "Inventory must contain at least one RPC node in group 'rpc_archive' or 'rpc'"
+
+    - name: Select Blockscout target host
+      ansible.builtin.set_fact:
+        blockscout_target_host: "{{ groups['rpc_archive'][0] if (groups['rpc_archive'] | default([]) | length) > 0 else groups['rpc'][0] }}"
+
+    - name: Show selected Blockscout target
+      ansible.builtin.debug:
+        msg: "Deploying Blockscout on {{ blockscout_target_host }}"
+
 - name: Deploy Blockscout Block Explorer
-  hosts: rpc
+  hosts: rpc_archive[0]:rpc[0]
   become: true
   vars:
     # Override these in your inventory or via -e
@@ -29,8 +55,14 @@
     blockscout_rpc_url: "{{ rpc_url | default('http://host.docker.internal:9650/ext/bc/' + (l1_chain_id | string) + '/rpc') }}"
     blockscout_ws_url: "{{ ws_url | default('ws://host.docker.internal:9650/ext/bc/' + (l1_chain_id | string) + '/ws') }}"
 
+  pre_tasks:
+    - name: Determine whether this host should run Blockscout deployment
+      ansible.builtin.set_fact:
+        deploy_blockscout_here: "{{ inventory_hostname == hostvars['localhost']['blockscout_target_host'] }}"
+
   roles:
-    - blockscout
+    - role: blockscout
+      when: deploy_blockscout_here
 
   post_tasks:
     - name: Display access information
@@ -50,3 +82,4 @@
           Note: Initial sync may take some time depending
           on the number of blocks in your chain.
           ============================================
+      when: deploy_blockscout_here

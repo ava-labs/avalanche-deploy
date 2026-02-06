@@ -18,10 +18,13 @@
 #   ./tests/e2e-primary-network.sh --skip-infra       # Skip infra creation
 #   ./tests/e2e-primary-network.sh --skip-destroy     # Don't destroy at end
 #   ./tests/e2e-primary-network.sh --skip-sync-wait   # Don't wait for full sync (faster but incomplete test)
+#   ./tests/e2e-primary-network.sh --dry-run          # Local preflight only (no cloud changes)
 #
 # Required environment variables:
 #   AWS_ACCESS_KEY_ID
 #   AWS_SECRET_ACCESS_KEY
+#
+# Note: In --dry-run mode, these credentials are not required.
 #
 # Note: This test does NOT register validators on P-Chain (requires staking).
 #       It tests the infrastructure, deployment, backup, snapshot, and migration flows.
@@ -43,6 +46,7 @@ NC='\033[0m' # No Color
 SKIP_INFRA=false
 SKIP_DESTROY=false
 SKIP_SYNC_WAIT=false
+DRY_RUN=false
 CLOUD="${CLOUD:-aws}"
 NETWORK="${NETWORK:-fuji}"
 
@@ -52,6 +56,12 @@ for arg in "$@"; do
         --skip-infra) SKIP_INFRA=true ;;
         --skip-destroy) SKIP_DESTROY=true ;;
         --skip-sync-wait) SKIP_SYNC_WAIT=true ;;
+        --dry-run)
+            DRY_RUN=true
+            SKIP_INFRA=true
+            SKIP_DESTROY=true
+            SKIP_SYNC_WAIT=true
+            ;;
         *) echo "Unknown option: $arg"; exit 1 ;;
     esac
 done
@@ -91,7 +101,7 @@ cleanup() {
     if [ "$SKIP_DESTROY" = false ]; then
         section "Cleanup"
         log "Destroying infrastructure..."
-        make destroy CLOUD=$CLOUD || log_warning "Destroy failed (may already be destroyed)"
+        make destroy CLOUD=$CLOUD AUTO_APPROVE=true || log_warning "Destroy failed (may already be destroyed)"
     else
         log_warning "Skipping destroy (--skip-destroy)"
     fi
@@ -115,11 +125,27 @@ trap cleanup EXIT
 # Preflight checks
 section "Preflight Checks"
 
-if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
-    log_error "AWS_ACCESS_KEY_ID not set"
-    exit 1
+if [ "$DRY_RUN" = true ]; then
+    log_warning "Dry-run mode enabled: skipping cloud operations and destructive actions"
 fi
-log_success "AWS credentials configured"
+
+if [ "$DRY_RUN" = false ]; then
+    if [ "$CLOUD" != "aws" ]; then
+        log_error "Primary Network E2E currently supports CLOUD=aws only"
+        exit 1
+    fi
+    if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
+        log_error "AWS_ACCESS_KEY_ID not set"
+        exit 1
+    fi
+    if [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+        log_error "AWS_SECRET_ACCESS_KEY not set"
+        exit 1
+    fi
+    log_success "AWS credentials configured"
+else
+    log_success "Dry-run: skipping AWS credential requirement"
+fi
 
 if ! command -v terraform &> /dev/null; then
     log_error "terraform not installed"
@@ -136,12 +162,42 @@ log_success "ansible installed"
 # Validate configurations
 section "Validation"
 
-log "Validating Ansible playbooks..."
-if make validate > /dev/null 2>&1; then
-    log_success "All configurations valid"
+if [ "$DRY_RUN" = true ]; then
+    log_warning "Dry-run: skipping make validate (covered by incremental test target)"
 else
-    log_error "Validation failed"
-    exit 1
+    log "Validating Ansible playbooks..."
+    if make validate > /dev/null 2>&1; then
+        log_success "All configurations valid"
+    else
+        log_error "Validation failed"
+        exit 1
+    fi
+fi
+
+if [ "$DRY_RUN" = true ]; then
+    section "Dry Run"
+    log "Running script-level sanity checks..."
+    if bash -n scripts/check-primary-sync.sh \
+        scripts/backup-staking-keys.sh \
+        scripts/create-snapshot.sh \
+        scripts/restore-snapshot.sh \
+        scripts/list-snapshots.sh \
+        scripts/restore-staking-keys.sh; then
+        log_success "Primary operation scripts passed syntax checks"
+    else
+        log_error "Primary operation script syntax check failed"
+        exit 1
+    fi
+    if make check-primary-cloud CLOUD=aws > /dev/null 2>&1; then
+        log_success "Primary cloud guard check passed"
+    else
+        log_error "Primary cloud guard check failed"
+        exit 1
+    fi
+    log_warning "Skipping infrastructure, sync, backup, snapshots, migration, and restart in dry-run mode"
+    section "E2E Dry Run Complete"
+    log_success "Primary Network dry-run checks passed"
+    exit 0
 fi
 
 # Infrastructure

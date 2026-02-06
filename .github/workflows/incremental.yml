@@ -1,0 +1,43 @@
+name: Incremental CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  incremental:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.12"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible jq
+
+      - name: Install ansible-lint
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install ansible-lint
+
+      - name: Install Ansible Collections
+        run: ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: Run Incremental Test Suite
+        run: make test-incremental

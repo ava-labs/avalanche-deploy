@@ -15,6 +15,8 @@ source l1.env && make configure-l1 SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID
 
 **What you get:** 5 validators, archive + pruned RPC, Prometheus/Grafana, Blockscout (~$650/mo)
 
+`l1.env` includes `SUBNET_ID`, `CHAIN_ID`, `CONVERSION_TX`, and (when present in genesis) `EVM_CHAIN_ID`.
+
 [Full L1 Deployment Guide →](docs/L1-DEPLOYMENT.md)
 
 ## Primary Network Validator
@@ -22,10 +24,12 @@ source l1.env && make configure-l1 SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID
 Deploy high-performance validators for the Avalanche Primary Network:
 
 ```bash
-make setup && make primary-infra && make primary-deploy
+make setup && make primary-infra CLOUD=aws && make primary-deploy CLOUD=aws
 ```
 
 **What you get:** 1x i4i.xlarge primary validator + monitoring + S3 key backup/migration tooling (~$326/mo)
+
+Primary Network workflow targets are AWS-only in this repository.
 
 [Full Primary Network Guide →](docs/PRIMARY-NETWORK.md)
 
@@ -52,6 +56,17 @@ make backup-keys         # Backup staking keys to S3
 make destroy             # Tear down (stops billing!)
 ```
 
+## Testing
+
+```bash
+make test-unit           # Go unit tests
+make test-e2e-dry        # E2E script dry-runs (no infra changes)
+make test-incremental    # lint + validate + unit + e2e dry-run
+make test-incremental SKIP_TERRAFORM_VALIDATE=true  # air-gapped/local fallback
+make test-e2e-l1         # full L1 E2E (creates/destroys infra)
+make test-e2e-primary    # full Primary Network E2E
+```
+
 ## Documentation
 
 - [L1 Deployment](docs/L1-DEPLOYMENT.md) - Complete L1 setup guide
@@ -74,6 +89,10 @@ brew install terraform ansible awscli jq go
 make infra              # AWS (default)
 make infra CLOUD=gcp    # Google Cloud
 make infra CLOUD=azure  # Azure
+
+# Primary Network workflows are AWS-only
+make primary-infra CLOUD=aws
+make primary-deploy CLOUD=aws
 ```
 
 ## Getting AVAX for Testing

@@ -63,11 +63,13 @@
         backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
 
     - name: Create backup archive
-      ansible.builtin.archive:
-        path: /var/lib/avalanchego/staking/
-        dest: /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
-        format: gz
-        mode: '0600'
+      ansible.builtin.shell: |
+        set -euo pipefail
+        tar -czf /tmp/staking-keys-{{ inventory_hostname }}.tar.gz -C /var/lib/avalanchego/staking .
+        chmod 600 /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
+      args:
+        executable: /bin/bash
+      changed_when: true
 
     - name: Upload current backup to S3
       ansible.builtin.command: >

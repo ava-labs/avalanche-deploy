@@ -9,12 +9,29 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots lint validate test-e2e-l1 test-e2e-primary
+.PHONY: setup infra deploy status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots lint validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud
 
 # Default cloud provider
 CLOUD ?= aws
 NETWORK ?= fuji
+AUTO_APPROVE ?= false
+TF_INIT_RETRIES ?= 3
+SKIP_TERRAFORM_VALIDATE ?= false
 ANSIBLE_INVENTORY = inventory/$(CLOUD)_hosts
+ANSIBLE_SYNTAX_INVENTORY ?= ../tests/fixtures/syntax_inventory.ini
+export ANSIBLE_LOCAL_TEMP ?= $(CURDIR)/.ansible/tmp
+export ANSIBLE_REMOTE_TMP ?= /tmp/.ansible-tmp
+export GOCACHE ?= $(CURDIR)/.cache/go-build
+
+#
+# Guards
+#
+check-primary-cloud:
+	@if [ "$(CLOUD)" != "aws" ]; then \
+		echo "Error: Primary Network workflows are currently supported only on AWS."; \
+		echo "Use CLOUD=aws for: primary-infra, primary-deploy, backup-keys, migration, snapshots."; \
+		exit 1; \
+	fi
 
 #
 # Setup
@@ -25,6 +42,8 @@ setup:
 	@which ansible > /dev/null || brew install ansible
 	@which aws > /dev/null || brew install awscli
 	@which jq > /dev/null || brew install jq
+	@which go > /dev/null || brew install go
+	@which ansible-galaxy > /dev/null && ansible-galaxy collection install -r ansible/requirements.yml || true
 	@echo "Done! Run 'make infra' next."
 
 #
@@ -91,7 +110,7 @@ logs:
 #
 create-l1:
 	@echo "Building create-l1 tool..."
-	@cd tools/create-l1 && go mod tidy && go build -o create-l1 .
+	@cd tools/create-l1 && go build -o create-l1 .
 	@echo "Done! Binary at tools/create-l1/create-l1"
 
 #
@@ -142,7 +161,7 @@ erpc:
 #
 init-validator-manager:
 	@echo "Building initialize-validator-manager tool..."
-	@cd tools/initialize-validator-manager && go mod tidy && go build -o initialize-validator-manager .
+	@cd tools/initialize-validator-manager && go build -o initialize-validator-manager .
 	@echo "Done! Binary at tools/initialize-validator-manager/initialize-validator-manager"
 
 initialize-validator-manager:
@@ -164,7 +183,7 @@ initialize-validator-manager:
 #
 # Primary Network Validators
 #
-primary-infra:
+primary-infra: check-primary-cloud
 	@echo "Creating Primary Network validator infrastructure (no L1 validators/RPC)..."
 	@cd terraform/$(CLOUD) && terraform init && terraform apply \
 		-var="validator_count=0" \
@@ -174,32 +193,32 @@ primary-infra:
 	@echo ""
 	@echo "Done! Run 'make primary-deploy' next."
 
-primary-deploy:
+primary-deploy: check-primary-cloud
 	@echo "Deploying Primary Network validators..."
 	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/10-deploy-primary-network.yml -e network=$(NETWORK)
 	@echo ""
 	@echo "Done! Run 'make primary-status' to check sync progress."
 
-primary-status:
+primary-status: check-primary-cloud
 	@CLOUD=$(CLOUD) ./scripts/check-primary-sync.sh
 
-backup-keys:
+backup-keys: check-primary-cloud
 	@echo "Backing up staking keys to S3 (L1 + Primary Network validators)..."
 	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/11-backup-staking-keys.yml
 
-restore-keys:
+restore-keys: check-primary-cloud
 	@if [ -z "$(SOURCE)" ]; then echo "Usage: make restore-keys SOURCE=primary-validator-1 TARGET_IP=10.0.1.50"; exit 1; fi
 	@if [ -z "$(TARGET_IP)" ]; then echo "Usage: make restore-keys SOURCE=primary-validator-1 TARGET_IP=10.0.1.50"; exit 1; fi
 	@./scripts/restore-staking-keys.sh $(SOURCE) $(TARGET_IP)
 
-prepare-migration:
+prepare-migration: check-primary-cloud
 	@if [ -z "$(NODE)" ]; then echo "Usage: make prepare-migration NODE=migration-target [SNAPSHOT=true] [SNAPSHOT_NAME=latest]"; exit 1; fi
 	@echo "Preparing migration node $(NODE)..."
 	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/12-prepare-migration-node.yml --limit $(NODE) \
 		$(if $(SNAPSHOT),-e "use_snapshot=$(SNAPSHOT)",) \
 		$(if $(SNAPSHOT_NAME),-e "snapshot_name=$(SNAPSHOT_NAME)",)
 
-migrate-validator:
+migrate-validator: check-primary-cloud
 	@if [ -z "$(SOURCE)" ]; then echo "Usage: make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target"; exit 1; fi
 	@if [ -z "$(TARGET)" ]; then echo "Usage: make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target"; exit 1; fi
 	@echo "Migrating validator from $(SOURCE) to $(TARGET)..."
@@ -210,19 +229,19 @@ migrate-validator:
 #
 # Database Snapshots
 #
-create-snapshot:
+create-snapshot: check-primary-cloud
 	@if [ -z "$(NODE)" ]; then echo "Usage: make create-snapshot NODE=primary-validator-1 [NAME=my-snapshot]"; exit 1; fi
 	@echo "Creating database snapshot from $(NODE)..."
 	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/14-create-snapshot.yml --limit $(NODE) \
 		$(if $(NAME),-e "snapshot_name=$(NAME)",)
 
-restore-snapshot:
+restore-snapshot: check-primary-cloud
 	@if [ -z "$(TARGET)" ]; then echo "Usage: make restore-snapshot TARGET=migration-target [SNAPSHOT=latest]"; exit 1; fi
 	@echo "Restoring snapshot to $(TARGET)..."
 	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/15-restore-snapshot.yml --limit $(TARGET) \
 		$(if $(SNAPSHOT),-e "snapshot_name=$(SNAPSHOT)",)
 
-list-snapshots:
+list-snapshots: check-primary-cloud
 	@./scripts/list-snapshots.sh
 
 #
@@ -251,6 +270,7 @@ reset-genesis:
 #
 lint:
 	@echo "Running linters..."
+	@mkdir -p "$(ANSIBLE_LOCAL_TEMP)"
 	@which ansible-lint > /dev/null 2>&1 || { \
 		echo "ansible-lint not found. Installing..."; \
 		if command -v brew > /dev/null 2>&1; then \
@@ -261,29 +281,54 @@ lint:
 			pip3 install --user ansible-lint; \
 		fi; \
 	}
-	@cd ansible && ansible-lint playbooks/*.yml || true
+	@cd ansible && ansible-lint playbooks/*.yml
 	@echo ""
 	@echo "Checking Terraform format..."
-	@cd terraform/aws && terraform fmt -check -recursive || true
-	@cd terraform/gcp && terraform fmt -check -recursive || true
-	@cd terraform/azure && terraform fmt -check -recursive || true
+	@cd terraform/aws && terraform fmt -check -recursive
+	@cd terraform/gcp && terraform fmt -check -recursive
+	@cd terraform/azure && terraform fmt -check -recursive
+	@echo ""
+	@echo "Checking shell script syntax..."
+	@for f in scripts/*.sh tests/*.sh; do bash -n "$$f"; done
 	@echo "Done!"
 
 validate:
 	@echo "Validating Ansible playbooks..."
+	@mkdir -p "$(ANSIBLE_LOCAL_TEMP)"
 	@cd ansible && for f in playbooks/*.yml; do \
 		echo "  Checking $$f..."; \
-		ansible-playbook --syntax-check "$$f" > /dev/null || exit 1; \
+		ansible-playbook --syntax-check -i "$(ANSIBLE_SYNTAX_INVENTORY)" "$$f" > /dev/null || exit 1; \
 	done
 	@echo "✓ All Ansible playbooks valid"
-	@echo ""
-	@echo "Validating Terraform configurations..."
-	@cd terraform/aws && terraform init -backend=false > /dev/null && terraform validate
-	@echo "✓ AWS terraform valid"
-	@cd terraform/gcp && terraform init -backend=false > /dev/null && terraform validate
-	@echo "✓ GCP terraform valid"
-	@cd terraform/azure && terraform init -backend=false > /dev/null && terraform validate
-	@echo "✓ Azure terraform valid"
+	@if [ "$(SKIP_TERRAFORM_VALIDATE)" = "true" ]; then \
+		echo ""; \
+		echo "Skipping Terraform validation (SKIP_TERRAFORM_VALIDATE=true)"; \
+	else \
+		echo ""; \
+		echo "Validating Terraform configurations..."; \
+		set -e; \
+		validate_terraform() { \
+			local dir="$$1"; \
+			local label="$$2"; \
+			local attempt=1; \
+			while [ $$attempt -le $(TF_INIT_RETRIES) ]; do \
+				if (cd "$$dir" && terraform init -backend=false -input=false > /dev/null && terraform validate); then \
+					echo "✓ $$label terraform valid"; \
+					return 0; \
+				fi; \
+				if [ $$attempt -lt $(TF_INIT_RETRIES) ]; then \
+					echo "Retrying $$label terraform validation ($$attempt/$(TF_INIT_RETRIES))..."; \
+					sleep 2; \
+				fi; \
+				attempt=$$((attempt + 1)); \
+			done; \
+			echo "✗ $$label terraform validation failed after $(TF_INIT_RETRIES) attempts"; \
+			return 1; \
+		}; \
+		validate_terraform terraform/aws AWS; \
+		validate_terraform terraform/gcp GCP; \
+		validate_terraform terraform/azure Azure; \
+	fi
 	@echo ""
 	@echo "All validations passed!"
 
@@ -295,12 +340,36 @@ test-e2e-primary:
 	@echo "Running Primary Network E2E test..."
 	@./tests/e2e-primary-network.sh
 
+test-e2e-l1-dry:
+	@echo "Running L1 E2E dry-run..."
+	@./tests/e2e-l1.sh --dry-run
+
+test-e2e-primary-dry:
+	@echo "Running Primary Network E2E dry-run..."
+	@./tests/e2e-primary-network.sh --dry-run
+
+test-e2e-dry: test-e2e-l1-dry test-e2e-primary-dry
+	@echo "✓ E2E dry-run checks passed"
+
+test-unit:
+	@echo "Running unit tests..."
+	@cd tools/create-l1 && go test ./...
+	@cd tools/initialize-validator-manager && go test ./...
+	@cd tools/initialize-validator-manager/cmd/init_valset && go test ./...
+	@echo "✓ Unit tests passed"
+
+test-incremental: lint validate test-unit test-e2e-dry
+	@echo "✓ Incremental checks passed"
+
+test: test-incremental
+	@echo "✓ Default test suite passed"
+
 #
 # Cleanup
 #
 destroy:
 	@echo "Destroying $(CLOUD) infrastructure..."
-	@cd terraform/$(CLOUD) && terraform destroy
+	@cd terraform/$(CLOUD) && terraform destroy $(if $(filter true,$(AUTO_APPROVE)),-auto-approve,)
 	@echo "Done!"
 
 clean:
@@ -363,12 +432,19 @@ help:
 	@echo "Testing:"
 	@echo "  make lint             Run ansible-lint and terraform fmt checks"
 	@echo "  make validate         Validate all Ansible and Terraform configs"
+	@echo "  make test-unit        Run Go unit tests for local tools"
+	@echo "  make test-e2e-dry     Run both E2E scripts in dry-run mode (no infra changes)"
+	@echo "  make test-incremental Run lint + validate + unit tests + E2E dry-run"
+	@echo "  make test             Alias for test-incremental"
 	@echo "  make test-e2e-l1      Run full L1 E2E test (creates/destroys infra)"
 	@echo "  make test-e2e-primary Run full Primary Network E2E test"
 	@echo ""
 	@echo "Options:"
 	@echo "  CLOUD=aws|gcp|azure  (default: aws)"
 	@echo "  NETWORK=fuji|mainnet (default: fuji)"
+	@echo "  AUTO_APPROVE=true    Auto-confirm terraform destroy (use with care)"
+	@echo "  TF_INIT_RETRIES=3    Terraform init/validate retry count"
+	@echo "  SKIP_TERRAFORM_VALIDATE=true Skip Terraform validation (air-gapped/local only)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  # L1 Deployment"
@@ -377,13 +453,13 @@ help:
 	@echo "  make upgrade VERSION=1.12.0"
 	@echo ""
 	@echo "  # Primary Network Validators"
-	@echo "  make primary-infra"
-	@echo "  make primary-deploy NETWORK=mainnet"
-	@echo "  make backup-keys"
-	@echo "  make create-snapshot NODE=primary-validator-1"
-	@echo "  make list-snapshots"
-	@echo "  make prepare-migration NODE=migration-target SNAPSHOT=true"
-	@echo "  make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target"
+	@echo "  make primary-infra CLOUD=aws"
+	@echo "  make primary-deploy CLOUD=aws NETWORK=mainnet"
+	@echo "  make backup-keys CLOUD=aws"
+	@echo "  make create-snapshot CLOUD=aws NODE=primary-validator-1"
+	@echo "  make list-snapshots CLOUD=aws"
+	@echo "  make prepare-migration CLOUD=aws NODE=migration-target SNAPSHOT=true"
+	@echo "  make migrate-validator CLOUD=aws SOURCE=primary-validator-1 TARGET=migration-target"
 	@echo ""
 	@echo "  # Developer Tools"
 	@echo "  make faucet CHAIN_ID=xxx EVM_CHAIN_ID=99999 FAUCET_KEY=0x..."

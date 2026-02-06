@@ -48,6 +48,10 @@ Thumbs.db
 
 # Ansible
 *.retry
+.ansible/tmp/
+
+# Local build/test caches
+.cache/
 
 # Secrets (never commit these)
 *.pem

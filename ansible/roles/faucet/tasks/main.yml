@@ -10,7 +10,7 @@
 #   faucet_private_key: Private key for the faucet wallet (must be funded)
 #
 # Optional variables:
-#   faucet_port: Port to expose faucet (default: 8000)
+#   faucet_port: Port to expose faucet (default: 8010)
 #   faucet_amount: Amount of tokens to dispense per request (default: 1)
 #   faucet_rate_limit: Requests per hour per address (default: 1)
 

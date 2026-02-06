@@ -45,7 +45,8 @@ export VALIDATOR_3_IP=1.2.3.6
   --genesis=genesis.json \            # Genesis file for your L1
   --chain-name=my-l1 \                # Name for your L1
   --validator-balance=1 \             # AVAX per validator (default: 1)
-  --output=l1.env                     # Output file (default: l1.env)
+  --output=l1.env \                   # Output file (default: l1.env)
+  --json                              # Optional machine-readable output
 ```
 
 ### Private Key Options
@@ -86,11 +87,15 @@ The tool creates an output file (default: `l1.env`) with:
 ```bash
 SUBNET_ID=...
 CHAIN_ID=...
+CONVERSION_TX=...
+EVM_CHAIN_ID=99999
 NETWORK=fuji
 RPC_1_URL=http://1.2.3.4:9650/ext/bc/.../rpc
 RPC_2_URL=http://1.2.3.5:9650/ext/bc/.../rpc
 RPC_3_URL=http://1.2.3.6:9650/ext/bc/.../rpc
 ```
+
+`EVM_CHAIN_ID` is populated when `config.chainId` exists in the provided genesis.
 
 ## What Happens
 

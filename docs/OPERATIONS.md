@@ -71,7 +71,7 @@ make reset-l1
 
 | Command | Description |
 |---------|-------------|
-| `make setup` | Install terraform, ansible, jq |
+| `make setup` | Install terraform, ansible, aws-cli, jq, go |
 | `make infra` | Create L1 cloud infrastructure |
 | `make deploy` | Install avalanchego on L1 nodes |
 | `make create-l1` | Build the L1 creation tool |
@@ -82,13 +82,13 @@ make reset-l1
 
 | Command | Description |
 |---------|-------------|
-| `make primary-infra` | Create Primary Network validator infrastructure |
-| `make primary-deploy` | Deploy avalanchego for Primary Network |
-| `make primary-status` | Check P/X/C chain sync status |
-| `make backup-keys` | Backup staking keys to S3 |
-| `make restore-keys` | Restore staking keys from S3 |
-| `make prepare-migration` | Prepare new node for migration (supports `SNAPSHOT=true`) |
-| `make migrate-validator` | Execute validator migration |
+| `make primary-infra CLOUD=aws` | Create Primary Network validator infrastructure (AWS-only) |
+| `make primary-deploy CLOUD=aws` | Deploy avalanchego for Primary Network (AWS-only) |
+| `make primary-status CLOUD=aws` | Check P/X/C chain sync status (AWS-only) |
+| `make backup-keys CLOUD=aws` | Backup staking keys to S3 (AWS-only) |
+| `make restore-keys CLOUD=aws` | Restore staking keys from S3 (AWS-only) |
+| `make prepare-migration CLOUD=aws` | Prepare new node for migration (supports `SNAPSHOT=true`, AWS-only) |
+| `make migrate-validator CLOUD=aws` | Execute validator migration (AWS-only) |
 
 ### Database Snapshots
 
@@ -126,6 +126,19 @@ make reset-l1
 | `make init-validator-manager` | Build the validator manager initialization tool |
 | `make initialize-validator-manager` | Deploy and initialize ValidatorManager contract |
 
+### Testing
+
+| Command | Description |
+|---------|-------------|
+| `make test-unit` | Run Go unit tests for local tools |
+| `make test-e2e-dry` | Run both E2E scripts in dry-run mode (no infra changes) |
+| `make test-incremental` | Run lint + validate + unit tests + E2E dry-runs |
+| `make test-e2e-l1` | Run full L1 E2E (creates/destroys infra) |
+| `make test-e2e-primary` | Run full Primary Network E2E (creates/destroys infra) |
+
+For air-gapped or DNS-restricted environments, you can skip Terraform provider validation with:
+`make test-incremental SKIP_TERRAFORM_VALIDATE=true`
+
 ## Cloud Provider Options
 
 | Provider | Config | Command |
@@ -133,6 +146,8 @@ make reset-l1
 | AWS | `terraform/aws/` | `make infra` (default) |
 | GCP | `terraform/gcp/` | `make infra CLOUD=gcp` |
 | Azure | `terraform/azure/` | `make infra CLOUD=azure` |
+
+Primary Network validator workflows are currently AWS-only.
 
 ## Network Options
 

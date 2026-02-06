@@ -2,6 +2,8 @@
 
 Deploy and operate Avalanche Primary Network validators with enterprise-grade features.
 
+> **Scope:** Primary Network workflows in this repo are currently supported on AWS only.
+
 ## Architecture
 
 ```mermaid
@@ -58,19 +60,19 @@ flowchart TB
 ### 1. Create Infrastructure
 
 ```bash
-make primary-infra
+make primary-infra CLOUD=aws
 ```
 
 ### 2. Deploy Validators
 
 ```bash
-make primary-deploy NETWORK=fuji  # or mainnet
+make primary-deploy CLOUD=aws NETWORK=fuji  # or mainnet
 ```
 
 ### 3. Wait for Sync
 
 ```bash
-make primary-status
+make primary-status CLOUD=aws
 # Takes 2-4 hours for state-sync
 ```
 
@@ -81,17 +83,17 @@ Use [Core Wallet](https://core.app/) or avalanche-cli to register your validator
 ### 5. Backup Keys
 
 ```bash
-make backup-keys
+make backup-keys CLOUD=aws
 ```
 
 ## Staking Key Management
 
 ```bash
 # Backup all validator keys to S3
-make backup-keys
+make backup-keys CLOUD=aws
 
 # Restore keys to a specific node
-make restore-keys SOURCE=primary-validator-1 TARGET_IP=10.0.1.50
+make restore-keys CLOUD=aws SOURCE=primary-validator-1 TARGET_IP=10.0.1.50
 
 # List backups
 aws s3 ls s3://$(terraform -chdir=terraform/aws output -raw staking_keys_bucket)/
@@ -103,17 +105,17 @@ Create snapshots of synced nodes for faster bootstrapping:
 
 ```bash
 # Create a snapshot from a synced validator
-make create-snapshot NODE=primary-validator-1
+make create-snapshot CLOUD=aws NODE=primary-validator-1
 
 # Create with custom name
-make create-snapshot NODE=primary-validator-1 NAME=mainnet-2025-02
+make create-snapshot CLOUD=aws NODE=primary-validator-1 NAME=mainnet-2025-02
 
 # List available snapshots
-make list-snapshots
+make list-snapshots CLOUD=aws
 
 # Restore snapshot to a node
-make restore-snapshot TARGET=migration-target
-make restore-snapshot TARGET=migration-target SNAPSHOT=mainnet-2025-02
+make restore-snapshot CLOUD=aws TARGET=migration-target
+make restore-snapshot CLOUD=aws TARGET=migration-target SNAPSHOT=mainnet-2025-02
 
 # Restore with integrity verification (slower but safer)
 ansible-playbook playbooks/15-restore-snapshot.yml --limit migration-target \
@@ -162,16 +164,16 @@ sequenceDiagram
 
 # 2. Prepare the new node
 # Option A: Using snapshot (faster - minutes)
-make prepare-migration NODE=migration-target SNAPSHOT=true
+make prepare-migration CLOUD=aws NODE=migration-target SNAPSHOT=true
 
 # Option B: Using state-sync (slower - hours)
-make prepare-migration NODE=migration-target
+make prepare-migration CLOUD=aws NODE=migration-target
 
 # 3. Wait for sync to complete
 ./scripts/check-primary-sync.sh <new-node-ip>
 
 # 4. Execute migration (~30s downtime)
-make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target
+make migrate-validator CLOUD=aws SOURCE=primary-validator-1 TARGET=migration-target
 ```
 
 ## Cost Estimate

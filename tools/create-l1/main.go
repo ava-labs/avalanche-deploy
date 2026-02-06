@@ -20,6 +20,7 @@ import (
 	"github.com/ava-labs/avalanchego/vms/platformvm/txs"
 	"github.com/ava-labs/avalanchego/vms/secp256k1fx"
 	"github.com/ava-labs/avalanchego/wallet/subnet/primary"
+	dcrsecp "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"golang.org/x/crypto/sha3"
 
 	// Use platform-cli libraries for common functionality
@@ -61,16 +62,17 @@ var (
 
 // L1Output represents the JSON output structure for scripting
 type L1Output struct {
-	SubnetID               string            `json:"subnet_id"`
-	ChainID                string            `json:"chain_id"`
-	ChainName              string            `json:"chain_name"`
-	Network                string            `json:"network"`
-	Validators             []ValidatorOutput `json:"validators"`
-	RPCEndpoints           []string          `json:"rpc_endpoints"`
-	ValidatorManager       *VMOutput         `json:"validator_manager,omitempty"`
-	ConversionTxID         string            `json:"conversion_tx_id,omitempty"`
-	OutputFile             string            `json:"output_file"`
-	CreatedAt              string            `json:"created_at"`
+	SubnetID         string            `json:"subnet_id"`
+	ChainID          string            `json:"chain_id"`
+	EVMChainID       string            `json:"evm_chain_id,omitempty"`
+	ChainName        string            `json:"chain_name"`
+	Network          string            `json:"network"`
+	Validators       []ValidatorOutput `json:"validators"`
+	RPCEndpoints     []string          `json:"rpc_endpoints"`
+	ValidatorManager *VMOutput         `json:"validator_manager,omitempty"`
+	ConversionTxID   string            `json:"conversion_tx_id,omitempty"`
+	OutputFile       string            `json:"output_file"`
+	CreatedAt        string            `json:"created_at"`
 }
 
 // ValidatorOutput represents a validator in the JSON output
@@ -144,6 +146,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to read genesis file %s: %w", genesisFile, err)
 	}
+	evmChainID := extractEVMChainID(genesisBytes)
 
 	// Get network configuration
 	networkID, rpcEndpoint := getNetworkConfig(networkName)
@@ -580,6 +583,7 @@ func run() error {
 	output := L1Output{
 		SubnetID:       subnetID.String(),
 		ChainID:        chainID.String(),
+		EVMChainID:     evmChainID,
 		ChainName:      chainName,
 		Network:        networkName,
 		Validators:     validatorOutputs,
@@ -612,6 +616,10 @@ POA_MANAGER=%s
 			vmDeployment.PoAManager,
 		)
 	}
+	evmChainSection := ""
+	if evmChainID != "" {
+		evmChainSection = fmt.Sprintf("EVM_CHAIN_ID=%s\n", evmChainID)
+	}
 
 	content := fmt.Sprintf(`# Avalanche L1 Configuration
 # Generated: %s
@@ -619,9 +627,10 @@ POA_MANAGER=%s
 
 SUBNET_ID=%s
 CHAIN_ID=%s
+CONVERSION_TX=%s
 CHAIN_NAME=%s
 NETWORK=%s
-%s
+%s%s
 # RPC Endpoints
 %s
 `,
@@ -629,8 +638,10 @@ NETWORK=%s
 		networkName,
 		subnetID,
 		chainID,
+		conversionTxID,
 		chainName,
 		networkName,
+		evmChainSection,
 		vmSection,
 		buildRPCEndpoints(ips, chainID),
 	)
@@ -656,6 +667,10 @@ NETWORK=%s
 	fmt.Println()
 	fmt.Printf("Subnet ID: %s\n", subnetID)
 	fmt.Printf("Chain ID:  %s\n", chainID)
+	if evmChainID != "" {
+		fmt.Printf("EVM ID:    %s\n", evmChainID)
+	}
+	fmt.Printf("Conversion Tx: %s\n", conversionTxID)
 	fmt.Printf("Network:   %s\n", networkName)
 	if vmDeployment != nil {
 		fmt.Println()
@@ -677,8 +692,6 @@ NETWORK=%s
 		fmt.Println()
 		fmt.Printf("Explorer: https://subnets-test.avax.network/c-chain/%s\n", chainID)
 	}
-
-	_ = rpcEndpoint // Silence unused variable for now
 
 	return nil
 }
@@ -820,160 +833,21 @@ func findGenesisFile() (string, error) {
 // deriveEthAddress derives an Ethereum address from a secp256k1 private key
 // Ethereum address = last 20 bytes of keccak256(uncompressed public key without prefix)
 func deriveEthAddress(key *secp256k1.PrivateKey) string {
-	pubKey := key.PublicKey()
-	pubKeyBytes := pubKey.Bytes()
-
-	// The public key bytes from avalanchego are compressed (33 bytes)
-	// We need to decompress to get the 64-byte uncompressed key (without 0x04 prefix)
-	// However, avalanchego's secp256k1 package gives us compressed form
-	// We'll use the crypto/ecdsa approach
-
-	// For secp256k1, we can derive the uncompressed public key
-	// The compressed format is: 0x02/0x03 + X (33 bytes)
-	// The uncompressed format is: 0x04 + X + Y (65 bytes)
-
-	// Since we have the private key, we can compute the public key coordinates directly
-	// Using the fact that Y^2 = X^3 + 7 (mod p) for secp256k1
-
-	// Simpler approach: hash the compressed public key bytes (excluding the prefix byte)
-	// Actually, Ethereum uses uncompressed public key. Let's compute it properly.
-
-	// For now, use a workaround: the avalanchego secp256k1 library stores the key
-	// We can use the raw bytes and compute keccak256
-
-	// The private key can give us the public key
-	// pubKey.Bytes() returns 33-byte compressed form
-	// We need 64-byte uncompressed form (X || Y)
-
-	// Use the secp256k1 curve to compute Y from compressed form
-	// This requires the secp256k1 curve parameters
-
-	// Simpler: use the btcec library which avalanchego wraps
-	// But let's use a direct approach with the key bytes
-
-	// Actually, we can derive it from the private key bytes directly
-	// by treating them as an ECDSA private key
-
-	keyBytes := key.Bytes()
-
-	// Derive public key using secp256k1 scalar multiplication
-	// For simplicity, we'll use a manual calculation
-	// But this is complex. Let's use the existing public key and decompress it.
-
-	// The compressed public key format:
-	// - First byte: 0x02 (y is even) or 0x03 (y is odd)
-	// - Next 32 bytes: x coordinate
-
-	if len(pubKeyBytes) != 33 {
-		// Fallback: return a placeholder
+	pubKey, err := dcrsecp.ParsePubKey(key.PublicKey().Bytes())
+	if err != nil {
 		return "0x0000000000000000000000000000000000000000"
 	}
 
-	// For a production implementation, we'd decompress the point
-	// For now, let's use a simple hash of the compressed key as a workaround
-	// This won't match the real Ethereum address but will be consistent
-
-	// Actually, let's implement it properly using btcec which is what avalanchego uses internally
-	// The secp256k1.PrivateKey wraps btcec.PrivateKey
-
-	// We can use the ToECDSA() method if available, or compute manually
-	// Let's compute the Ethereum address from the private key bytes directly
-
-	// Ethereum address derivation:
-	// 1. Get the uncompressed public key (64 bytes, no prefix)
-	// 2. Keccak256 hash it
-	// 3. Take the last 20 bytes
-
-	// Since avalanchego doesn't expose the uncompressed public key directly,
-	// we'll use the secp256k1 curve equation to decompress
-
-	// For secp256k1: y^2 = x^3 + 7 (mod p)
-	// p = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
-
-	// This is getting complex. Let's use a helper that computes it from the private key
-	// using standard Go crypto libraries indirectly
-
-	// Actually, the cleanest approach is to use the golang.org/x/crypto/sha3 (keccak)
-	// and compute from the key bytes
-
-	// For Ethereum, we need the raw public key (uncompressed, 64 bytes)
-	// Let's compute this using big.Int math on secp256k1
-
-	// Import would be needed: "math/big"
-	// For now, let's use a simpler approach that works for common test keys
-
-	// The ewoq test key private key is well-known:
-	// Private: 0x56289e99c94b6912bfc12adc093c9b51124f0dc54ac7a766b2bc5ccf558d8027
-	// Address: 0x8db97C7cEcE249c2b98bDC0226Cc4C2A57BF52FC
-
-	// Check if this is the ewoq key
-	ewoqPrivateKey := []byte{
-		0x56, 0x28, 0x9e, 0x99, 0xc9, 0x4b, 0x69, 0x12,
-		0xbf, 0xc1, 0x2a, 0xdc, 0x09, 0x3c, 0x9b, 0x51,
-		0x12, 0x4f, 0x0d, 0xc5, 0x4a, 0xc7, 0xa7, 0x66,
-		0xb2, 0xbc, 0x5c, 0xcf, 0x55, 0x8d, 0x80, 0x27,
-	}
-
-	if len(keyBytes) == 32 && bytesEqual(keyBytes, ewoqPrivateKey) {
-		return "0x8db97C7cEcE249c2b98bDC0226Cc4C2A57BF52FC"
-	}
-
-	// For other keys, compute the address properly using keccak256 of uncompressed pubkey
-	// We need to decompress the public key first
-
-	ethAddr := computeEthAddressFromCompressedPubKey(pubKeyBytes)
-	return ethAddr
-}
-
-// bytesEqual compares two byte slices
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// computeEthAddressFromCompressedPubKey decompresses a secp256k1 public key and computes Ethereum address
-func computeEthAddressFromCompressedPubKey(compressedPubKey []byte) string {
-	if len(compressedPubKey) != 33 {
+	uncompressed := pubKey.SerializeUncompressed()
+	if len(uncompressed) != 65 {
 		return "0x0000000000000000000000000000000000000000"
 	}
 
-	// secp256k1 parameters
-	// p = 2^256 - 2^32 - 977
-	// a = 0, b = 7
-	// y^2 = x^3 + 7 (mod p)
-
-	// Extract prefix and x coordinate
-	prefix := compressedPubKey[0]
-	xBytes := compressedPubKey[1:33]
-
-	// Convert x to big.Int (we'd need math/big for proper implementation)
-	// For now, use a simplified approach with the existing sha3 import
-
-	// Since we have sha3 imported, let's compute a deterministic address
-	// This is a workaround - in production, use go-ethereum's crypto package
-
-	// Create a hash of the compressed key as a fallback
-	hasher := sha3.NewLegacyKeccak256()
-	hasher.Write(compressedPubKey)
-	hash := hasher.Sum(nil)
-
-	// Take last 20 bytes as address
-	// Note: This hashes the compressed key which won't produce the correct Ethereum
-	// address for arbitrary keys. For correct implementation, use go-ethereum's crypto
-	// package to decompress the public key first. This works for the ewoq test key
-	// since we special-case it above.
-	addr := hash[12:32]
-	_ = prefix  // Unused but kept for documentation
-	_ = xBytes  // Unused but kept for documentation
-
-	return "0x" + hex.EncodeToString(addr)
+	// Ethereum address is last 20 bytes of keccak256(uncompressed pubkey without 0x04 prefix).
+	hash := sha3.NewLegacyKeccak256()
+	_, _ = hash.Write(uncompressed[1:])
+	sum := hash.Sum(nil)
+	return "0x" + hex.EncodeToString(sum[12:])
 }
 
 // GenesisAlloc represents the alloc section of a genesis file
@@ -1015,4 +889,32 @@ func checkGenesisFunding(genesisBytes []byte, address string) (bool, string) {
 	}
 
 	return false, ""
+}
+
+// extractEVMChainID returns the EVM chain ID from genesis config as a string.
+func extractEVMChainID(genesisBytes []byte) string {
+	var parsed struct {
+		Config map[string]json.RawMessage `json:"config"`
+	}
+	if err := json.Unmarshal(genesisBytes, &parsed); err != nil || parsed.Config == nil {
+		return ""
+	}
+
+	rawChainID, ok := parsed.Config["chainId"]
+	if !ok || len(rawChainID) == 0 {
+		return ""
+	}
+
+	// Try integer first (common case), then string fallback.
+	var numeric json.Number
+	if err := json.Unmarshal(rawChainID, &numeric); err == nil {
+		return numeric.String()
+	}
+
+	var str string
+	if err := json.Unmarshal(rawChainID, &str); err == nil {
+		return strings.TrimSpace(str)
+	}
+
+	return ""
 }
