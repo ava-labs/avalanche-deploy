@@ -49,6 +49,7 @@ spec:
             - --api-health-enabled={{ .Values.l1_rpc_config.apiHealthEnabled }}
             - --index-enabled={{ .Values.l1_rpc_config.indexEnabled }}
             - --db-dir=/data/db
+            - --plugin-dir=/avalanchego/build/plugins
             # Partial sync for L1 - only sync P-Chain from Primary Network
             {{- if .Values.l1_rpc_config.partialSyncPrimaryNetwork }}
             - --partial-sync-primary-network={{ .Values.l1_rpc_config.partialSyncPrimaryNetwork }}

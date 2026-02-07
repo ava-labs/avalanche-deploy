@@ -9,9 +9,10 @@ network: fuji
 
 # AvalancheGo image for L1
 l1_rpc_image:
-  # subnet-evm is bundled with avalanchego in modern releases.
-  repository: avaplatform/avalanchego
-  tag: "v1.14.1"
+  # Use bundled subnet-evm + avalanchego image for L1 chains.
+  repository: avaplatform/subnet-evm_avalanchego
+  # Format: subnet-evm version + avalanchego version.
+  tag: "v0.8.0_v1.14.0"
   pullPolicy: IfNotPresent
 
 # Resource limits for L1 RPC (lower than validators)

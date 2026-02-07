@@ -8,6 +8,8 @@ K8S_DIR="$(dirname "$SCRIPT_DIR")"
 RELEASE="l1-validators"
 L1_ENV="l1.env"
 TIMEOUT_SECONDS="300"
+L1_IMAGE_REPOSITORY="avaplatform/subnet-evm_avalanchego"
+L1_IMAGE_TAG="v0.8.0_v1.14.0"
 
 usage() {
     cat <<USAGE
@@ -15,6 +17,8 @@ Usage: $0 [options]
   --release=NAME         Helm release name for L1 validators (default: l1-validators)
   --env=FILE             Path to l1.env output file (default: l1.env)
   --timeout=SECONDS      Rollout timeout in seconds (default: 300)
+  --image-repo=IMAGE     AvalancheGo image repository override for validators
+  --image-tag=TAG        AvalancheGo image tag override for validators
   -h, --help             Show this help
 USAGE
 }
@@ -24,6 +28,8 @@ while [[ $# -gt 0 ]]; do
         --release=*) RELEASE="${1#*=}"; shift ;;
         --env=*) L1_ENV="${1#*=}"; shift ;;
         --timeout=*) TIMEOUT_SECONDS="${1#*=}"; shift ;;
+        --image-repo=*) L1_IMAGE_REPOSITORY="${1#*=}"; shift ;;
+        --image-tag=*) L1_IMAGE_TAG="${1#*=}"; shift ;;
         -h|--help)
             usage
             exit 0
@@ -97,12 +103,14 @@ fi
 echo "Gathering NodeIDs..."
 BOOTSTRAP_IDS=""
 BOOTSTRAP_IPS=""
+pod_count=0
 
 for pod in $PODS; do
     response="$(rpc_post "$pod" "/ext/info" '{"jsonrpc":"2.0","id":1,"method":"info.getNodeID"}')"
 
     node_id="$(echo "$response" | sed -n 's/.*"nodeID":"\([^"]*\)".*/\1/p')"
     pod_ip="$(kubectl get pod "$pod" -o jsonpath='{.status.podIP}')"
+    pod_count=$((pod_count + 1))
 
     if [[ -z "$node_id" ]]; then
         echo "Failed to read NodeID from pod: $pod"
@@ -120,6 +128,15 @@ for pod in $PODS; do
     fi
 done
 
+if [[ "$pod_count" -le 1 ]]; then
+    echo "  Single validator detected; omitting bootstrap peer flags."
+    BOOTSTRAP_IDS=""
+    BOOTSTRAP_IPS=""
+fi
+
+escaped_bootstrap_ids="${BOOTSTRAP_IDS//,/\\,}"
+escaped_bootstrap_ips="${BOOTSTRAP_IPS//,/\\,}"
+
 echo ""
 echo "Updating L1 ConfigMap..."
 kubectl create configmap l1-config \
@@ -132,11 +149,13 @@ kubectl create configmap l1-config \
 echo "Upgrading Helm release..."
 helm upgrade "$RELEASE" "$K8S_DIR/helm/avalanche-validator" \
     --reuse-values \
+    --set "l1_validator_image.repository=$L1_IMAGE_REPOSITORY" \
+    --set "l1_validator_image.tag=$L1_IMAGE_TAG" \
     --set "l1.enabled=true" \
     --set "l1.subnetId=$SUBNET_ID" \
     --set "l1.chainId=$CHAIN_ID" \
-    --set "l1.bootstrapIds=$BOOTSTRAP_IDS" \
-    --set "l1.bootstrapIps=$BOOTSTRAP_IPS"
+    --set-string "l1.bootstrapIds=$escaped_bootstrap_ids" \
+    --set-string "l1.bootstrapIps=$escaped_bootstrap_ips"
 
 statefulset_name="$(kubectl get statefulset -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/name=l1-validator" -o jsonpath='{.items[0].metadata.name}')"
 if [[ -z "$statefulset_name" ]]; then
