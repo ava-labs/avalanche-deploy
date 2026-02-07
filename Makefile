@@ -34,8 +34,10 @@ K8S_L1_RELEASE ?= l1-validators
 K8S_L1_RPC_RELEASE ?= l1-rpc
 K8S_PRIMARY_RELEASE ?= primary-validators
 K8S_PRIMARY_RPC_RELEASE ?= primary-rpc
-K8S_L1_VALIDATOR_REPLICAS ?= 3
-K8S_L1_RPC_REPLICAS ?= 2
+K8S_L1_VALIDATOR_VALUES_FILE ?= ./helm/avalanche-validator/values-kind.yaml
+K8S_L1_RPC_VALUES_FILE ?= ./helm/avalanche-rpc/values-kind.yaml
+K8S_L1_VALIDATOR_REPLICAS ?= 1
+K8S_L1_RPC_REPLICAS ?= 1
 K8S_PRIMARY_VALIDATOR_REPLICAS ?= 2
 K8S_PRIMARY_RPC_REPLICAS ?= 2
 K8S_L1_ENV_FILE ?= l1.env
@@ -370,9 +372,11 @@ k8s-kind:
 
 k8s-l1-deploy:
 	@cd "$(K8S_DIR)" && helm upgrade --install "$(K8S_L1_RELEASE)" ./helm/avalanche-validator \
+		-f "$(K8S_L1_VALIDATOR_VALUES_FILE)" \
 		--set "l1_validator_replicas=$(K8S_L1_VALIDATOR_REPLICAS)" \
 		--set "network=$(NETWORK)"
 	@cd "$(K8S_DIR)" && helm upgrade --install "$(K8S_L1_RPC_RELEASE)" ./helm/avalanche-rpc \
+		-f "$(K8S_L1_RPC_VALUES_FILE)" \
 		--set "l1_rpc_replicas=$(K8S_L1_RPC_REPLICAS)" \
 		--set "network=$(NETWORK)"
 
@@ -717,6 +721,8 @@ help-all:
 	@echo "  K8S_KIND_MAP_HOST_PORTS=false map host ports when creating kind cluster"
 	@echo "  K8S_KIND_HTTP_PORT   host HTTP API port for make k8s-kind"
 	@echo "  K8S_KIND_STAKING_PORT host staking/P2P port for make k8s-kind"
+	@echo "  K8S_L1_VALIDATOR_VALUES_FILE values file for make k8s-l1-deploy validator chart"
+	@echo "  K8S_L1_RPC_VALUES_FILE values file for make k8s-l1-deploy rpc chart"
 	@echo "  K8S_L1_KEY_NAME      optional platform-cli key for make k8s-l1-create"
 	@echo "  K8S_* variables      Release names/replicas for k8s wrapper targets"
 	@echo ""
