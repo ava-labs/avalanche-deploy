@@ -24,6 +24,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	// Use platform-cli libraries for common functionality
+	pkgkeystore "github.com/ava-labs/platform-cli/pkg/keystore"
 	"github.com/ava-labs/platform-cli/pkg/network"
 	pkgwallet "github.com/ava-labs/platform-cli/pkg/wallet"
 )
@@ -39,6 +40,7 @@ type Config struct {
 
 var (
 	networkName            string
+	keyName                string
 	privateKey             string
 	privateKeyFile         string
 	configFile             string
@@ -90,8 +92,9 @@ type VMOutput struct {
 
 func main() {
 	flag.StringVar(&networkName, "network", "fuji", "Network: fuji or mainnet")
-	flag.StringVar(&privateKey, "private-key", "", "Private key (PrivateKey-... or 0x... format)")
-	flag.StringVar(&privateKeyFile, "private-key-file", "", "File containing private key")
+	flag.StringVar(&keyName, "key-name", "", "Key name from platform-cli keystore (~/.platform/keys, preferred)")
+	flag.StringVar(&privateKey, "private-key", "", "Private key (PrivateKey-... or 0x... format, deprecated; prefer --key-name)")
+	flag.StringVar(&privateKeyFile, "private-key-file", "", "File containing private key (deprecated; prefer --key-name)")
 	flag.StringVar(&configFile, "config", "", "Config file (YAML/JSON)")
 	flag.StringVar(&outputFile, "output", "l1.env", "Output file for subnet/chain IDs")
 	flag.StringVar(&validatorIPs, "validators", "", "Comma-separated validator IPs")
@@ -701,7 +704,15 @@ NETWORK=%s
 func loadPrivateKey() (*secp256k1.PrivateKey, error) {
 	var keyStr string
 
-	// Priority: flag > file > env
+	// Priority: key manager (--key-name) > default key > legacy raw key sources.
+	if keyName != "" {
+		return loadPrivateKeyFromKeystore(keyName)
+	}
+	if ks, err := pkgkeystore.Load(); err == nil {
+		if defaultKey := ks.GetDefault(); defaultKey != "" {
+			return loadPrivateKeyFromKeystore(defaultKey)
+		}
+	}
 	if privateKey != "" {
 		keyStr = privateKey
 	} else if privateKeyFile != "" {
@@ -713,7 +724,7 @@ func loadPrivateKey() (*secp256k1.PrivateKey, error) {
 	} else if envKey := os.Getenv("AVALANCHE_PRIVATE_KEY"); envKey != "" {
 		keyStr = envKey
 	} else {
-		return nil, fmt.Errorf("no private key provided. Use --private-key, --private-key-file, or AVALANCHE_PRIVATE_KEY env var")
+		return nil, fmt.Errorf("no key provided. Use --key-name (preferred), --private-key, --private-key-file, or AVALANCHE_PRIVATE_KEY env var")
 	}
 
 	// Check for balance override from env
@@ -730,6 +741,44 @@ func loadPrivateKey() (*secp256k1.PrivateKey, error) {
 	}
 
 	return pkgwallet.ToPrivateKey(keyBytes)
+}
+
+func loadPrivateKeyFromKeystore(name string) (*secp256k1.PrivateKey, error) {
+	if err := pkgkeystore.ValidateKeyName(name); err != nil {
+		return nil, err
+	}
+
+	ks, err := pkgkeystore.Load()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load keystore: %w", err)
+	}
+	if !ks.HasKey(name) {
+		return nil, fmt.Errorf("key %q not found in keystore", name)
+	}
+
+	var password []byte
+	if ks.IsEncrypted(name) {
+		envPwd := os.Getenv("PLATFORM_CLI_KEY_PASSWORD")
+		if envPwd == "" {
+			return nil, fmt.Errorf("key %q is encrypted; set PLATFORM_CLI_KEY_PASSWORD", name)
+		}
+		password = []byte(envPwd)
+		defer clearBytes(password)
+	}
+
+	keyBytes, err := ks.LoadKey(name, password)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load key %q from keystore: %w", name, err)
+	}
+	defer clearBytes(keyBytes)
+
+	return pkgwallet.ToPrivateKey(keyBytes)
+}
+
+func clearBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
 }
 
 func hexToBytes(hexStr string) ([]byte, error) {
