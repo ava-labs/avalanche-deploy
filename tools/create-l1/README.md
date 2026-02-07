@@ -23,8 +23,9 @@ go build -o create-l1 .
 ### Basic Usage
 
 ```bash
-# Set your private key (P-Chain format)
-export AVALANCHE_PRIVATE_KEY=PrivateKey-...
+# Create/import a deployer key in platform-cli keystore
+platform keys import --name l1-deployer
+# or: platform keys generate --name l1-deployer
 
 # Set validator IPs
 export VALIDATOR_1_IP=1.2.3.4
@@ -32,7 +33,7 @@ export VALIDATOR_2_IP=1.2.3.5
 export VALIDATOR_3_IP=1.2.3.6
 
 # Create L1 on Fuji
-./create-l1 --network=fuji --genesis=../../configs/l1/genesis/genesis.json --chain-name=my-l1
+./create-l1 --network=fuji --key-name=l1-deployer --genesis=../../configs/l1/genesis/genesis.json --chain-name=my-l1
 ```
 
 ### All Options
@@ -40,7 +41,7 @@ export VALIDATOR_3_IP=1.2.3.6
 ```bash
 ./create-l1 \
   --network=fuji \                    # fuji or mainnet
-  --private-key=PrivateKey-... \      # Or use --private-key-file or AVALANCHE_PRIVATE_KEY
+  --key-name=l1-deployer \            # Preferred: key from platform-cli keystore
   --validators=1.2.3.4,1.2.3.5 \      # Or use VALIDATOR_*_IP env vars
   --genesis=../../configs/l1/genesis/genesis.json \
   --chain-name=my-l1 \                # Name for your L1
@@ -51,22 +52,36 @@ export VALIDATOR_3_IP=1.2.3.6
 
 Default genesis path: `../../configs/l1/genesis/genesis.json`
 
-### Private Key Options
+### Key Source Options
 
-1. **Environment variable** (recommended):
+1. **Keystore key name** (recommended):
+   ```bash
+   ./create-l1 --key-name=l1-deployer
+   ```
+
+2. **Default key from platform-cli keystore**:
+   If `platform keys default --name <key>` is set, `create-l1` uses it automatically.
+
+3. **Environment variable**:
    ```bash
    export AVALANCHE_PRIVATE_KEY=PrivateKey-ewoqjP7PxY4yr3iLTpLisriqt94hdyDFNgchSxGGztUrTXtNN
    ```
 
-2. **File**:
+4. **File**:
    ```bash
    ./create-l1 --private-key-file=~/.avalanche/key.txt
    ```
 
-3. **Flag** (not recommended for production):
+5. **Flag** (deprecated / not recommended):
    ```bash
    ./create-l1 --private-key=PrivateKey-...
    ```
+
+For encrypted keystore keys, set:
+
+```bash
+export PLATFORM_CLI_KEY_PASSWORD='your-password'
+```
 
 ### Validator IPs Options
 

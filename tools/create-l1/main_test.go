@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ava-labs/avalanchego/utils/crypto/secp256k1"
+	pkgkeystore "github.com/ava-labs/platform-cli/pkg/keystore"
 )
 
 func TestDeriveEthAddressEwoq(t *testing.T) {
@@ -169,5 +170,97 @@ func assertSameFile(t *testing.T, gotPath, wantPath string) {
 	}
 	if !os.SameFile(gotInfo, wantInfo) {
 		t.Fatalf("paths do not reference the same file: got %q want %q", gotPath, wantPath)
+	}
+}
+
+func TestLoadPrivateKeyFromKeystoreByName(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	ks, err := pkgkeystore.Load()
+	if err != nil {
+		t.Fatalf("pkgkeystore.Load() error = %v", err)
+	}
+
+	keyBytes, err := hex.DecodeString("56289e99c94b6912bfc12adc093c9b51124f0dc54ac7a766b2bc5ccf558d8027")
+	if err != nil {
+		t.Fatalf("hex.DecodeString() error = %v", err)
+	}
+	if err := ks.ImportKey("deployer", keyBytes, nil); err != nil {
+		t.Fatalf("ks.ImportKey() error = %v", err)
+	}
+
+	origKeyName := keyName
+	origPrivateKey := privateKey
+	origPrivateKeyFile := privateKeyFile
+	defer func() {
+		keyName = origKeyName
+		privateKey = origPrivateKey
+		privateKeyFile = origPrivateKeyFile
+	}()
+
+	keyName = "deployer"
+	privateKey = ""
+	privateKeyFile = ""
+
+	got, err := loadPrivateKey()
+	if err != nil {
+		t.Fatalf("loadPrivateKey() error = %v", err)
+	}
+
+	want, err := secp256k1.ToPrivateKey(keyBytes)
+	if err != nil {
+		t.Fatalf("secp256k1.ToPrivateKey() error = %v", err)
+	}
+	if got.Address() != want.Address() {
+		t.Fatalf("loadPrivateKey() address = %s, want %s", got.Address(), want.Address())
+	}
+}
+
+func TestLoadPrivateKeyPrefersDefaultKeystoreOverEnv(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	ks, err := pkgkeystore.Load()
+	if err != nil {
+		t.Fatalf("pkgkeystore.Load() error = %v", err)
+	}
+
+	defaultKeyBytes, err := hex.DecodeString("56289e99c94b6912bfc12adc093c9b51124f0dc54ac7a766b2bc5ccf558d8027")
+	if err != nil {
+		t.Fatalf("hex.DecodeString(default) error = %v", err)
+	}
+	if err := ks.ImportKey("default", defaultKeyBytes, nil); err != nil {
+		t.Fatalf("ks.ImportKey(default) error = %v", err)
+	}
+	if err := ks.SetDefault("default"); err != nil {
+		t.Fatalf("ks.SetDefault() error = %v", err)
+	}
+
+	envKeyHex := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	t.Setenv("AVALANCHE_PRIVATE_KEY", "0x"+envKeyHex)
+
+	origKeyName := keyName
+	origPrivateKey := privateKey
+	origPrivateKeyFile := privateKeyFile
+	defer func() {
+		keyName = origKeyName
+		privateKey = origPrivateKey
+		privateKeyFile = origPrivateKeyFile
+	}()
+
+	keyName = ""
+	privateKey = ""
+	privateKeyFile = ""
+
+	got, err := loadPrivateKey()
+	if err != nil {
+		t.Fatalf("loadPrivateKey() error = %v", err)
+	}
+
+	want, err := secp256k1.ToPrivateKey(defaultKeyBytes)
+	if err != nil {
+		t.Fatalf("secp256k1.ToPrivateKey(default) error = %v", err)
+	}
+	if got.Address() != want.Address() {
+		t.Fatalf("loadPrivateKey() address = %s, want default key address %s", got.Address(), want.Address())
 	}
 }
