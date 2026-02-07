@@ -47,7 +47,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 CREATE_L1="$ROOT_DIR/tools/create-l1/create-l1"
-if [[ ! -f "$CREATE_L1" ]]; then
+
+needs_build=false
+if [[ ! -x "$CREATE_L1" ]]; then
+    needs_build=true
+elif [[ "$ROOT_DIR/tools/create-l1/main.go" -nt "$CREATE_L1" ]]; then
+    needs_build=true
+elif [[ "$ROOT_DIR/tools/create-l1/go.mod" -nt "$CREATE_L1" ]]; then
+    needs_build=true
+elif [[ -f "$ROOT_DIR/tools/create-l1/go.sum" && "$ROOT_DIR/tools/create-l1/go.sum" -nt "$CREATE_L1" ]]; then
+    needs_build=true
+elif ! "$CREATE_L1" --help 2>&1 | grep -q -- "-key-name"; then
+    # Existing binary is from an older build and doesn't support key manager flow.
+    needs_build=true
+fi
+
+if [[ "$needs_build" == "true" ]]; then
     echo "Building create-l1 tool..."
     (cd "$ROOT_DIR/tools/create-l1" && go build -o create-l1 .)
 fi
