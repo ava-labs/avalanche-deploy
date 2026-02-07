@@ -41,8 +41,6 @@ type Config struct {
 var (
 	networkName            string
 	keyName                string
-	privateKey             string
-	privateKeyFile         string
 	configFile             string
 	outputFile             string
 	validatorIPs           string
@@ -93,8 +91,6 @@ type VMOutput struct {
 func main() {
 	flag.StringVar(&networkName, "network", "fuji", "Network: fuji or mainnet")
 	flag.StringVar(&keyName, "key-name", "", "Key name from platform-cli keystore (~/.platform/keys, preferred)")
-	flag.StringVar(&privateKey, "private-key", "", "Private key (PrivateKey-... or 0x... format, deprecated; prefer --key-name)")
-	flag.StringVar(&privateKeyFile, "private-key-file", "", "File containing private key (deprecated; prefer --key-name)")
 	flag.StringVar(&configFile, "config", "", "Config file (YAML/JSON)")
 	flag.StringVar(&outputFile, "output", "l1.env", "Output file for subnet/chain IDs")
 	flag.StringVar(&validatorIPs, "validators", "", "Comma-separated validator IPs")
@@ -702,9 +698,7 @@ NETWORK=%s
 }
 
 func loadPrivateKey() (*secp256k1.PrivateKey, error) {
-	var keyStr string
-
-	// Priority: key manager (--key-name) > default key > legacy raw key sources.
+	// Priority: key manager (--key-name) > default key > env fallback.
 	if keyName != "" {
 		return loadPrivateKeyFromKeystore(keyName)
 	}
@@ -713,29 +707,20 @@ func loadPrivateKey() (*secp256k1.PrivateKey, error) {
 			return loadPrivateKeyFromKeystore(defaultKey)
 		}
 	}
-	if privateKey != "" {
-		keyStr = privateKey
-	} else if privateKeyFile != "" {
-		data, err := os.ReadFile(privateKeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read key file: %w", err)
-		}
-		keyStr = strings.TrimSpace(string(data))
-	} else if envKey := os.Getenv("AVALANCHE_PRIVATE_KEY"); envKey != "" {
-		keyStr = envKey
-	} else {
-		return nil, fmt.Errorf("no key provided. Use --key-name (preferred), --private-key, --private-key-file, or AVALANCHE_PRIVATE_KEY env var")
-	}
-
-	// Check for balance override from env
+	// Check for balance override from env.
 	if envBalance := os.Getenv("L1_VALIDATOR_BALANCE_AVAX"); envBalance != "" && balanceAVAX == 1.0 {
 		if val, err := parseFloat64(envBalance); err == nil {
 			balanceAVAX = val
 		}
 	}
 
-	// Use platform-cli wallet package for key parsing
-	keyBytes, err := pkgwallet.ParsePrivateKey(keyStr)
+	envKey := os.Getenv("AVALANCHE_PRIVATE_KEY")
+	if envKey == "" {
+		return nil, fmt.Errorf("no key provided. Use --key-name (preferred), set a platform-cli default key, or AVALANCHE_PRIVATE_KEY env var")
+	}
+
+	// Use platform-cli wallet package for env-key parsing.
+	keyBytes, err := pkgwallet.ParsePrivateKey(envKey)
 	if err != nil {
 		return nil, err
 	}

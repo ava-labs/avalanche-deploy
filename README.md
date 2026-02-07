@@ -28,14 +28,16 @@ make infra CLOUD=$CLOUD
 make deploy CLOUD=$CLOUD NETWORK=$NETWORK
 make create-l1
 
-# Required for create-l1
-export AVALANCHE_PRIVATE_KEY=PrivateKey-...
+# Recommended key flow (platform-cli keystore)
+platform keys import --name l1-deployer
+platform keys default --name l1-deployer
 
 # Use terraform outputs for validator IPs
 VALIDATORS=$(cd terraform/$CLOUD && terraform output -json validator_ips | jq -r 'join(",")')
 
 ./tools/create-l1/create-l1 \
   --network=$NETWORK \
+  --key-name=l1-deployer \
   --validators="$VALIDATORS" \
   --genesis=configs/l1/genesis/genesis.json \
   --chain-name=my-l1 \

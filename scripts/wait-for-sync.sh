@@ -54,9 +54,9 @@ while true; do
         echo "All chains bootstrapped!"
         echo ""
         echo "Next step:"
+        echo "  platform keys default --name <key-name>"
         echo "  make create-l1"
-        echo "  export AVALANCHE_PRIVATE_KEY='PrivateKey-...'"
-        echo "  cd tools/create-l1 && ./create-l1 --network=fuji --validators=\$VALIDATORS"
+        echo "  cd tools/create-l1 && ./create-l1 --network=fuji --key-name=<key-name> --validators=\$VALIDATORS"
         exit 0
     fi
 

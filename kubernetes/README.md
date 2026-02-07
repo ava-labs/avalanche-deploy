@@ -25,7 +25,7 @@ Use this when you want Kubernetes-hosted Primary Network nodes.
 - `kubectl` connected to your cluster
 - `helm` v3+
 - For local testing: `kind` and Docker
-- For L1 creation: funded P-Chain key in `AVALANCHE_PRIVATE_KEY`
+- For L1 creation: funded key in platform-cli keystore (recommended) or `AVALANCHE_PRIVATE_KEY` env fallback
 
 ## Make Wrappers (From Repo Root)
 
@@ -45,27 +45,26 @@ make k8s-help-primary
 cd kubernetes
 
 # 1) Create local cluster
-./scripts/create-kind-cluster.sh --name=avalanche-l1 --image=kindest/node:v1.35.0 --workers=3
+./scripts/create-kind-cluster.sh --name=avalanche-l1 --image=kindest/node:v1.34.0 --workers=1
 
 # 2) Deploy L1 validators + RPC
-helm install l1-validators ./helm/avalanche-validator \
-  --set l1_validator_replicas=3 \
-  --set network=fuji
+helm upgrade --install l1-validators ./helm/avalanche-validator -f ./helm/avalanche-validator/values-kind.yaml --set network=fuji
 
-helm install l1-rpc ./helm/avalanche-rpc \
-  --set l1_rpc_replicas=2 \
-  --set network=fuji
+helm upgrade --install l1-rpc ./helm/avalanche-rpc -f ./helm/avalanche-rpc/values-kind.yaml --set network=fuji
 
 # 3) Wait for P-Chain sync on validators
 ./scripts/wait-for-sync.sh --release=l1-validators
 
 # 4) Create L1
-export AVALANCHE_PRIVATE_KEY="PrivateKey-..."
+# Recommended key flow:
+# platform keys import --name l1-deployer
+# platform keys default --name l1-deployer
 ./scripts/create-l1.sh \
   --release=l1-validators \
   --network=fuji \
   --chain-name=mychain \
-  --output=l1.env
+  --output=l1.env \
+  --key-name=l1-deployer
 
 # 5) Configure validators to track the new L1
 ./scripts/configure-l1.sh --release=l1-validators --env=l1.env
@@ -76,6 +75,7 @@ export AVALANCHE_PRIVATE_KEY="PrivateKey-..."
 
 Note: the first `kind` run pulls the node image and can take several minutes depending on network speed.
 If your laptop is resource constrained, start with `--workers=1` and scale up later.
+Host port mapping is disabled by default; use `kubectl port-forward` or pass `--map-host-ports` explicitly.
 
 ### Option B: Existing cluster (non-kind)
 
@@ -182,6 +182,13 @@ Pods pending:
 kubectl describe pod <pod-name>
 ```
 
+If pods are unscheduled with messages like `Insufficient cpu` or `does not have a host assigned`, use the local kind profiles:
+
+```bash
+helm upgrade --install l1-validators ./helm/avalanche-validator -f ./helm/avalanche-validator/values-kind.yaml --set network=fuji
+helm upgrade --install l1-rpc ./helm/avalanche-rpc -f ./helm/avalanche-rpc/values-kind.yaml --set network=fuji
+```
+
 Node not syncing:
 
 ```bash
@@ -193,6 +200,19 @@ Service lookup:
 ```bash
 kubectl get svc
 ```
+
+kind fails with `No such container: <cluster>-control-plane`:
+
+This usually means the Docker daemon API is unhealthy (`docker ps` works, but `docker inspect`/`docker logs` fail).
+
+```bash
+docker run -d --name docker-api-check alpine:3.20 sleep 30
+docker inspect docker-api-check
+docker logs docker-api-check
+docker rm -f docker-api-check
+```
+
+If `inspect` or `logs` fail, restart Docker Desktop and retry `./scripts/create-kind-cluster.sh`.
 
 ## Genesis
 

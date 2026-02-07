@@ -27,6 +27,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if ! command -v curl >/dev/null 2>&1; then
+    echo "Error: curl not found in PATH"
+    exit 1
+fi
+
 red='\033[0;31m'
 green='\033[0;32m'
 yellow='\033[1;33m'
@@ -50,6 +55,33 @@ if [[ -n "$l1_release_pods" ]]; then
     is_l1_release="true"
 fi
 
+rpc_post() {
+    local pod="$1"
+    local endpoint="$2"
+    local payload="$3"
+    local pf_port
+    pf_port="$((20000 + RANDOM % 20000))"
+
+    kubectl port-forward "pod/$pod" "${pf_port}:9650" >/dev/null 2>&1 &
+    local pf_pid=$!
+
+    local response=""
+    for _ in $(seq 1 20); do
+        response="$(curl -s "http://127.0.0.1:${pf_port}${endpoint}" \
+            -X POST -H 'content-type:application/json' \
+            -d "$payload" 2>/dev/null || true)"
+        if [[ -n "$response" ]]; then
+            break
+        fi
+        sleep 0.25
+    done
+
+    kill "$pf_pid" >/dev/null 2>&1 || true
+    wait "$pf_pid" >/dev/null 2>&1 || true
+
+    echo "$response"
+}
+
 echo "--- Pods ---"
 for pod in $pods; do
     pod_status="$(kubectl get pod "$pod" -o jsonpath='{.status.phase}')"
@@ -60,16 +92,10 @@ for pod in $pods; do
         continue
     fi
 
-    p_boot_response="$(kubectl exec "$pod" -- curl -s localhost:9650/ext/info \
-        -X POST -H 'content-type:application/json' \
-        -d '{"jsonrpc":"2.0","id":1,"method":"info.isBootstrapped","params":{"chain":"P"}}' \
-        2>/dev/null || true)"
+    p_boot_response="$(rpc_post "$pod" "/ext/info" '{"jsonrpc":"2.0","id":1,"method":"info.isBootstrapped","params":{"chain":"P"}}')"
     p_boot="$(echo "$p_boot_response" | sed -n 's/.*"isBootstrapped":\([^,}]*\).*/\1/p')"
 
-    node_id_response="$(kubectl exec "$pod" -- curl -s localhost:9650/ext/info \
-        -X POST -H 'content-type:application/json' \
-        -d '{"jsonrpc":"2.0","id":1,"method":"info.getNodeID"}' \
-        2>/dev/null || true)"
+    node_id_response="$(rpc_post "$pod" "/ext/info" '{"jsonrpc":"2.0","id":1,"method":"info.getNodeID"}')"
     node_id="$(echo "$node_id_response" | sed -n 's/.*"nodeID":"\([^"]*\)".*/\1/p')"
 
     if [[ "$p_boot" == "true" ]]; then
@@ -85,10 +111,7 @@ for pod in $pods; do
     echo "  NodeID: $node_id"
 
     if [[ -n "$l1_chain_id" && "$is_l1_release" == "true" ]]; then
-        l1_response="$(kubectl exec "$pod" -- curl -s "localhost:9650/ext/bc/$l1_chain_id/rpc" \
-            -X POST -H 'content-type:application/json' \
-            -d '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' \
-            2>/dev/null || true)"
+        l1_response="$(rpc_post "$pod" "/ext/bc/$l1_chain_id/rpc" '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}')"
         l1_block="$(echo "$l1_response" | sed -n 's/.*"result":"\([^"]*\)".*/\1/p')"
 
         if [[ -n "$l1_block" ]]; then

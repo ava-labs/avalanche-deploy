@@ -72,23 +72,19 @@ primary_validator_securityContext:
 
 # Liveness probe
 primary_validator_livenessProbe:
-  exec:
-    command:
-      - /bin/sh
-      - -c
-      - "curl -sf localhost:9650/ext/info -X POST -H 'content-type:application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.getNodeID\"}'"
+  httpGet:
+    path: /ext/health/liveness
+    port: http
   initialDelaySeconds: 30
   periodSeconds: 10
   timeoutSeconds: 5
   failureThreshold: 6
 
-# Readiness probe - check P-Chain bootstrap
+# Readiness probe
 primary_validator_readinessProbe:
-  exec:
-    command:
-      - /bin/sh
-      - -c
-      - "curl -sf localhost:9650/ext/info -X POST -H 'content-type:application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.isBootstrapped\",\"params\":{\"chain\":\"P\"}}' | grep -q 'true'"
+  httpGet:
+    path: /ext/health/readiness
+    port: http
   initialDelaySeconds: 60
   periodSeconds: 10
   timeoutSeconds: 5

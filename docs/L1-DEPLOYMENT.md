@@ -125,13 +125,15 @@ make status   # Wait for "P:OK" on all nodes
 ### 5. Create Your L1
 
 ```bash
-# Set your funded P-Chain private key
-export AVALANCHE_PRIVATE_KEY="PrivateKey-ewoq..."
+# Recommended key flow (platform-cli keystore)
+platform keys import --name l1-deployer
+platform keys default --name l1-deployer
 
 # Build and run create-l1 tool
 make create-l1
 ./tools/create-l1/create-l1 \
   --network=fuji \
+  --key-name=l1-deployer \
   --validators=$(cd terraform/aws && terraform output -json validator_ips | jq -r 'join(",")') \
   --chain-name=mychain \
   --output=l1.env

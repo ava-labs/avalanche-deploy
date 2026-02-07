@@ -7,12 +7,11 @@ l1_validator_replicas: 3
 # Network: fuji or mainnet
 network: fuji
 
-# Subnet-EVM bundled image for L1
+# AvalancheGo image for L1
 l1_validator_image:
-  # Uses bundled image with avalanchego + subnet-evm
-  # Tag format: v{avalanchego}-v{subnet-evm}
-  repository: avaplatform/subnet-evm_avalanchego
-  tag: "v1.14.1-v0.8.0"
+  # subnet-evm is bundled with avalanchego in modern releases.
+  repository: avaplatform/avalanchego
+  tag: "v1.14.1"
   pullPolicy: IfNotPresent
 
 # Resource limits for L1 validators
@@ -41,8 +40,9 @@ l1_validator_config:
   apiInfoEnabled: true
   apiHealthEnabled: true
   indexEnabled: false
-  # Partial sync for L1 - faster bootstrap, less storage
-  partialSyncPrimaryNetwork: "P-Chain"
+  # Partial sync for L1 - faster bootstrap, less storage.
+  # AvalancheGo expects a boolean for this flag.
+  partialSyncPrimaryNetwork: true
 
 # Service configuration
 l1_validator_service:
@@ -80,25 +80,21 @@ l1:
   bootstrapIds: ""  # Comma-separated NodeIDs
   bootstrapIps: ""  # Comma-separated IP:port
 
-# Liveness probe - use info endpoint (more lenient than /ext/health)
+# Liveness probe
 l1_validator_livenessProbe:
-  exec:
-    command:
-      - /bin/sh
-      - -c
-      - "curl -sf localhost:9650/ext/info -X POST -H 'content-type:application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.getNodeID\"}'"
+  httpGet:
+    path: /ext/health/liveness
+    port: http
   initialDelaySeconds: 30
   periodSeconds: 10
   timeoutSeconds: 5
   failureThreshold: 6
 
-# Readiness probe - check P-Chain bootstrap
+# Readiness probe
 l1_validator_readinessProbe:
-  exec:
-    command:
-      - /bin/sh
-      - -c
-      - "curl -sf localhost:9650/ext/info -X POST -H 'content-type:application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.isBootstrapped\",\"params\":{\"chain\":\"P\"}}' | grep -q 'true'"
+  httpGet:
+    path: /ext/health/readiness
+    port: http
   initialDelaySeconds: 60
   periodSeconds: 10
   timeoutSeconds: 5

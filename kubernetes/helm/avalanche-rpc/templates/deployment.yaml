@@ -33,6 +33,11 @@ spec:
         - name: avalanchego
           image: "{{ .Values.l1_rpc_image.repository }}:{{ .Values.l1_rpc_image.tag }}"
           imagePullPolicy: {{ .Values.l1_rpc_image.pullPolicy }}
+          env:
+            - name: HOME
+              value: /data
+          command:
+            - /avalanchego/build/avalanchego
           args:
             - --network-id={{ include "l1-rpc.networkId" . }}
             - --http-host=0.0.0.0

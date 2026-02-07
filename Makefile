@@ -25,8 +25,11 @@ L1_GENESIS_FILE ?= $(L1_CONFIG_DIR)/genesis/genesis.json
 L1_GENESIS_TEMPLATE ?= $(L1_CONFIG_DIR)/genesis/genesis-clean.json
 K8S_DIR ?= kubernetes
 K8S_CLUSTER_NAME ?= avalanche-l1
-K8S_KIND_IMAGE ?= kindest/node:v1.35.0
-K8S_KIND_WORKERS ?= 3
+K8S_KIND_IMAGE ?= kindest/node:v1.34.0
+K8S_KIND_WORKERS ?= 1
+K8S_KIND_MAP_HOST_PORTS ?= false
+K8S_KIND_HTTP_PORT ?= 9650
+K8S_KIND_STAKING_PORT ?= 9651
 K8S_L1_RELEASE ?= l1-validators
 K8S_L1_RPC_RELEASE ?= l1-rpc
 K8S_PRIMARY_RELEASE ?= primary-validators
@@ -37,6 +40,7 @@ K8S_PRIMARY_VALIDATOR_REPLICAS ?= 2
 K8S_PRIMARY_RPC_REPLICAS ?= 2
 K8S_L1_ENV_FILE ?= l1.env
 K8S_CHAIN_NAME ?= mychain
+K8S_L1_KEY_NAME ?=
 export ANSIBLE_LOCAL_TEMP ?= $(CURDIR)/.ansible/tmp
 export ANSIBLE_REMOTE_TMP ?= /tmp/.ansible-tmp
 export GOCACHE ?= $(CURDIR)/.cache/go-build
@@ -332,8 +336,8 @@ k8s-help-l1:
 	@echo "  make k8s-kind"
 	@echo "  make k8s-l1-deploy NETWORK=fuji"
 	@echo "  make k8s-l1-wait"
-	@echo "  export AVALANCHE_PRIVATE_KEY=PrivateKey-..."
-	@echo "  make k8s-l1-create NETWORK=fuji K8S_CHAIN_NAME=mychain"
+	@echo "  platform keys default --name <key-name>"
+	@echo "  make k8s-l1-create NETWORK=fuji K8S_CHAIN_NAME=mychain [K8S_L1_KEY_NAME=<key-name>]"
 	@echo "  make k8s-l1-configure"
 	@echo "  make k8s-l1-status"
 
@@ -348,10 +352,21 @@ k8s-l1: k8s-help-l1
 k8s-primary: k8s-help-primary
 
 k8s-kind:
-	@cd "$(K8S_DIR)" && ./scripts/create-kind-cluster.sh \
-		--name="$(K8S_CLUSTER_NAME)" \
-		--image="$(K8S_KIND_IMAGE)" \
-		--workers="$(K8S_KIND_WORKERS)"
+	@if [ "$(K8S_KIND_MAP_HOST_PORTS)" = "true" ]; then \
+		cd "$(K8S_DIR)" && ./scripts/create-kind-cluster.sh \
+			--name="$(K8S_CLUSTER_NAME)" \
+			--image="$(K8S_KIND_IMAGE)" \
+			--workers="$(K8S_KIND_WORKERS)" \
+			--map-host-ports \
+			--http-port="$(K8S_KIND_HTTP_PORT)" \
+			--staking-port="$(K8S_KIND_STAKING_PORT)"; \
+	else \
+		cd "$(K8S_DIR)" && ./scripts/create-kind-cluster.sh \
+			--name="$(K8S_CLUSTER_NAME)" \
+			--image="$(K8S_KIND_IMAGE)" \
+			--workers="$(K8S_KIND_WORKERS)" \
+			--no-map-host-ports; \
+	fi
 
 k8s-l1-deploy:
 	@cd "$(K8S_DIR)" && helm upgrade --install "$(K8S_L1_RELEASE)" ./helm/avalanche-validator \
@@ -365,11 +380,21 @@ k8s-l1-wait:
 	@cd "$(K8S_DIR)" && ./scripts/wait-for-sync.sh --release="$(K8S_L1_RELEASE)"
 
 k8s-l1-create:
-	@cd "$(K8S_DIR)" && ./scripts/create-l1.sh \
-		--release="$(K8S_L1_RELEASE)" \
-		--network="$(NETWORK)" \
-		--chain-name="$(K8S_CHAIN_NAME)" \
-		--output="$(K8S_L1_ENV_FILE)"
+	@cd "$(K8S_DIR)" && \
+		if [ -n "$(K8S_L1_KEY_NAME)" ]; then \
+			./scripts/create-l1.sh \
+				--release="$(K8S_L1_RELEASE)" \
+				--network="$(NETWORK)" \
+				--chain-name="$(K8S_CHAIN_NAME)" \
+				--output="$(K8S_L1_ENV_FILE)" \
+				--key-name="$(K8S_L1_KEY_NAME)"; \
+		else \
+			./scripts/create-l1.sh \
+				--release="$(K8S_L1_RELEASE)" \
+				--network="$(NETWORK)" \
+				--chain-name="$(K8S_CHAIN_NAME)" \
+				--output="$(K8S_L1_ENV_FILE)"; \
+		fi
 
 k8s-l1-configure:
 	@cd "$(K8S_DIR)" && ./scripts/configure-l1.sh \
@@ -688,7 +713,11 @@ help-all:
 	@echo "  SKIP_TERRAFORM_VALIDATE=true Skip Terraform validation (air-gapped/local only)"
 	@echo "  K8S_DIR=kubernetes   Kubernetes working directory"
 	@echo "  K8S_KIND_IMAGE=...   kind node image for make k8s-kind"
-	@echo "  K8S_KIND_WORKERS=3   worker count for make k8s-kind"
+	@echo "  K8S_KIND_WORKERS=1   worker count for make k8s-kind"
+	@echo "  K8S_KIND_MAP_HOST_PORTS=false map host ports when creating kind cluster"
+	@echo "  K8S_KIND_HTTP_PORT   host HTTP API port for make k8s-kind"
+	@echo "  K8S_KIND_STAKING_PORT host staking/P2P port for make k8s-kind"
+	@echo "  K8S_L1_KEY_NAME      optional platform-cli key for make k8s-l1-create"
 	@echo "  K8S_* variables      Release names/replicas for k8s wrapper targets"
 	@echo ""
 	@echo "Examples:"
