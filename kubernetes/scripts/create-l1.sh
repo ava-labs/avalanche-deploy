@@ -67,27 +67,35 @@ if [[ "$needs_build" == "true" ]]; then
     (cd "$ROOT_DIR/tools/create-l1" && go build -o create-l1 .)
 fi
 
-echo "Getting L1 validator pod IPs for release '$RELEASE'..."
-PODS="$(kubectl get pods -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/name=l1-validator" -o jsonpath='{.items[*].metadata.name}')"
+if ! command -v curl >/dev/null 2>&1; then
+    echo "Error: curl not found in PATH"
+    exit 1
+fi
+
+echo "Getting running L1 validator pods for release '$RELEASE'..."
+PODS="$(kubectl get pods \
+    -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/name=l1-validator" \
+    --field-selector=status.phase=Running \
+    -o jsonpath='{.items[*].metadata.name}')"
 
 if [[ -z "$PODS" ]]; then
-    echo "No L1 validator pods found for release: $RELEASE"
+    echo "No running L1 validator pods found for release: $RELEASE"
     echo "Deploy first, for example:"
     echo "  helm upgrade --install $RELEASE \"$ROOT_DIR/kubernetes/helm/avalanche-validator\" -f \"$ROOT_DIR/kubernetes/helm/avalanche-validator/values-kind.yaml\" --set network=$NETWORK"
     exit 1
 fi
 
-VALIDATOR_IPS=""
+REAL_VALIDATOR_IPS=""
 for pod in $PODS; do
     ip="$(kubectl get pod "$pod" -o jsonpath='{.status.podIP}')"
-    if [[ -n "$VALIDATOR_IPS" ]]; then
-        VALIDATOR_IPS="$VALIDATOR_IPS,$ip"
+    if [[ -n "$REAL_VALIDATOR_IPS" ]]; then
+        REAL_VALIDATOR_IPS="$REAL_VALIDATOR_IPS,$ip"
     else
-        VALIDATOR_IPS="$ip"
+        REAL_VALIDATOR_IPS="$ip"
     fi
 done
 
-echo "Validators: $VALIDATOR_IPS"
+echo "Validator Pods: $REAL_VALIDATOR_IPS"
 
 if [[ -z "$GENESIS" ]]; then
     if [[ -f "$ROOT_DIR/configs/l1/genesis/genesis.json" ]]; then
@@ -111,16 +119,56 @@ else
 fi
 echo ""
 
-first_pod="${PODS%% *}"
-echo "Setting up temporary port-forward to $first_pod..."
-kubectl port-forward "pod/$first_pod" 19650:9650 >/dev/null 2>&1 &
-pf_pid=$!
-sleep 3
+PF_PIDS=()
+VALIDATOR_IPS=""
+validator_index=0
+
+wait_for_node_id() {
+    local endpoint="$1"
+    local response=""
+
+    for _ in $(seq 1 30); do
+        response="$(curl --noproxy '*' -s "http://${endpoint}/ext/info" \
+            -X POST -H 'content-type:application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"info.getNodeID"}' 2>/dev/null || true)"
+        if [[ "$response" == *'"nodeID"'* ]]; then
+            return 0
+        fi
+        sleep 0.25
+    done
+    return 1
+}
 
 cleanup() {
-    kill "$pf_pid" >/dev/null 2>&1 || true
+    for pid in "${PF_PIDS[@]:-}"; do
+        kill "$pid" >/dev/null 2>&1 || true
+        wait "$pid" >/dev/null 2>&1 || true
+    done
 }
 trap cleanup EXIT
+
+for pod in $PODS; do
+    local_port="$((19650 + validator_index))"
+    local_endpoint="127.0.0.1:${local_port}"
+    echo "Setting up temporary port-forward to $pod on ${local_endpoint}..."
+    kubectl port-forward --address 127.0.0.1 "pod/$pod" "${local_port}:9650" >/dev/null 2>&1 &
+    PF_PIDS+=("$!")
+    validator_index=$((validator_index + 1))
+
+    if [[ -n "$VALIDATOR_IPS" ]]; then
+        VALIDATOR_IPS="$VALIDATOR_IPS,$local_endpoint"
+    else
+        VALIDATOR_IPS="$local_endpoint"
+    fi
+done
+
+echo "Validator API Endpoints: $VALIDATOR_IPS"
+for endpoint in ${VALIDATOR_IPS//,/ }; do
+    if ! wait_for_node_id "$endpoint"; then
+        echo "Error: failed to reach validator API at $endpoint"
+        exit 1
+    fi
+done
 
 echo "Creating L1..."
 create_l1_args=(

@@ -4,8 +4,10 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/utils/crypto/secp256k1"
 	pkgkeystore "github.com/ava-labs/platform-cli/pkg/keystore"
 )
@@ -251,4 +253,63 @@ func TestLoadPrivateKeyPrefersDefaultKeystoreOverEnv(t *testing.T) {
 	if got.Address() != want.Address() {
 		t.Fatalf("loadPrivateKey() address = %s, want default key address %s", got.Address(), want.Address())
 	}
+}
+
+func TestBuildNodeURI(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		want     string
+	}{
+		{
+			name:     "host only",
+			endpoint: "10.0.0.5",
+			want:     "http://10.0.0.5:9650",
+		},
+		{
+			name:     "host and port",
+			endpoint: "127.0.0.1:19650",
+			want:     "http://127.0.0.1:19650",
+		},
+		{
+			name:     "uri passthrough",
+			endpoint: "https://example.com:9650",
+			want:     "https://example.com:9650",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := buildNodeURI(tc.endpoint)
+			if err != nil {
+				t.Fatalf("buildNodeURI() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("buildNodeURI() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildRPCEndpointsUsesNodeURIs(t *testing.T) {
+	nodeURIs := []string{
+		"http://127.0.0.1:19650",
+		"http://127.0.0.1:19651",
+	}
+	got := buildRPCEndpoints(nodeURIs, mustID("2ZF68ComC4sqLu7Bwo4sY5rAbd6D3vvwN2NVFKejtVDkRKE2oc"))
+
+	if !strings.Contains(got, "RPC_1_URL=http://127.0.0.1:19650/ext/bc/2ZF68ComC4sqLu7Bwo4sY5rAbd6D3vvwN2NVFKejtVDkRKE2oc/rpc") {
+		t.Fatalf("buildRPCEndpoints() missing expected first endpoint: %s", got)
+	}
+	if !strings.Contains(got, "RPC_2_URL=http://127.0.0.1:19651/ext/bc/2ZF68ComC4sqLu7Bwo4sY5rAbd6D3vvwN2NVFKejtVDkRKE2oc/rpc") {
+		t.Fatalf("buildRPCEndpoints() missing expected second endpoint: %s", got)
+	}
+}
+
+func mustID(s string) ids.ID {
+	id, err := ids.FromString(s)
+	if err != nil {
+		panic(err)
+	}
+	return id
 }

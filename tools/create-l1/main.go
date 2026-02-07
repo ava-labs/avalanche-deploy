@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -163,10 +164,14 @@ func run() error {
 
 	ctx := context.Background()
 
-	// Build node URIs
+	// Build node URIs from validator endpoints.
 	nodeURIs := make([]string, len(ips))
-	for i, ip := range ips {
-		nodeURIs[i] = fmt.Sprintf("http://%s:9650", ip)
+	for i, endpoint := range ips {
+		nodeURI, err := buildNodeURI(endpoint)
+		if err != nil {
+			return fmt.Errorf("invalid validator endpoint %q: %w", endpoint, err)
+		}
+		nodeURIs[i] = nodeURI
 	}
 
 	// Initialize keychain and wallet
@@ -278,7 +283,7 @@ func run() error {
 		time.Sleep(15 * time.Second)
 
 		// Build the chain RPC URL
-		chainRPCURL := fmt.Sprintf("http://%s:9650/ext/bc/%s/rpc", ips[0], chainID)
+		chainRPCURL := fmt.Sprintf("%s/ext/bc/%s/rpc", strings.TrimRight(nodeURIs[0], "/"), chainID)
 		fmt.Printf("  Chain RPC: %s\n", chainRPCURL)
 
 		// Parse manager type
@@ -384,7 +389,7 @@ func run() error {
 		fmt.Println("[7/7] Initializing validator set...")
 
 		// Build the chain RPC URL
-		chainRPCURL := fmt.Sprintf("http://%s:9650/ext/bc/%s/rpc", ips[0], chainID)
+		chainRPCURL := fmt.Sprintf("%s/ext/bc/%s/rpc", strings.TrimRight(nodeURIs[0], "/"), chainID)
 
 		// Get the private key hex for cast
 		keyBytes := key.Bytes()
@@ -410,7 +415,7 @@ func run() error {
 			fmt.Println("  Starting local signature-aggregator...")
 
 			// Get the P-Chain API URL
-			pChainAPI := fmt.Sprintf("http://%s:9650", ips[0])
+			pChainAPI := nodeURIs[0]
 
 			sigAgg = NewSignatureAggregator(
 				nodeURIs,
@@ -558,16 +563,16 @@ func run() error {
 
 	// Verify chain is accessible
 	if !jsonOutput {
-		for i, ip := range ips {
-			rpcURL := fmt.Sprintf("http://%s:9650/ext/bc/%s/rpc", ip, chainID)
+		for i, nodeURI := range nodeURIs {
+			rpcURL := fmt.Sprintf("%s/ext/bc/%s/rpc", strings.TrimRight(nodeURI, "/"), chainID)
 			fmt.Printf("  Checking RPC [%d]: %s\n", i+1, rpcURL)
 		}
 	}
 
 	// Build RPC endpoints list
-	rpcEndpoints := make([]string, len(ips))
-	for i, ip := range ips {
-		rpcEndpoints[i] = fmt.Sprintf("http://%s:9650/ext/bc/%s/rpc", ip, chainID)
+	rpcEndpoints := make([]string, len(nodeURIs))
+	for i, nodeURI := range nodeURIs {
+		rpcEndpoints[i] = fmt.Sprintf("%s/ext/bc/%s/rpc", strings.TrimRight(nodeURI, "/"), chainID)
 	}
 
 	// Build validators output
@@ -644,7 +649,7 @@ NETWORK=%s
 		networkName,
 		evmChainSection,
 		vmSection,
-		buildRPCEndpoints(ips, chainID),
+		buildRPCEndpoints(nodeURIs, chainID),
 	)
 
 	if err := os.WriteFile(outputFile, []byte(content), 0644); err != nil {
@@ -684,8 +689,8 @@ NETWORK=%s
 	}
 	fmt.Println()
 	fmt.Println("RPC Endpoints:")
-	for i, ip := range ips {
-		fmt.Printf("  [%d] http://%s:9650/ext/bc/%s/rpc\n", i+1, ip, chainID)
+	for i, nodeURI := range nodeURIs {
+		fmt.Printf("  [%d] %s/ext/bc/%s/rpc\n", i+1, strings.TrimRight(nodeURI, "/"), chainID)
 	}
 
 	// Print explorer link if applicable
@@ -808,15 +813,37 @@ func parseValidatorIPs() ([]string, error) {
 	return ips, nil
 }
 
+func buildNodeURI(endpoint string) (string, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return "", fmt.Errorf("endpoint cannot be empty")
+	}
+	if strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
+		return strings.TrimRight(endpoint, "/"), nil
+	}
+	if host, port, err := net.SplitHostPort(endpoint); err == nil {
+		if host == "" || port == "" {
+			return "", fmt.Errorf("invalid host:port endpoint")
+		}
+		return "http://" + endpoint, nil
+	}
+	if strings.Count(endpoint, ":") > 1 {
+		// IPv6 without an explicit port.
+		return "http://[" + endpoint + "]:9650", nil
+	}
+	return "http://" + endpoint + ":9650", nil
+}
+
 func getNetworkConfig(networkName string) (uint32, string, error) {
 	// Use platform-cli network package for configuration
 	return network.GetNetworkIDAndRPC(networkName)
 }
 
-func buildRPCEndpoints(ips []string, chainID ids.ID) string {
+func buildRPCEndpoints(nodeURIs []string, chainID ids.ID) string {
 	var lines []string
-	for i, ip := range ips {
-		lines = append(lines, fmt.Sprintf("RPC_%d_URL=http://%s:9650/ext/bc/%s/rpc", i+1, ip, chainID))
+	for i, nodeURI := range nodeURIs {
+		baseURI := strings.TrimRight(nodeURI, "/")
+		lines = append(lines, fmt.Sprintf("RPC_%d_URL=%s/ext/bc/%s/rpc", i+1, baseURI, chainID))
 	}
 	return strings.Join(lines, "\n")
 }
