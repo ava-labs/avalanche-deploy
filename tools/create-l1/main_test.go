@@ -190,17 +190,11 @@ func TestLoadPrivateKeyFromKeystoreByName(t *testing.T) {
 	}
 
 	origKeyName := keyName
-	origPrivateKey := privateKey
-	origPrivateKeyFile := privateKeyFile
 	defer func() {
 		keyName = origKeyName
-		privateKey = origPrivateKey
-		privateKeyFile = origPrivateKeyFile
 	}()
 
 	keyName = "deployer"
-	privateKey = ""
-	privateKeyFile = ""
 
 	got, err := loadPrivateKey()
 	if err != nil {
@@ -239,17 +233,11 @@ func TestLoadPrivateKeyPrefersDefaultKeystoreOverEnv(t *testing.T) {
 	t.Setenv("AVALANCHE_PRIVATE_KEY", "0x"+envKeyHex)
 
 	origKeyName := keyName
-	origPrivateKey := privateKey
-	origPrivateKeyFile := privateKeyFile
 	defer func() {
 		keyName = origKeyName
-		privateKey = origPrivateKey
-		privateKeyFile = origPrivateKeyFile
 	}()
 
 	keyName = ""
-	privateKey = ""
-	privateKeyFile = ""
 
 	got, err := loadPrivateKey()
 	if err != nil {

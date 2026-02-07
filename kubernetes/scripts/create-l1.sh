@@ -11,6 +11,7 @@ CHAIN_NAME="mychain"
 RELEASE="l1-validators"
 OUTPUT="l1.env"
 GENESIS=""
+KEY_NAME=""
 
 usage() {
     cat <<USAGE
@@ -20,6 +21,7 @@ Usage: $0 [options]
   --release=NAME           Helm release name for L1 validators (default: l1-validators)
   --genesis=FILE           Genesis file (default: auto-find)
   --output=FILE            Output file (default: l1.env)
+  --key-name=NAME          platform-cli key name (optional; otherwise uses default key or env fallback)
   -h, --help               Show this help
 USAGE
 }
@@ -31,6 +33,7 @@ while [[ $# -gt 0 ]]; do
         --release=*) RELEASE="${1#*=}"; shift ;;
         --genesis=*) GENESIS="${1#*=}"; shift ;;
         --output=*) OUTPUT="${1#*=}"; shift ;;
+        --key-name=*) KEY_NAME="${1#*=}"; shift ;;
         -h|--help)
             usage
             exit 0
@@ -42,13 +45,6 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
-
-if [[ -z "${AVALANCHE_PRIVATE_KEY:-}" ]]; then
-    echo "Error: AVALANCHE_PRIVATE_KEY not set"
-    echo "Export your funded P-Chain private key:"
-    echo "  export AVALANCHE_PRIVATE_KEY=\"PrivateKey-...\""
-    exit 1
-fi
 
 CREATE_L1="$ROOT_DIR/tools/create-l1/create-l1"
 if [[ ! -f "$CREATE_L1" ]]; then
@@ -62,7 +58,7 @@ PODS="$(kubectl get pods -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.
 if [[ -z "$PODS" ]]; then
     echo "No L1 validator pods found for release: $RELEASE"
     echo "Deploy first, for example:"
-    echo "  helm install $RELEASE ./helm/avalanche-validator --set l1_validator_replicas=3 --set network=$NETWORK"
+    echo "  helm upgrade --install $RELEASE \"$ROOT_DIR/kubernetes/helm/avalanche-validator\" -f \"$ROOT_DIR/kubernetes/helm/avalanche-validator/values-kind.yaml\" --set network=$NETWORK"
     exit 1
 fi
 
@@ -93,6 +89,11 @@ fi
 echo "Genesis: $GENESIS"
 echo "Network: $NETWORK"
 echo "Chain Name: $CHAIN_NAME"
+if [[ -n "$KEY_NAME" ]]; then
+    echo "Key Source: platform-cli key '$KEY_NAME'"
+else
+    echo "Key Source: platform-cli default key (or AVALANCHE_PRIVATE_KEY fallback)"
+fi
 echo ""
 
 first_pod="${PODS%% *}"
@@ -107,13 +108,20 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Creating L1..."
-"$CREATE_L1" \
-    --network="$NETWORK" \
-    --validators="$VALIDATOR_IPS" \
-    --chain-name="$CHAIN_NAME" \
-    --genesis="$GENESIS" \
+create_l1_args=(
+    --network="$NETWORK"
+    --validators="$VALIDATOR_IPS"
+    --chain-name="$CHAIN_NAME"
+    --genesis="$GENESIS"
     --output="$OUTPUT"
+)
+if [[ -n "$KEY_NAME" ]]; then
+    create_l1_args+=(--key-name="$KEY_NAME")
+fi
+
+"$CREATE_L1" \
+    "${create_l1_args[@]}"
 
 echo ""
 echo "L1 created. Config saved to: $OUTPUT"
-echo "Next: ./scripts/configure-l1.sh --release=$RELEASE --env=$OUTPUT"
+echo "Next: \"$SCRIPT_DIR/configure-l1.sh\" --release=$RELEASE --env=$OUTPUT"

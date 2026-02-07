@@ -1,0 +1,19 @@
+# Overrides for local kind development.
+# Use with:
+# helm upgrade --install l1-rpc ./helm/avalanche-rpc -f ./helm/avalanche-rpc/values-kind.yaml --set network=fuji
+
+l1_rpc_replicas: 1
+
+l1_rpc_resources:
+  requests:
+    cpu: "500m"
+    memory: "2Gi"
+  limits:
+    cpu: "2"
+    memory: "4Gi"
+
+# LoadBalancer is not generally useful on kind.
+l1_rpc_service:
+  type: ClusterIP
+  httpPort: 9650
+  stakingPort: 9651

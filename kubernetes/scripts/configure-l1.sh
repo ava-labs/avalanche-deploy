@@ -36,6 +36,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if ! command -v curl >/dev/null 2>&1; then
+    echo "Error: curl not found in PATH"
+    exit 1
+fi
+
 if [[ ! -f "$L1_ENV" ]]; then
     echo "Error: $L1_ENV not found"
     echo "Run ./scripts/create-l1.sh first"
@@ -56,6 +61,33 @@ echo "  Subnet ID: $SUBNET_ID"
 echo "  Chain ID:  $CHAIN_ID"
 echo ""
 
+rpc_post() {
+    local pod="$1"
+    local endpoint="$2"
+    local payload="$3"
+    local pf_port
+    pf_port="$((20000 + RANDOM % 20000))"
+
+    kubectl port-forward "pod/$pod" "${pf_port}:9650" >/dev/null 2>&1 &
+    local pf_pid=$!
+
+    local response=""
+    for _ in $(seq 1 20); do
+        response="$(curl -s "http://127.0.0.1:${pf_port}${endpoint}" \
+            -X POST -H 'content-type:application/json' \
+            -d "$payload" 2>/dev/null || true)"
+        if [[ -n "$response" ]]; then
+            break
+        fi
+        sleep 0.25
+    done
+
+    kill "$pf_pid" >/dev/null 2>&1 || true
+    wait "$pf_pid" >/dev/null 2>&1 || true
+
+    echo "$response"
+}
+
 PODS="$(kubectl get pods -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/name=l1-validator" -o jsonpath='{.items[*].metadata.name}')"
 if [[ -z "$PODS" ]]; then
     echo "No L1 validator pods found for release: $RELEASE"
@@ -67,9 +99,7 @@ BOOTSTRAP_IDS=""
 BOOTSTRAP_IPS=""
 
 for pod in $PODS; do
-    response="$(kubectl exec "$pod" -- curl -s localhost:9650/ext/info \
-        -X POST -H 'content-type:application/json' \
-        -d '{"jsonrpc":"2.0","id":1,"method":"info.getNodeID"}')"
+    response="$(rpc_post "$pod" "/ext/info" '{"jsonrpc":"2.0","id":1,"method":"info.getNodeID"}')"
 
     node_id="$(echo "$response" | sed -n 's/.*"nodeID":"\([^"]*\)".*/\1/p')"
     pod_ip="$(kubectl get pod "$pod" -o jsonpath='{.status.podIP}')"
@@ -124,9 +154,7 @@ sleep 10
 
 new_pods="$(kubectl get pods -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/name=l1-validator" -o jsonpath='{.items[*].metadata.name}')"
 for pod in $new_pods; do
-    chain_response="$(kubectl exec "$pod" -- curl -s "localhost:9650/ext/bc/$CHAIN_ID/rpc" \
-        -X POST -H 'content-type:application/json' \
-        -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' || true)"
+    chain_response="$(rpc_post "$pod" "/ext/bc/$CHAIN_ID/rpc" '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}')"
 
     if echo "$chain_response" | grep -q '"result"'; then
         echo "  $pod: L1 ready"

@@ -67,15 +67,7 @@ Default genesis path: `../../configs/l1/genesis/genesis.json`
    export AVALANCHE_PRIVATE_KEY=PrivateKey-ewoqjP7PxY4yr3iLTpLisriqt94hdyDFNgchSxGGztUrTXtNN
    ```
 
-4. **File**:
-   ```bash
-   ./create-l1 --private-key-file=~/.avalanche/key.txt
-   ```
-
-5. **Flag** (deprecated / not recommended):
-   ```bash
-   ./create-l1 --private-key=PrivateKey-...
-   ```
+Raw key flags are intentionally unsupported.
 
 For encrypted keystore keys, set:
 

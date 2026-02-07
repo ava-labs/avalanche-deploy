@@ -35,6 +35,11 @@ spec:
         - name: avalanchego
           image: "{{ .Values.l1_validator_image.repository }}:{{ .Values.l1_validator_image.tag }}"
           imagePullPolicy: {{ .Values.l1_validator_image.pullPolicy }}
+          env:
+            - name: HOME
+              value: /data
+          command:
+            - /avalanchego/build/avalanchego
           args:
             - --network-id={{ include "l1-validator.networkId" . }}
             - --http-host=0.0.0.0

@@ -20,8 +20,9 @@ make infra CLOUD=<aws|gcp|azure>
 make deploy CLOUD=<aws|gcp|azure> NETWORK=<fuji|mainnet>
 
 # 2) Build/create the L1
+platform keys default --name <key-name>
 make create-l1
-./tools/create-l1/create-l1 ... --genesis=configs/l1/genesis/genesis.json --output=l1.env
+./tools/create-l1/create-l1 --key-name=<key-name> ... --genesis=configs/l1/genesis/genesis.json --output=l1.env
 
 # 3) Configure nodes for the new L1
 source l1.env

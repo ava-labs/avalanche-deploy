@@ -1,0 +1,17 @@
+# Overrides for local kind development.
+# Use with:
+# helm upgrade --install l1-validators ./helm/avalanche-validator -f ./helm/avalanche-validator/values-kind.yaml --set network=fuji
+
+l1_validator_replicas: 1
+
+l1_validator_resources:
+  requests:
+    cpu: "500m"
+    memory: "2Gi"
+  limits:
+    cpu: "2"
+    memory: "4Gi"
+
+# Single-replica local runs should not enforce a multi-pod disruption budget.
+l1_validator_pdb:
+  enabled: false
