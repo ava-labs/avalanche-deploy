@@ -14,7 +14,7 @@ Use this when you want to launch and run your own Avalanche L1.
 Includes:
 - Validator and RPC infrastructure provisioning
 - AvalancheGo deployment and L1 configuration
-- Optional add-ons: Blockscout, faucet, The Graph, eRPC, Safe (experimental)
+- Optional add-ons: Blockscout, faucet, The Graph, eRPC, ICM Relayer, Safe (experimental)
 
 ### Quick Start (L1)
 
@@ -64,6 +64,9 @@ make graph-node CLOUD=$CLOUD CHAIN_ID=$CHAIN_ID NETWORK_NAME=my-l1
 
 # RPC load balancer
 make erpc CLOUD=$CLOUD CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=$EVM_CHAIN_ID
+
+# ICM Relayer (cross-chain messaging)
+make icm-relayer CLOUD=$CLOUD SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID RELAYER_KEY=0x...
 ```
 
 ### Workflow B: Primary Network Validators + Ops
@@ -154,7 +157,7 @@ docs/         Runbooks and reference docs
 
 - [Workflow Index](docs/WORKFLOWS.md) - Which path to use and in what order
 - [L1 Deployment](docs/L1-DEPLOYMENT.md) - Full L1 runbook
-- [Add-ons](docs/ADD-ONS.md) - Blockscout, faucet, eRPC, The Graph, Safe
+- [Add-ons](docs/ADD-ONS.md) - Blockscout, faucet, eRPC, The Graph, ICM Relayer, Safe
 - [Primary Network](docs/PRIMARY-NETWORK.md) - Validator deployment, snapshots, migration
 - [Operations](docs/OPERATIONS.md) - Day-2 commands and references
 - [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and fixes

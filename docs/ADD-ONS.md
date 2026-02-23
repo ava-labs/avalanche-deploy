@@ -107,6 +107,46 @@ In your dApp:
 const RPC_URL = "http://<monitoring-ip>:4000"
 ```
 
+## ICM Relayer (Cross-Chain Messaging)
+
+Deploy the ICM Relayer for Avalanche Interchain Messaging between your L1 and C-Chain:
+
+```bash
+source l1.env
+make icm-relayer SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID RELAYER_KEY=0x...
+```
+
+Endpoints:
+- API: `http://<rpc-ip>:8080`
+- Health: `http://<rpc-ip>:8080/health`
+- Metrics: `http://<rpc-ip>:9090/metrics`
+
+### What It Does
+
+The ICM Relayer listens for Avalanche Warp Messages on source blockchains, aggregates BLS signatures from validators, and delivers cross-chain messages to destination blockchains. By default it relays bidirectionally between your L1 and C-Chain.
+
+### Prerequisites
+
+- The `RELAYER_KEY` wallet must be funded on **both** chains:
+  - C-Chain: Fund with AVAX for gas
+  - L1 Chain: Fund with native token for gas
+- Use a dedicated relay wallet (not your main deployer key)
+
+### Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `SUBNET_ID` | (required) | Subnet ID from create-l1 output |
+| `CHAIN_ID` | (required) | Blockchain ID from create-l1 output |
+| `RELAYER_KEY` | (required) | Hex private key for relay transactions |
+| `NETWORK` | fuji | Network name (fuji or mainnet) |
+
+### Kubernetes
+
+```bash
+make k8s-icm-relayer SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID RELAYER_KEY=0x...
+```
+
 ## Safe Multisig (Experimental)
 
 > **Warning:** Safe Multisig support is experimental and not production-ready. Known issues include transaction indexing delays, Docker container restarts, and HTTPS certificate management.

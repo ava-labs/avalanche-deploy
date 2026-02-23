@@ -117,6 +117,24 @@ kubectl port-forward svc/monitoring-grafana 3000:3000
 # http://localhost:3000 (admin/admin)
 ```
 
+## ICM Relayer (Cross-Chain Messaging)
+
+After your L1 is running:
+
+```bash
+source l1.env
+helm upgrade --install icm-relayer ./helm/icm-relayer \
+  --set "l1.subnetId=$SUBNET_ID" \
+  --set "l1.blockchainId=$CHAIN_ID" \
+  --set "relayerPrivateKey=0x..." \
+  --set "network=fuji"
+
+# Or from repo root:
+make k8s-icm-relayer SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID RELAYER_KEY=0x...
+```
+
+The relayer connects to the `l1-rpc` service by default. Override with `--set avalanchego.serviceName=<svc>`.
+
 ## Helm Chart Map
 
 | Purpose | Chart Path | Recommended Release |
@@ -126,6 +144,7 @@ kubectl port-forward svc/monitoring-grafana 3000:3000
 | Primary validators | `helm/primary-network-validator` | `primary-validators` |
 | Primary RPC | `helm/primary-network-rpc` | `primary-rpc` |
 | Monitoring | `helm/monitoring` | `monitoring` |
+| ICM Relayer | `helm/icm-relayer` | `icm-relayer` |
 
 ## Script Reference
 
@@ -169,6 +188,7 @@ helm lint ./helm/avalanche-rpc
 helm lint ./helm/primary-network-validator
 helm lint ./helm/primary-network-rpc
 helm lint ./helm/monitoring
+helm lint ./helm/icm-relayer
 
 # Script syntax checks
 for f in scripts/*.sh; do bash -n "$f"; done

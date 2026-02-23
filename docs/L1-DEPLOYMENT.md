@@ -195,6 +195,6 @@ Key settings:
 
 ## Next Steps
 
-- [Deploy add-ons](ADD-ONS.md) (Blockscout, faucet, eRPC, The Graph)
+- [Deploy add-ons](ADD-ONS.md) (Blockscout, faucet, eRPC, The Graph, ICM Relayer)
 - [Operations guide](OPERATIONS.md) (upgrades, monitoring, health checks)
 - [Troubleshooting](TROUBLESHOOTING.md)

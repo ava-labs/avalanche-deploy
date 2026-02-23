@@ -1,0 +1,6 @@
+apiVersion: v2
+name: icm-relayer
+description: ICM Relayer for Avalanche cross-chain messaging
+type: application
+version: 0.1.0
+appVersion: "1.7.5"

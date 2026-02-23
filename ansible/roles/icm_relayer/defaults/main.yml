@@ -1,0 +1,54 @@
+---
+# ICM Relayer defaults
+
+# Docker image tag
+icm_relayer_version: "v1.7.5"
+
+# API port (HTTP API for relay status)
+icm_relayer_api_port: 8080
+
+# Metrics port (Prometheus)
+icm_relayer_metrics_port: 9090
+
+# Log level: debug, info, warn, error
+icm_relayer_log_level: info
+
+# Process missed blocks on startup (catch up on messages)
+icm_relayer_process_missed_blocks: true
+
+# Storage location inside the container
+icm_relayer_storage_location: /data/icm-relayer-storage
+
+# Network: fuji or mainnet
+icm_relayer_network: fuji
+
+# Enable bidirectional relay (L1 <-> C-Chain)
+icm_relayer_bidirectional: true
+
+# RPC host for the local avalanchego node
+icm_relayer_rpc_host: "127.0.0.1"
+
+# Source L1 chain (required, passed from playbook)
+# icm_relayer_source_subnet_id:
+# icm_relayer_source_blockchain_id:
+
+# Destination private key (required, passed from playbook)
+# icm_relayer_destination_private_key:
+
+# C-Chain blockchain IDs (well-known)
+icm_relayer_cchain_ids:
+  fuji:
+    subnet_id: "11111111111111111111111111111111LpoYY"
+    blockchain_id: "yH8D7ThNJkxmtkuv2jgBa4P1Rn3Qpr4pPr7QYNfcdoS6k6HWp"
+  mainnet:
+    subnet_id: "11111111111111111111111111111111LpoYY"
+    blockchain_id: "2q9e4r6Mu3U68nU1fYjgbR6JvwrRx36CohpAX5UQxse55x1Q5"
+
+# Message contracts - default to wildcard (relay all ICM messages)
+icm_relayer_message_contracts:
+  "0x0000000000000000000000000000000000000000":
+    message_format: "off-chain-registry"
+
+# Additional source/destination blockchains (advanced usage)
+# icm_relayer_extra_source_blockchains: []
+# icm_relayer_extra_destination_blockchains: []

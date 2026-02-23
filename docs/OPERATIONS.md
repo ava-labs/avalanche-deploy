@@ -121,6 +121,7 @@ make reset-l1
 | `make faucet` | Deploy token faucet |
 | `make graph-node` | Deploy The Graph Node |
 | `make erpc` | Deploy eRPC load balancer |
+| `make icm-relayer` | Deploy ICM Relayer for cross-chain messaging |
 
 ### Validator Manager
 

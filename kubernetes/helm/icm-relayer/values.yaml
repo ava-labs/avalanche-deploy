@@ -1,0 +1,112 @@
+# ICM Relayer - Cross-chain message relay
+
+# Number of relayer replicas (typically 1)
+replicas: 1
+
+# Network: fuji or mainnet
+network: fuji
+
+# ICM Relayer image
+image:
+  repository: avaplatform/icm-relayer
+  tag: "v1.7.5"
+  pullPolicy: IfNotPresent
+
+# Resource limits
+resources:
+  requests:
+    cpu: "500m"
+    memory: "512Mi"
+  limits:
+    cpu: "1"
+    memory: "1Gi"
+
+# Persistent storage for relayer state
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 10Gi
+  accessModes:
+    - ReadWriteOnce
+
+# Ports
+ports:
+  api: 8080
+  metrics: 9090
+
+# Service configuration
+service:
+  type: ClusterIP
+  apiPort: 8080
+  metricsPort: 9090
+
+# L1 Configuration (required)
+l1:
+  subnetId: ""
+  blockchainId: ""
+
+# Bidirectional relay (L1 <-> C-Chain)
+bidirectional: true
+
+# Log level
+logLevel: info
+
+# Process missed blocks on startup
+processMissedBlocks: true
+
+# AvalancheGo service to connect to (within cluster)
+avalanchego:
+  serviceName: "l1-rpc"
+  httpPort: 9650
+
+# C-Chain blockchain IDs
+cchain:
+  fuji:
+    subnetId: "11111111111111111111111111111111LpoYY"
+    blockchainId: "yH8D7ThNJkxmtkuv2jgBa4P1Rn3Qpr4pPr7QYNfcdoS6k6HWp"
+  mainnet:
+    subnetId: "11111111111111111111111111111111LpoYY"
+    blockchainId: "2q9e4r6Mu3U68nU1fYjgbR6JvwrRx36CohpAX5UQxse55x1Q5"
+
+# Relayer wallet private key (for signing relay transactions)
+# Must be funded on both chains!
+# Set via --set relayerPrivateKey=0x... or values file
+relayerPrivateKey: ""
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Service account
+serviceAccount:
+  create: true
+  name: ""
+
+# Liveness probe
+livenessProbe:
+  httpGet:
+    path: /health
+    port: api
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  failureThreshold: 6
+
+# Readiness probe
+readinessProbe:
+  httpGet:
+    path: /health
+    port: api
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  failureThreshold: 3
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}

@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
+.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
 
 # Default cloud provider
 CLOUD ?= aws
@@ -208,6 +208,20 @@ erpc:
 		-e "l1_evm_chain_id=$(EVM_CHAIN_ID)"
 
 #
+# ICM Relayer
+#
+icm-relayer:
+	@if [ -z "$(SUBNET_ID)" ]; then echo "Usage: make icm-relayer SUBNET_ID=xxx CHAIN_ID=yyy RELAYER_KEY=0x..."; exit 1; fi
+	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make icm-relayer SUBNET_ID=xxx CHAIN_ID=yyy RELAYER_KEY=0x..."; exit 1; fi
+	@if [ -z "$(RELAYER_KEY)" ]; then echo "Usage: make icm-relayer SUBNET_ID=xxx CHAIN_ID=yyy RELAYER_KEY=0x..."; exit 1; fi
+	@echo "Deploying ICM Relayer..."
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/16-deploy-icm-relayer.yml \
+		-e "l1_subnet_id=$(SUBNET_ID)" \
+		-e "l1_chain_id=$(CHAIN_ID)" \
+		-e "relayer_private_key=$(RELAYER_KEY)" \
+		$(if $(NETWORK),-e "icm_relayer_network=$(NETWORK)",)
+
+#
 # Validator Manager
 #
 init-validator-manager:
@@ -330,6 +344,7 @@ k8s-help:
 	@echo "Common wrappers:"
 	@echo "  make k8s-kind        # Create local kind cluster"
 	@echo "  make k8s-monitoring  # Install/upgrade monitoring chart"
+	@echo "  make k8s-icm-relayer # Deploy ICM Relayer for cross-chain messaging"
 	@echo "  make k8s-cleanup     # Cleanup releases + optional PVC/kind"
 
 k8s-help-l1:
@@ -424,6 +439,16 @@ k8s-primary-status:
 
 k8s-monitoring:
 	@cd "$(K8S_DIR)" && helm upgrade --install monitoring ./helm/monitoring
+
+k8s-icm-relayer:
+	@if [ -z "$(SUBNET_ID)" ]; then echo "Usage: make k8s-icm-relayer SUBNET_ID=xxx CHAIN_ID=yyy RELAYER_KEY=0x..."; exit 1; fi
+	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make k8s-icm-relayer SUBNET_ID=xxx CHAIN_ID=yyy RELAYER_KEY=0x..."; exit 1; fi
+	@if [ -z "$(RELAYER_KEY)" ]; then echo "Usage: make k8s-icm-relayer SUBNET_ID=xxx CHAIN_ID=yyy RELAYER_KEY=0x..."; exit 1; fi
+	@cd "$(K8S_DIR)" && helm upgrade --install icm-relayer ./helm/icm-relayer \
+		--set "l1.subnetId=$(SUBNET_ID)" \
+		--set "l1.blockchainId=$(CHAIN_ID)" \
+		--set "relayerPrivateKey=$(RELAYER_KEY)" \
+		--set "network=$(NETWORK)"
 
 k8s-cleanup:
 	@cd "$(K8S_DIR)" && ./scripts/cleanup.sh
@@ -608,6 +633,7 @@ help-l1:
 	@echo "  make faucet CHAIN_ID=... EVM_CHAIN_ID=... FAUCET_KEY=0x..."
 	@echo "  make graph-node CHAIN_ID=... [NETWORK_NAME=...]"
 	@echo "  make erpc CHAIN_ID=... EVM_CHAIN_ID=..."
+	@echo "  make icm-relayer SUBNET_ID=... CHAIN_ID=... RELAYER_KEY=0x..."
 	@echo "  make safe-genesis | make safe ... | make reset-genesis"
 	@echo ""
 	@echo "Ops:"
@@ -674,6 +700,7 @@ help-all:
 	@echo "  make k8s-primary-wait   Wait for Primary validator sync"
 	@echo "  make k8s-primary-status Check Primary release status"
 	@echo "  make k8s-monitoring     Install/upgrade monitoring chart"
+	@echo "  make k8s-icm-relayer    Deploy ICM Relayer for cross-chain messaging"
 	@echo "  make k8s-cleanup        Cleanup Kubernetes resources"
 	@echo ""
 	@echo "Operations:"
@@ -687,6 +714,7 @@ help-all:
 	@echo "  make deploy-blockscout Deploy Blockscout block explorer"
 	@echo "  make graph-node        Deploy The Graph Node for indexing"
 	@echo "  make erpc              Deploy eRPC load balancer"
+	@echo "  make icm-relayer       Deploy ICM Relayer for cross-chain messaging"
 	@echo ""
 	@echo "Validator Manager:"
 	@echo "  make init-validator-manager      Build the validator manager tool"
@@ -745,4 +773,5 @@ help-all:
 	@echo "  make faucet CHAIN_ID=xxx EVM_CHAIN_ID=99999 FAUCET_KEY=0x..."
 	@echo "  make graph-node CHAIN_ID=xxx NETWORK_NAME=my-l1"
 	@echo "  make erpc CHAIN_ID=xxx EVM_CHAIN_ID=99999"
+	@echo "  make icm-relayer SUBNET_ID=xxx CHAIN_ID=yyy RELAYER_KEY=0x..."
 	@echo "  make initialize-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"

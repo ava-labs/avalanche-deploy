@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  icm-relayer:
+    image: avaplatform/icm-relayer:{{ icm_relayer_version | default('v1.7.5') }}
+    container_name: icm-relayer
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /opt/icm-relayer/config.json:/app/config.json:ro
+      - /opt/icm-relayer/data:/data
+    command:
+      - --config-file
+      - /app/config.json
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:{{ icm_relayer_api_port | default(8080) }}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

@@ -1,0 +1,115 @@
+---
+# ICM Relayer Role - Deploy ICM Relayer for cross-chain messaging
+#
+# The ICM Relayer listens for Avalanche Warp Messages on source blockchains,
+# aggregates BLS signatures from validators, and delivers cross-chain messages
+# to destination blockchains.
+#
+# Required variables:
+#   icm_relayer_source_subnet_id: Subnet ID of the source L1
+#   icm_relayer_source_blockchain_id: Chain ID of the source L1
+#   icm_relayer_destination_private_key: Private key for relay transactions
+#
+# Optional variables:
+#   icm_relayer_version: Docker image tag (default: v1.7.5)
+#   icm_relayer_api_port: API port (default: 8080)
+#   icm_relayer_metrics_port: Metrics port (default: 9090)
+#   icm_relayer_log_level: Log level (default: info)
+#   icm_relayer_network: Network name (default: fuji)
+
+- name: Install Docker dependencies
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+    update_cache: true
+
+- name: Add Docker GPG key
+  ansible.builtin.apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Add Docker repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+
+- name: Install Docker
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: Start Docker service
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Create icm-relayer user
+  ansible.builtin.user:
+    name: icmrelayer
+    groups: docker
+    shell: /bin/bash
+    create_home: true
+
+- name: Create icm-relayer directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: icmrelayer
+    group: icmrelayer
+    mode: '0755'
+  loop:
+    - /opt/icm-relayer
+    - /opt/icm-relayer/data
+
+- name: Create ICM Relayer configuration file
+  ansible.builtin.template:
+    src: icm-relayer-config.json.j2
+    dest: /opt/icm-relayer/config.json
+    owner: icmrelayer
+    group: icmrelayer
+    mode: '0600'
+  notify: Restart icm-relayer
+
+- name: Create docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/icm-relayer/docker-compose.yml
+    owner: icmrelayer
+    group: icmrelayer
+    mode: '0644'
+
+- name: Create systemd service
+  ansible.builtin.template:
+    src: icm-relayer.service.j2
+    dest: /etc/systemd/system/icm-relayer.service
+    mode: '0644'
+  notify: Restart icm-relayer
+
+- name: Enable and start icm-relayer
+  ansible.builtin.systemd:
+    name: icm-relayer
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Wait for ICM Relayer to be ready
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ icm_relayer_api_port | default(8080) }}/health"
+    method: GET
+    status_code: 200
+  register: icm_relayer_health
+  until: icm_relayer_health.status == 200
+  retries: 30
+  delay: 5
+  ignore_errors: true

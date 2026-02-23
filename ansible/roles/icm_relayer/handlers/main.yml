@@ -1,0 +1,6 @@
+---
+- name: Restart icm-relayer
+  ansible.builtin.systemd:
+    name: icm-relayer
+    state: restarted
+    daemon_reload: true
