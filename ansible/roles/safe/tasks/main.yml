@@ -614,7 +614,7 @@
 
 - name: Wait for Client Gateway to be ready
   ansible.builtin.uri:
-    url: "http://localhost:{{ safe_cgw_port }}/health"
+    url: "http://localhost:{{ safe_cgw_port }}/about"
     method: GET
     status_code: 200
   register: safe_cgw_health
@@ -670,7 +670,7 @@
           '{{ safe_contracts.create_call }}',
           '{{ safe_contracts.sign_message_lib }}',
           '{{ safe_contracts.simulate_tx_accessor }}',
-          {{ safe_use_l2 | lower }}
+          {{ safe_use_l2 | ternary('True', 'False') }}
       )
       "
   register: safe_txs_init
@@ -755,7 +755,7 @@
       Internal Services (for debugging):
         Transaction Service: http://{{ ansible_host }}:{{ safe_txs_port }}/api/v1/about/
         Config Service:      http://{{ ansible_host }}:{{ safe_cfg_port }}/api/v1/about/
-        Client Gateway:      http://{{ ansible_host }}:{{ safe_cgw_port }}/health
+        Client Gateway:      http://{{ ansible_host }}:{{ safe_cgw_port }}/about
 
       {% if safe_use_letsencrypt %}
       SSL: Let's Encrypt certificate for {{ safe_domain }} (auto-renewal configured)

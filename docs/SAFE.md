@@ -133,7 +133,7 @@ curl -k https://<ip>/txs/api/v1/about/
 curl -k https://<ip>/cfg/api/v1/about/
 
 # Client Gateway
-curl -k https://<ip>/cgw/health
+curl -k https://<ip>/cgw/about
 ```
 
 ## Troubleshooting

@@ -51,7 +51,7 @@
 
     - name: Verify Client Gateway health
       ansible.builtin.uri:
-        url: "http://localhost:{{ safe_cgw_port }}/health"
+        url: "http://localhost:{{ safe_cgw_port }}/about"
         method: GET
       register: cgw_health
       failed_when: false
