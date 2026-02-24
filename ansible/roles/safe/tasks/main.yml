@@ -237,9 +237,29 @@
     dest: "{{ safe_install_dir }}/patch-safe-deployments.js"
     mode: '0644'
 
-- name: Check if patched Safe UI image exists
-  ansible.builtin.command:
-    cmd: docker images -q safe-ui-patched:{{ evm_chain_id }}
+- name: Check if patched Safe UI image exists and is correctly built
+  ansible.builtin.shell: |
+    set -eo pipefail
+    # Check if image exists
+    if ! docker images -q safe-ui-patched:{{ evm_chain_id }} | grep -q .; then
+      echo "NEEDS_BUILD"
+      exit 0
+    fi
+    # Verify the image has the chain ID in the JS bundles
+    if ! docker run --rm --entrypoint="" safe-ui-patched:{{ evm_chain_id }} \
+      sh -c 'grep -rl "{{ evm_chain_id }}" /usr/share/nginx/html/_next/static/chunks/*.js 2>/dev/null | head -1' | grep -q .; then
+      echo "NEEDS_BUILD"
+      exit 0
+    fi
+    # Verify the gateway URL points to our CGW (not safe-client.safe.global fallback)
+    if docker run --rm --entrypoint="" safe-ui-patched:{{ evm_chain_id }} \
+      sh -c 'grep -rl "safe-client.safe.global" /usr/share/nginx/html/_next/static/chunks/*.js 2>/dev/null | head -1' | grep -q .; then
+      echo "NEEDS_BUILD"
+      exit 0
+    fi
+    echo "OK"
+  args:
+    executable: /bin/bash
   register: safe_patched_ui_check
   changed_when: false
   failed_when: false
@@ -286,6 +306,22 @@
     docker rm safe-ui-build
     rm -rf /tmp/safe-ui-scripts
 
+    # Verify the chain ID was compiled into the JS bundles
+    if ! grep -rl '{{ evm_chain_id }}' /tmp/safe-ui-patched/_next/static/chunks/*.js >/dev/null 2>&1; then
+      echo "ERROR: Chain {{ evm_chain_id }} not found in built JS bundles. Patch may have failed." >&2
+      rm -rf /tmp/safe-ui-patched
+      exit 1
+    fi
+    echo "Verified: chain {{ evm_chain_id }} found in built JS bundles"
+
+    # Verify the gateway URL was compiled in (not falling back to safe-client.safe.global)
+    if grep -rl 'safe-client.safe.global' /tmp/safe-ui-patched/_next/static/chunks/*.js >/dev/null 2>&1; then
+      echo "ERROR: Gateway URL still points to safe-client.safe.global. .env.production may not have been applied." >&2
+      rm -rf /tmp/safe-ui-patched
+      exit 1
+    fi
+    echo "Verified: gateway URL does not contain safe-client.safe.global fallback"
+
     # Build nginx image with the patched build output
     cat > /tmp/Dockerfile.safe-ui << 'EOF'
     FROM nginx:alpine
@@ -305,7 +341,7 @@
     rm -rf /tmp/safe-ui-patched /tmp/Dockerfile.safe-ui
   args:
     executable: /bin/bash
-  when: safe_patched_ui_check.stdout == ""
+  when: safe_patched_ui_check.stdout | trim == "NEEDS_BUILD"
   register: safe_build_ui
   timeout: 1200
   changed_when: true
