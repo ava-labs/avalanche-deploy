@@ -5,6 +5,8 @@
 terraform.tfvars
 tfplan
 *.tfplan
+.obsidian/
+.claude/
 
 # Credentials (never commit)
 .aws-creds.sh

@@ -38,13 +38,13 @@ services:
     image: postgres:14-alpine
     container_name: safe-postgres-cgw
     environment:
-      POSTGRES_DB: {{ safe_cgw_db_name }}
+      POSTGRES_DB: safe_cgw
       POSTGRES_USER: {{ safe_db_user }}
       POSTGRES_PASSWORD: {{ safe_db_password }}
     volumes:
       - {{ safe_data_dir }}/postgres-cgw:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U {{ safe_db_user }} -d {{ safe_cgw_db_name }}"]
+      test: ["CMD-SHELL", "pg_isready -U {{ safe_db_user }} -d safe_cgw"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -102,12 +102,44 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
-  # Transaction Service - Worker (Celery)
-  txs-worker:
+  # Transaction Service - Worker: indexing
+  txs-worker-indexer:
     image: safeglobal/safe-transaction-service:{{ safe_txs_version }}
-    container_name: safe-txs-worker
+    container_name: safe-txs-worker-indexer
     env_file:
       - {{ safe_install_dir }}/txs.env
+    environment:
+      WORKER_QUEUES: default,indexing,processing
+    depends_on:
+      - txs-web
+    command: docker/web/celery/worker/run.sh
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # Transaction Service - Worker: contracts & tokens
+  txs-worker-contracts-tokens:
+    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}
+    container_name: safe-txs-worker-contracts-tokens
+    env_file:
+      - {{ safe_install_dir }}/txs.env
+    environment:
+      WORKER_QUEUES: contracts,tokens
+    depends_on:
+      - txs-web
+    command: docker/web/celery/worker/run.sh
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # Transaction Service - Worker: notifications & webhooks
+  txs-worker-notifications:
+    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}
+    container_name: safe-txs-worker-notifications
+    env_file:
+      - {{ safe_install_dir }}/txs.env
+    environment:
+      WORKER_QUEUES: notifications,webhooks
     depends_on:
       - txs-web
     command: docker/web/celery/worker/run.sh
@@ -144,23 +176,25 @@ services:
     command: docker/web/run_web.sh
     restart: unless-stopped
 
-  # Client Gateway
+  # Client Gateway (nest)
   cgw:
-    image: safeglobal/safe-client-gateway:{{ safe_cgw_version }}
+    image: {{ safe_cgw_image }}:{{ safe_cgw_version }}
     container_name: safe-cgw
     env_file:
       - {{ safe_install_dir }}/cgw.env
     depends_on:
+      redis:
+        condition: service_healthy
       postgres-cgw:
         condition: service_healthy
-      redis:
+      rabbitmq:
         condition: service_healthy
       txs-web:
         condition: service_started
       cfg:
         condition: service_started
     ports:
-      - "{{ safe_cgw_port }}:3666"
+      - "{{ safe_cgw_port }}:3000"
     restart: unless-stopped
 
   # Safe Wallet Web UI (patched for custom chain ID)

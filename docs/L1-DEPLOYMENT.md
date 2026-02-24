@@ -149,7 +149,13 @@ make configure-l1 SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID
 make status
 ```
 
-Your L1 is now running.
+This automatically deploys **eRPC** as a load balancer in front of your RPC nodes (auto-detected from `configs/l1/genesis/genesis.json`). To skip eRPC, add `SKIP_ERPC=true`.
+
+Your L1 is now running:
+
+- **Direct RPC**: `http://<rpc-ip>:9650/ext/bc/<chain-id>/rpc`
+- **eRPC (recommended)**: `http://<monitoring-ip>:4000` — load balanced, cached, automatic failover
+- **eRPC Health**: `http://<monitoring-ip>:4001/healthcheck`
 
 ## Optional: Initialize Validator Manager
 
@@ -193,8 +199,12 @@ Key settings:
 | S3 + KMS | - | ~$1 |
 | **Total** | | **~$651/mo** |
 
+## Kubernetes Alternative
+
+This guide covers the Terraform + Ansible path. To deploy L1 infrastructure on an existing Kubernetes cluster instead, see the [Kubernetes deployment guide](../kubernetes/README.md).
+
 ## Next Steps
 
-- [Deploy add-ons](ADD-ONS.md) (Blockscout, faucet, eRPC, The Graph, ICM Relayer)
+- [Deploy add-ons](ADD-ONS.md) (Blockscout, faucet, The Graph, ICM Relayer)
 - [Operations guide](OPERATIONS.md) (upgrades, monitoring, health checks)
 - [Troubleshooting](TROUBLESHOOTING.md)

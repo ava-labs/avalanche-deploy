@@ -156,27 +156,38 @@ echo "Contract patches complete."
 echo ""
 echo "Patching Gateway URL..."
 
-DEFAULT_GATEWAY="https://safe-client.safe.global"
 LOCAL_GATEWAY="/cgw"
 
-# Find all JS files and replace the gateway URL
+# Gateway URLs to replace (production + staging, in case build mode varies)
+GATEWAY_URLS=(
+    "https://safe-client.safe.global"
+    "https://safe-client.staging.5afe.dev"
+)
+
+# Find all JS files and replace gateway URLs
 JS_FILES=$(find /tmp/safe-ui-patched -name "*.js" -type f 2>/dev/null)
 GATEWAY_PATCHED=0
 
 for js_file in $JS_FILES; do
-    if grep -q "$DEFAULT_GATEWAY" "$js_file" 2>/dev/null; then
-        sed -i.tmp "s|$DEFAULT_GATEWAY|$LOCAL_GATEWAY|g" "$js_file"
-        rm -f "${js_file}.tmp"
-        GATEWAY_PATCHED=$((GATEWAY_PATCHED + 1))
-    fi
+    for gw_url in "${GATEWAY_URLS[@]}"; do
+        if grep -q "$gw_url" "$js_file" 2>/dev/null; then
+            sed -i.tmp "s|$gw_url|$LOCAL_GATEWAY|g" "$js_file"
+            rm -f "${js_file}.tmp"
+            GATEWAY_PATCHED=$((GATEWAY_PATCHED + 1))
+        fi
+    done
 done
 
 echo "  Patched gateway URL in $GATEWAY_PATCHED files"
 
 # Verify gateway patch
-REMAINING=$(grep -r "$DEFAULT_GATEWAY" /tmp/safe-ui-patched 2>/dev/null | wc -l | tr -d ' ')
+REMAINING=0
+for gw_url in "${GATEWAY_URLS[@]}"; do
+    COUNT=$(grep -r "$gw_url" /tmp/safe-ui-patched 2>/dev/null | wc -l | tr -d ' ')
+    REMAINING=$((REMAINING + COUNT))
+done
 if [ "$REMAINING" -gt 0 ]; then
-    echo "  Warning: $REMAINING references to default gateway remain"
+    echo "  Warning: $REMAINING references to default gateways remain"
 fi
 
 echo ""

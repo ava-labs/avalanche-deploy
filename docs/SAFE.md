@@ -1,15 +1,5 @@
 # Safe Multisig Infrastructure
 
-> **⚠️ EXPERIMENTAL: This feature is not production-ready.**
->
-> Safe Multisig support is experimental and has known issues:
-> - Transaction indexing may be slow or incomplete
-> - Docker containers may require manual restarts
-> - HTTPS certificate management can be unreliable
-> - Safe contracts must be manually merged into genesis before L1 creation
->
-> Use at your own risk. Contributions welcome!
-
 This guide explains how to deploy Safe (formerly Gnosis Safe) multisig infrastructure on your Avalanche L1.
 
 ## Overview
@@ -17,35 +7,40 @@ This guide explains how to deploy Safe (formerly Gnosis Safe) multisig infrastru
 Safe is a smart contract wallet that requires multiple signatures to execute transactions. This deployment includes:
 
 - **Safe Wallet Web UI** - User interface for creating and managing Safes
-- **Transaction Service** - Backend API for collecting signatures and indexing transactions
+- **Transaction Service** - Backend API for collecting signatures and indexing transactions (3 specialized Celery workers)
 - **Config Service** - Chain configuration and metadata
-- **Client Gateway** - API aggregation layer for the web UI
+- **Client Gateway (Nest)** - API aggregation layer for the web UI
 - **PostgreSQL, Redis, RabbitMQ** - Supporting infrastructure
+
+Contracts are deployed at runtime via the Singleton Factory (`0x914d7Fec6aaC8cd542e72Bca78B30650d45643d7`), matching how Safe works on every other EVM chain.
 
 ## Prerequisites
 
 1. Deployed Avalanche L1 with RPC node running
-2. Genesis file configured with Safe contracts (see below)
+2. Singleton Factory deployed at `0x914d7Fec6aaC8cd542e72Bca78B30650d45643d7` (include in genesis alloc)
 3. Ansible inventory with `rpc` host group
+4. `AVALANCHE_PRIVATE_KEY` set (for contract deployment)
 
 ## Quick Start
 
-### Step 1: Add Safe Contracts to Genesis
-
-> **Note:** Safe contracts are NOT included in `configs/l1/genesis/genesis.json` by default. You must explicitly merge them before creating your L1.
-
-Before creating your L1, merge Safe contracts into your genesis file:
-
 ```bash
-make safe-genesis
+# Single command - deploys contracts + full backend stack
+make safe
 ```
 
-To reset `configs/l1/genesis/genesis.json` back to clean state (removes Safe contracts):
+That's it. The `safe` target:
+1. Auto-detects `CHAIN_ID` and `EVM_CHAIN_ID` from `l1.env`
+2. Deploys 8 Safe v1.4.1 contracts via Singleton Factory (if `AVALANCHE_PRIVATE_KEY` is set)
+3. Runs the Ansible playbook to set up the full backend + UI
+
+You can also pass chain IDs explicitly:
 ```bash
-make reset-genesis
+make safe CHAIN_ID=xxx EVM_CHAIN_ID=yyy
 ```
 
-This adds 8 Safe v1.4.1 contracts at canonical CREATE2 addresses:
+### Contract Addresses
+
+All 8 contracts deploy to canonical CREATE2 addresses (identical to mainnet Ethereum):
 
 | Contract | Address |
 |----------|---------|
@@ -58,46 +53,40 @@ This adds 8 Safe v1.4.1 contracts at canonical CREATE2 addresses:
 | SignMessageLib | `0xd53cd0aB83D845Ac265BE939c57F53AD838012c9` |
 | SimulateTxAccessor | `0x3d4BA2E0884aa488718476ca2FB8Efc291A46199` |
 
-### Step 2: Create Your L1
+### Deploy Contracts Separately
+
+If you need to deploy contracts independently (e.g., from a different machine):
 
 ```bash
-make create-l1
-./tools/create-l1/create-l1 \
-  --network=fuji \
-  --validators=<ip,ip,...> \
-  --chain-name=<name> \
-  --output=l1.env
-source l1.env  # Sets SUBNET_ID and CHAIN_ID from tool output
+RPC_URL=http://<node-ip>:9650/ext/bc/<chain-id>/rpc \
+PRIVATE_KEY=0x... \
+./scripts/safe/deploy-contracts.sh
 ```
 
-### Step 3: Deploy Safe Infrastructure
-
-```bash
-make safe CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=<your-evm-chain-id>
-```
-
-The EVM chain ID should match the `chainId` field in your genesis file (`configs/l1/genesis/genesis.json` by default).
+The script is idempotent - it skips contracts that are already deployed.
 
 ## Architecture
 
 ```
 ┌─────────────────── RPC Node ───────────────────┐
 │                                                │
-│  Nginx (:8080)                                 │
+│  Nginx (:8080 -> :443, :4443)                  │
 │    ├── /        → Safe Wallet Web UI           │
-│    ├── /cgw/*   → Client Gateway               │
+│    ├── /cgw/*   → Client Gateway (Nest)        │
 │    ├── /txs/*   → Transaction Service          │
-│    └── /cfg/*   → Config Service               │
+│    ├── /cfg/*   → Config Service               │
+│    ├── /rpc     → Avalanche RPC proxy          │
+│    └── :4443    → Blockscout Block Explorer    │
 │                                                │
-│  Docker Compose (12 containers)                │
+│  Docker Compose (14 containers)                │
 │    - 3x PostgreSQL (txs, cfg, cgw)             │
 │    - Redis, RabbitMQ                           │
-│    - TXS Web + Worker + Scheduler              │
-│    - Config Service, Client Gateway            │
+│    - TXS Web + 3 Workers + Scheduler           │
+│    - Config Service, Client Gateway (Nest)     │
 │    - Safe Wallet Web UI                        │
 │                                                │
 │  AvalancheGo (:9650)                           │
-│    └── L1 RPC with pre-deployed Safe contracts │
+│    └── L1 RPC with Safe contracts              │
 └────────────────────────────────────────────────┘
 ```
 
@@ -114,33 +103,21 @@ https://<rpc-node-ip>/
 **Option 1: Self-signed certificate (default)**
 
 A self-signed SSL certificate is auto-generated. Accept the browser security warning to proceed.
-Works with IP addresses.
 
 **Option 2: Let's Encrypt (recommended for production)**
 
-For production deployments with a domain name, use Let's Encrypt for trusted SSL:
-
 ```bash
-cd ansible && ansible-playbook -i "inventory/${CLOUD:-aws}_hosts" playbooks/05-deploy-safe.yml \
-  -e "chain_id=$CHAIN_ID" \
-  -e "evm_chain_id=99999" \
-  -e "safe_use_letsencrypt=true" \
+make safe -e "safe_use_letsencrypt=true" \
   -e "safe_domain=safe.yourdomain.com" \
   -e "safe_letsencrypt_email=admin@yourdomain.com"
 ```
-
-Requirements:
-- Domain pointing to your RPC node's public IP
-- Port 80 open for ACME challenge (temporary, during cert issuance)
-- Port 443 open for HTTPS
-
-Auto-renewal is configured via cron (daily at 3am).
 
 ### API Endpoints
 
 | Service | URL |
 |---------|-----|
 | Web UI | `https://<ip>/` |
+| Block Explorer | `https://<ip>:4443/` |
 | Transaction Service API | `https://<ip>/txs/api/v1/` |
 | Config Service API | `https://<ip>/cfg/api/v1/` |
 | Client Gateway | `https://<ip>/cgw/` |
@@ -159,75 +136,14 @@ curl -k https://<ip>/cfg/api/v1/about/
 curl -k https://<ip>/cgw/health
 ```
 
-## Creating a Safe
-
-1. Open `https://<rpc-node-ip>/` in your browser
-2. Connect your wallet (MetaMask, WalletConnect, etc.)
-3. Click "Create new Safe"
-4. Add owner addresses and set threshold
-5. Review and deploy
-
-## Configuration
-
-### Default Ports
-
-| Service | Port |
-|---------|------|
-| Nginx HTTP redirect | 8080 |
-| Nginx HTTPS (external) | 443 |
-| Transaction Service | 8001 |
-| Config Service | 8002 |
-| Client Gateway | 8003 |
-| Web UI | 3000 |
-
-### Customization
-
-Override defaults in your playbook or via `-e` flags:
-
-```bash
-ansible-playbook playbooks/05-deploy-safe.yml \
-  -e "chain_id=$CHAIN_ID" \
-  -e "evm_chain_id=99999" \
-  -e "safe_http_port=8888" \
-  -e "chain_name=My Custom L1"
-```
-
-### Environment Variables
-
-Key configuration files:
-- `txs.env` - Transaction Service (Django)
-- `cfg.env` - Config Service (Django)
-- `cgw.env` - Client Gateway (Node.js)
-- `ui.env` - Web UI (Next.js)
-
 ## Troubleshooting
 
 ### Services won't start
 
-Check Docker logs:
 ```bash
 ssh <rpc-node>
 cd /opt/safe
-docker-compose logs -f
-```
-
-### Transaction Service can't connect to RPC
-
-Verify avalanchego is running and the RPC is accessible:
-```bash
-curl -X POST -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
-  http://localhost:9650/ext/bc/<CHAIN_ID>/rpc
-```
-
-### Database issues
-
-Reset databases (WARNING: destroys all Safe data):
-```bash
-cd /opt/safe
-docker-compose down -v
-rm -rf /opt/safe/data/postgres-*
-docker-compose up -d
+docker compose logs -f
 ```
 
 ### Check service health
@@ -237,60 +153,44 @@ systemctl status safe
 docker ps --format "table {{.Names}}\t{{.Status}}"
 ```
 
-## Maintenance
+### Database issues
 
-### Restart services
-
-```bash
-systemctl restart safe
-```
-
-### View logs
-
-```bash
-# All services
-cd /opt/safe && docker-compose logs -f
-
-# Specific service
-docker logs -f safe-txs-web
-```
-
-### Update versions
-
-Edit `/opt/safe/docker-compose.yml` and change image tags, then:
+Reset databases (WARNING: destroys all Safe data):
 ```bash
 cd /opt/safe
-docker-compose pull
-docker-compose up -d
+docker compose down -v
+rm -rf /opt/safe/data/postgres-*
+docker compose up -d
+```
+
+## Configuration
+
+### Default Ports
+
+| Service | Port |
+|---------|------|
+| Nginx HTTP redirect | 8080 |
+| Nginx HTTPS | 443 |
+| Blockscout HTTPS | 4443 |
+| Transaction Service | 8001 |
+| Config Service | 8002 |
+| Client Gateway | 8003 |
+| Web UI | 3000 |
+
+### Customization
+
+Override defaults via `-e` flags:
+
+```bash
+make safe EVM_CHAIN_ID=99999 \
+  -e "safe_http_port=8888" \
+  -e "safe_chain_name=My Custom L1"
 ```
 
 ## Security Considerations
 
-1. **Firewall**: Only expose ports 80/443 to the internet (for ACME/HTTPS)
-2. **HTTPS**:
-   - Self-signed cert works for testing (browser warning)
-   - Use `safe_use_letsencrypt=true` for production with trusted SSL
-3. **Secrets**: Auto-generated and stored in `/opt/safe/`:
-   - `.db_password` - PostgreSQL password
-   - `.rabbitmq_password` - RabbitMQ password
-   - `.txs_secret_key` - Transaction Service Django secret
-   - `.cfg_secret_key` - Config Service Django secret
-   - `.webhook_token` - CGW/Config Service webhook auth
+1. **Firewall**: Only expose ports 80/443/4443 to the internet
+2. **HTTPS**: Self-signed cert for testing, Let's Encrypt for production
+3. **Secrets**: Auto-generated and stored in `/opt/safe/` (`.db_password`, `.rabbitmq_password`, etc.)
 4. **Security Headers**: nginx configured with HSTS, X-Frame-Options, X-Content-Type-Options
 5. **RPC access**: Transaction Service connects to local RPC via `host.docker.internal`
-6. **Input validation**: All contract addresses and chain IDs are validated
-
-## Contract Addresses
-
-These canonical Safe v1.4.1 addresses are identical to mainnet Ethereum and other EVM chains, ensuring wallet compatibility:
-
-```
-Safe L2 v1.4.1:           0x29fcB43b46531BcA003ddC8FCB67FFE91900C762
-SafeProxyFactory v1.4.1:  0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67
-MultiSend v1.4.1:         0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526
-MultiSendCallOnly v1.4.1: 0x9641d764fc13c8B624c04430C7356C1C7C8102e2
-FallbackHandler v1.4.1:   0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99
-CreateCall v1.4.1:        0x9b35Af71d77eaf8d7e40252370304687390A1A52
-SignMessageLib v1.4.1:    0xd53cd0aB83D845Ac265BE939c57F53AD838012c9
-SimulateTxAccessor v1.4.1:0x3d4BA2E0884aa488718476ca2FB8Efc291A46199
-```

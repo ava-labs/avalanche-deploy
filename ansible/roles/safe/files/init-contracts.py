@@ -66,19 +66,38 @@ def create_master_copy(address, version, l2=True):
             "version": version,
             "l2": l2,
             "deployer": "Safe Team",
+            "initial_block_number": 0,
+            "tx_block_number": 0,
         }
     )
-    status = "Created" if created else "Exists"
-    safe_type = "L2" if l2 else "L1"
-    print("MasterCopy " + safe_type + " v" + version + ": " + status)
+    # Fix existing entries with NULL tx_block_number (indexer skips NULLs)
+    if not created and mc.tx_block_number is None:
+        mc.tx_block_number = 0
+        mc.save(update_fields=["tx_block_number"])
+        print("MasterCopy " + ("L2" if l2 else "L1") + " v" + version + ": Fixed tx_block_number")
+    else:
+        status = "Created" if created else "Exists"
+        print("MasterCopy " + ("L2" if l2 else "L1") + " v" + version + ": " + status)
     return created
 
 
 def create_proxy_factory(address):
     """Create a ProxyFactory entry if it doesn't exist."""
-    pf, created = ProxyFactory.objects.get_or_create(address=address.lower())
-    status = "Created" if created else "Exists"
-    print("ProxyFactory: " + status)
+    pf, created = ProxyFactory.objects.get_or_create(
+        address=address.lower(),
+        defaults={
+            "initial_block_number": 0,
+            "tx_block_number": 0,
+        }
+    )
+    # Fix existing entries with NULL tx_block_number (indexer skips NULLs)
+    if not created and pf.tx_block_number is None:
+        pf.tx_block_number = 0
+        pf.save(update_fields=["tx_block_number"])
+        print("ProxyFactory: Fixed tx_block_number")
+    else:
+        status = "Created" if created else "Exists"
+        print("ProxyFactory: " + status)
     return created
 
 

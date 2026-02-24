@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe safe-genesis reset-genesis reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
+.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
 
 # Default cloud provider
 CLOUD ?= aws
@@ -119,10 +119,11 @@ deploy:
 	@echo "Done! Run 'make status' to check sync progress."
 
 configure-l1:
-	@if [ -z "$(SUBNET_ID)" ]; then echo "Usage: make configure-l1 SUBNET_ID=xxx CHAIN_ID=yyy"; exit 1; fi
+	@if [ -z "$(SUBNET_ID)" ]; then echo "Usage: make configure-l1 SUBNET_ID=xxx CHAIN_ID=yyy [SKIP_ERPC=true]"; exit 1; fi
 	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/02-configure-l1.yml \
 		-e subnet_id=$(SUBNET_ID) \
-		-e chain_id=$(CHAIN_ID)
+		-e chain_id=$(CHAIN_ID) \
+		$(if $(SKIP_ERPC),-e skip_erpc=true,)
 
 reset-l1:
 	@echo "Resetting L1 chain data on all nodes..."
@@ -313,23 +314,30 @@ list-snapshots: check-primary-cloud
 # Safe Multisig
 #
 safe:
-	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make safe CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
-	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make safe CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
+	$(eval _CHAIN_ID := $(or $(CHAIN_ID),$(shell [ -f l1.env ] && . ./l1.env 2>/dev/null && echo $$CHAIN_ID)))
+	$(eval _EVM_CHAIN_ID := $(or $(EVM_CHAIN_ID),$(shell [ -f l1.env ] && . ./l1.env 2>/dev/null && echo $$EVM_CHAIN_ID)))
+	$(eval _CHAIN_NAME := $(or $(CHAIN_NAME),$(shell [ -f l1.env ] && . ./l1.env 2>/dev/null && echo $$CHAIN_NAME)))
+	@if [ -z "$(_CHAIN_ID)" ] || [ -z "$(_EVM_CHAIN_ID)" ]; then \
+		echo "Error: CHAIN_ID/EVM_CHAIN_ID not found. Run 'make create-l1' first or pass explicitly."; exit 1; fi
+	@if [ -n "$(AVALANCHE_PRIVATE_KEY)" ]; then \
+		echo "Deploying Safe contracts via Singleton Factory..."; \
+		RPC_URL=$$(cd terraform/$(CLOUD) && terraform output -json rpc_ips 2>/dev/null | jq -r '.[0]' 2>/dev/null || echo ""); \
+		if [ -n "$$RPC_URL" ] && [ "$$RPC_URL" != "null" ]; then \
+			RPC_URL="http://$$RPC_URL:9650/ext/bc/$(_CHAIN_ID)/rpc" \
+			PRIVATE_KEY="$(AVALANCHE_PRIVATE_KEY)" \
+			./scripts/safe/deploy-contracts.sh; \
+		else \
+			echo "Warning: Could not determine RPC URL from terraform. Skipping contract deployment."; \
+			echo "Deploy manually: RPC_URL=... PRIVATE_KEY=... ./scripts/safe/deploy-contracts.sh"; \
+		fi; \
+	else \
+		echo "Note: AVALANCHE_PRIVATE_KEY not set, skipping contract deployment."; \
+		echo "Contracts must already be deployed (or deploy manually with scripts/safe/deploy-contracts.sh)."; \
+	fi
 	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/05-deploy-safe.yml \
-		-e "chain_id=$(CHAIN_ID)" \
-		-e "evm_chain_id=$(EVM_CHAIN_ID)"
-
-safe-genesis:
-	@echo "=============================================="
-	@echo "  EXPERIMENTAL: Safe Multisig Genesis Merge"
-	@echo "=============================================="
-	@./scripts/safe/merge-genesis.sh "$(L1_GENESIS_FILE)"
-
-reset-genesis:
-	@echo "Resetting $(L1_GENESIS_FILE) to clean state..."
-	@mkdir -p "$(dir $(L1_GENESIS_FILE))"
-	@cp "$(L1_GENESIS_TEMPLATE)" "$(L1_GENESIS_FILE)"
-	@echo "Done! $(L1_GENESIS_FILE) reset (Safe contracts removed)"
+		-e "chain_id=$(_CHAIN_ID)" \
+		-e "evm_chain_id=$(_EVM_CHAIN_ID)" \
+		$(if $(_CHAIN_NAME),-e "safe_chain_name=$(_CHAIN_NAME)" -e "safe_chain_short_name=$(_CHAIN_NAME)")
 
 #
 # Kubernetes
@@ -625,16 +633,16 @@ help-l1:
 	@echo "  make infra CLOUD=aws|gcp|azure"
 	@echo "  make deploy CLOUD=aws|gcp|azure NETWORK=fuji|mainnet"
 	@echo "  make create-l1"
-	@echo "  make configure-l1 CLOUD=<provider> SUBNET_ID=... CHAIN_ID=..."
+	@echo "  make configure-l1 CLOUD=<provider> SUBNET_ID=... CHAIN_ID=...  (includes eRPC)"
 	@echo "  make status CLOUD=<provider>"
 	@echo ""
 	@echo "Add-ons:"
 	@echo "  make deploy-blockscout CHAIN_ID=... EVM_CHAIN_ID=... [CHAIN_NAME=...]"
 	@echo "  make faucet CHAIN_ID=... EVM_CHAIN_ID=... FAUCET_KEY=0x..."
 	@echo "  make graph-node CHAIN_ID=... [NETWORK_NAME=...]"
-	@echo "  make erpc CHAIN_ID=... EVM_CHAIN_ID=..."
+	@echo "  make erpc CHAIN_ID=... EVM_CHAIN_ID=...          (standalone re-deploy)"
 	@echo "  make icm-relayer SUBNET_ID=... CHAIN_ID=... RELAYER_KEY=0x..."
-	@echo "  make safe-genesis | make safe ... | make reset-genesis"
+	@echo "  make safe [CHAIN_ID=... EVM_CHAIN_ID=...]  (auto-detects from l1.env)"
 	@echo ""
 	@echo "Ops:"
 	@echo "  make monitoring | make health-checks | make rolling-restart | make upgrade VERSION=x.y.z"
@@ -720,10 +728,8 @@ help-all:
 	@echo "  make init-validator-manager      Build the validator manager tool"
 	@echo "  make initialize-validator-manager Deploy and initialize validator manager contract"
 	@echo ""
-	@echo "Safe Multisig (EXPERIMENTAL):"
-	@echo "  make safe-genesis Merge Safe contracts into $(L1_GENESIS_FILE) (EXPERIMENTAL)"
-	@echo "  make safe         Deploy Safe infrastructure (EXPERIMENTAL)"
-	@echo "  make reset-genesis Reset $(L1_GENESIS_FILE) to clean state (no Safe contracts)"
+	@echo "Safe Multisig:"
+	@echo "  make safe         Deploy Safe contracts + infrastructure (auto-detects chain from l1.env)"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make lint             Run ansible-lint and terraform fmt checks"
@@ -742,6 +748,7 @@ help-all:
 	@echo "  NETWORK=fuji|mainnet (default: fuji)"
 	@echo "  AUTO_APPROVE=true    Auto-confirm terraform destroy (use with care)"
 	@echo "  TF_INIT_RETRIES=3    Terraform init/validate retry count"
+	@echo "  SKIP_ERPC=true           Skip automatic eRPC deployment during configure-l1"
 	@echo "  SKIP_TERRAFORM_VALIDATE=true Skip Terraform validation (air-gapped/local only)"
 	@echo "  K8S_DIR=kubernetes   Kubernetes working directory"
 	@echo "  K8S_KIND_IMAGE=...   kind node image for make k8s-kind"

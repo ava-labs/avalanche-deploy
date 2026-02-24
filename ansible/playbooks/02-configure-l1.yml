@@ -214,10 +214,155 @@
       ansible.builtin.debug:
         msg: "{{ inventory_hostname }} is now tracking subnet {{ subnet_id }}{% if chain_id != '' %} (L1 chain ready){% endif %}"
 
+- name: Auto-detect EVM chain ID and build eRPC upstreams
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Skip eRPC block when skip_erpc is set
+      ansible.builtin.set_fact:
+        erpc_skipped: true
+      when: skip_erpc | default(false) | bool
+
+    - name: Check for genesis file
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../../configs/l1/genesis/genesis.json"
+      register: genesis_file
+      when: not (skip_erpc | default(false) | bool)
+
+    - name: Read genesis and extract EVM chain ID
+      ansible.builtin.set_fact:
+        erpc_evm_chain_id: "{{ (lookup('file', playbook_dir + '/../../configs/l1/genesis/genesis.json') | from_json).config.chainId }}"
+      when:
+        - not (skip_erpc | default(false) | bool)
+        - genesis_file.stat.exists | default(false)
+      failed_when: false
+
+    - name: Skip eRPC if EVM chain ID not found
+      ansible.builtin.debug:
+        msg: "Skipping eRPC: could not read config.chainId from genesis.json"
+      when:
+        - not (skip_erpc | default(false) | bool)
+        - erpc_evm_chain_id is not defined or erpc_evm_chain_id == ''
+
+    - name: Mark eRPC as skipped when no chain ID
+      ansible.builtin.set_fact:
+        erpc_skipped: true
+      when:
+        - not (skip_erpc | default(false) | bool)
+        - erpc_evm_chain_id is not defined or erpc_evm_chain_id == ''
+
+    - name: Check for RPC groups
+      ansible.builtin.set_fact:
+        has_rpc_nodes: >-
+          {{ (groups['rpc_archive'] | default([]) | length > 0) or
+             (groups['rpc_pruned'] | default([]) | length > 0) or
+             (groups['rpc'] | default([]) | length > 0) }}
+      when: not (erpc_skipped | default(false) | bool)
+
+    - name: Skip eRPC if no RPC groups found
+      ansible.builtin.debug:
+        msg: "Skipping eRPC: no rpc_archive, rpc_pruned, or rpc groups in inventory"
+      when:
+        - not (erpc_skipped | default(false) | bool)
+        - not (has_rpc_nodes | default(false) | bool)
+
+    - name: Mark eRPC as skipped when no RPC nodes
+      ansible.builtin.set_fact:
+        erpc_skipped: true
+      when:
+        - not (erpc_skipped | default(false) | bool)
+        - not (has_rpc_nodes | default(false) | bool)
+
+    - name: Build archive upstream endpoints
+      ansible.builtin.set_fact:
+        erpc_upstreams: >-
+          {{ erpc_upstreams | default([]) + [{
+            'id': 'rpc-archive-' ~ (idx + 1),
+            'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ chain_id ~ '/rpc',
+            'rpc_type': 'archive'
+          }] }}
+      loop: "{{ groups['rpc_archive'] | default([]) }}"
+      loop_control:
+        index_var: idx
+      when:
+        - not (erpc_skipped | default(false) | bool)
+        - groups['rpc_archive'] is defined
+
+    - name: Build pruned upstream endpoints
+      ansible.builtin.set_fact:
+        erpc_upstreams: >-
+          {{ erpc_upstreams | default([]) + [{
+            'id': 'rpc-pruned-' ~ (idx + 1),
+            'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ chain_id ~ '/rpc',
+            'rpc_type': 'pruned'
+          }] }}
+      loop: "{{ groups['rpc_pruned'] | default([]) }}"
+      loop_control:
+        index_var: idx
+      when:
+        - not (erpc_skipped | default(false) | bool)
+        - groups['rpc_pruned'] is defined
+
+    - name: Fallback - build upstream endpoints from generic rpc group
+      ansible.builtin.set_fact:
+        erpc_upstreams: >-
+          {{ erpc_upstreams | default([]) + [{
+            'id': 'rpc-' ~ (idx + 1),
+            'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ chain_id ~ '/rpc',
+            'rpc_type': hostvars[item]['rpc_type'] | default('archive')
+          }] }}
+      loop: "{{ groups['rpc'] | default([]) }}"
+      loop_control:
+        index_var: idx
+      when:
+        - not (erpc_skipped | default(false) | bool)
+        - (groups['rpc_archive'] is not defined or groups['rpc_archive'] | length == 0)
+        - (groups['rpc_pruned'] is not defined or groups['rpc_pruned'] | length == 0)
+
+    - name: Select eRPC deployment host
+      ansible.builtin.set_fact:
+        erpc_deploy_host: "{{ 'monitoring[0]' if (groups.get('monitoring', []) | length) > 0 else 'rpc[0]' }}"
+      when: not (erpc_skipped | default(false) | bool)
+
+- name: Deploy eRPC
+  hosts: monitoring[0]:rpc[0]
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Skip if eRPC deployment not needed
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']['erpc_skipped'] | default(false) | bool
+
+    - name: Determine whether this host should run eRPC deployment
+      ansible.builtin.set_fact:
+        deploy_erpc_here: "{{ inventory_hostname == (groups['monitoring'][0] if (groups.get('monitoring', []) | length) > 0 else groups['rpc'][0]) }}"
+
+    - name: Wait for system to become reachable
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+      when: deploy_erpc_here
+
+  roles:
+    - role: erpc
+      when: deploy_erpc_here
+      vars:
+        erpc_chain_id: "{{ hostvars['localhost']['chain_id'] }}"
+        erpc_evm_chain_id: "{{ hostvars['localhost']['erpc_evm_chain_id'] }}"
+        erpc_upstreams: "{{ hostvars['localhost']['erpc_upstreams'] }}"
+
 - name: Display completion message
   hosts: localhost
   gather_facts: false
   tasks:
+    - name: Get eRPC host
+      ansible.builtin.set_fact:
+        erpc_host: >-
+          {{ hostvars[groups['monitoring'][0]]['ansible_host']
+            if (groups.get('monitoring', []) | length) > 0
+            else hostvars[groups['rpc'][0]]['ansible_host'] }}
+      when: not (erpc_skipped | default(false) | bool)
+
     - name: Show L1 info
       ansible.builtin.debug:
         msg: |
@@ -242,5 +387,12 @@
           {% for host in groups['validators'] | default([]) %}
             http://{{ hostvars[host]['ansible_host'] }}:9650/ext/bc/{{ chain_id }}/rpc (validator - SSH tunnel only)
           {% endfor %}
+          {% if not (erpc_skipped | default(false) | bool) %}
+
+          eRPC Load Balancer (recommended for dApps):
+            http://{{ erpc_host }}:4000
+          eRPC Health Check:
+            http://{{ erpc_host }}:4001/healthcheck
+          {% endif %}
 
           ============================================

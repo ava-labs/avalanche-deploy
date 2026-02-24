@@ -71,7 +71,9 @@ Endpoints:
 
 ## eRPC (Load Balancer)
 
-Deploy eRPC for RPC load balancing, caching, and automatic failover:
+> **Included by default.** eRPC is automatically deployed as part of `make configure-l1`. The EVM chain ID is auto-detected from `configs/l1/genesis/genesis.json`. Skip with `SKIP_ERPC=true`.
+
+To re-deploy or reconfigure eRPC standalone:
 
 ```bash
 source l1.env
@@ -147,19 +149,13 @@ The ICM Relayer listens for Avalanche Warp Messages on source blockchains, aggre
 make k8s-icm-relayer SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID RELAYER_KEY=0x...
 ```
 
-## Safe Multisig (Experimental)
-
-> **Warning:** Safe Multisig support is experimental and not production-ready. Known issues include transaction indexing delays, Docker container restarts, and HTTPS certificate management.
+## Safe Multisig
 
 See [SAFE.md](SAFE.md) for deploying Gnosis Safe infrastructure.
 
 ```bash
-# Merge Safe contracts into genesis (before L1 creation)
-make safe-genesis
-
-# Deploy Safe infrastructure (after L1 is running)
-make safe CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999
-
-# Reset genesis to remove Safe contracts
-make reset-genesis
+# Deploy Safe contracts + infrastructure (auto-detects chain from l1.env)
+make safe
 ```
+
+Requires the Singleton Factory (`0x914d7Fec6aaC8cd542e72Bca78B30650d45643d7`) in your genesis alloc.

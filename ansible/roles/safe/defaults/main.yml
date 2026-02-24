@@ -19,15 +19,15 @@ safe_native_currency_symbol: "AVAX"
 safe_native_currency_decimals: 18
 
 # Docker image versions (Safe Global official images)
-safe_txs_version: "v4.26.1"
-safe_cfg_version: "v2.73.0"
-safe_cgw_version: "v3.43.0"
+safe_txs_version: "v5.42.1"
+safe_cfg_version: "v2.92.1"
+safe_cgw_version: "v1.102.0"
+safe_cgw_image: "safeglobal/safe-client-gateway-nest"
 safe_ui_version: "v1.31.0"
 
 # Database configuration
 safe_txs_db_name: "safe_txs"
 safe_cfg_db_name: "safe_cfg"
-safe_cgw_db_name: "safe_cgw"
 safe_db_user: "safe"
 # Password will be set in tasks via set_fact to ensure consistency
 safe_db_password: ""
@@ -41,7 +41,7 @@ safe_rabbitmq_user: "safe"
 safe_rabbitmq_password: ""
 
 # Safe contract addresses - canonical CREATE2 addresses from @safe-global/safe-deployments v1.4.1
-# These are pre-deployed in configs/l1/genesis/genesis.json via scripts/safe/genesis-contracts.json
+# Deployed at runtime via Singleton Factory (scripts/safe/deploy-contracts.sh)
 #
 # To use custom addresses (e.g., for non-L2 Safe), override these in your playbook:
 #   safe_contracts:

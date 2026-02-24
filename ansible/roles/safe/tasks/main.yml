@@ -126,7 +126,7 @@
   ansible.builtin.apt:
     name:
       - docker.io
-      - docker-compose
+      - docker-compose-v2
     state: present
     update_cache: true
   when: safe_docker_check.rc != 0
@@ -227,12 +227,15 @@
     mode: '0600'
   notify: Restart safe services
 
-# Build patched Safe UI Docker image for custom chain ID support
-- name: Copy Safe UI patch script
+# Build Safe UI Docker image with custom chain support
+# Instead of patching minified JS after build, we patch the @safe-global/safe-deployments
+# source JSON files BEFORE build (like AshAvalanche does with their safe-deployments fork).
+# This ensures the protocol-kit can fully resolve contract addresses for the custom chain.
+- name: Copy safe-deployments patch script
   ansible.builtin.copy:
-    src: patch-safe-ui.sh
-    dest: "{{ safe_install_dir }}/patch-safe-ui.sh"
-    mode: '0755'
+    src: patch-safe-deployments.js
+    dest: "{{ safe_install_dir }}/patch-safe-deployments.js"
+    mode: '0644'
 
 - name: Check if patched Safe UI image exists
   ansible.builtin.command:
@@ -245,38 +248,45 @@
   ansible.builtin.shell: |
     set -eo pipefail
     # Clean up any previous attempts
-    rm -rf /tmp/safe-ui-patched
+    rm -rf /tmp/safe-ui-patched /tmp/safe-ui-scripts
     docker rm -f safe-ui-build 2>/dev/null || true
 
     # Pull the official image
     docker pull safeglobal/safe-wallet-web:{{ safe_ui_version }}
 
-    # Build static files inside the container (v1.31.0+ builds at runtime, no pre-built /app/out)
-    # Set NEXT_PUBLIC_GATEWAY_URL_PRODUCTION to our gateway
-    echo "Building Safe UI static files (this may take a few minutes)..."
+    # Copy patch script to a volume mount directory
+    mkdir -p /tmp/safe-ui-scripts
+    cp {{ safe_install_dir }}/patch-safe-deployments.js /tmp/safe-ui-scripts/
+
+    # Build static files inside the container:
+    # 1. Write .env.production (Next.js reads this for DefinePlugin inlining of NEXT_PUBLIC_* vars)
+    # 2. Patch safe-deployments to add our chain to networkAddresses (pre-build)
+    # 3. Run yarn build
+    # NOTE: Using .env.production file instead of -e flags because Next.js DefinePlugin
+    # does not inline process.env.NEXT_PUBLIC_* from shell env vars in this Docker image.
+    {% set safe_host = safe_domain if safe_domain else ansible_host %}
+    cat > /tmp/safe-ui-scripts/env.production << ENVEOF
+    NEXT_PUBLIC_GATEWAY_URL_PRODUCTION=https://{{ safe_host }}/cgw
+    NEXT_PUBLIC_GATEWAY_URL_STAGING=https://{{ safe_host }}/cgw
+    NEXT_PUBLIC_IS_PRODUCTION=true
+    NEXT_PUBLIC_SAFE_VERSION=1.4.1
+    ENVEOF
+    # Strip leading whitespace from env file (heredoc preserves indentation)
+    sed -i 's/^[[:space:]]*//' /tmp/safe-ui-scripts/env.production
+
+    echo "Building Safe UI with chain {{ evm_chain_id }} support (this may take a few minutes)..."
     docker run --name safe-ui-build \
-      -e NEXT_PUBLIC_GATEWAY_URL_PRODUCTION=https://{{ ansible_host }}/cgw \
+      -v /tmp/safe-ui-scripts:/scripts:ro \
       --entrypoint="" \
       safeglobal/safe-wallet-web:{{ safe_ui_version }} \
-      yarn build
+      sh -c "cp /scripts/env.production /app/.env.production && node /scripts/patch-safe-deployments.js {{ evm_chain_id }} && yarn build"
 
     # Extract the built files
     docker cp safe-ui-build:/app/out /tmp/safe-ui-patched
     docker rm safe-ui-build
+    rm -rf /tmp/safe-ui-scripts
 
-    # Patch the JS for our chain ID
-    {{ safe_install_dir }}/patch-safe-ui.sh \
-      {{ evm_chain_id }} \
-      {{ safe_contracts.safe_singleton }} \
-      {{ safe_contracts.proxy_factory }} \
-      {{ safe_contracts.multi_send }} \
-      {{ safe_contracts.multi_send_call_only }} \
-      {{ safe_contracts.fallback_handler }} \
-      {{ safe_contracts.create_call }} \
-      {{ safe_contracts.sign_message_lib }} \
-      {{ safe_contracts.simulate_tx_accessor }}
-
-    # Build nginx image with patched files
+    # Build nginx image with the patched build output
     cat > /tmp/Dockerfile.safe-ui << 'EOF'
     FROM nginx:alpine
     COPY safe-ui-patched /usr/share/nginx/html
@@ -297,7 +307,7 @@
     executable: /bin/bash
   when: safe_patched_ui_check.stdout == ""
   register: safe_build_ui
-  timeout: 600
+  timeout: 1200
   changed_when: true
 
 - name: Create SSL directory
@@ -456,6 +466,65 @@
     state: started
     enabled: true
 
+# Deploy Safe contracts via Singleton Factory (if deploy key is provided)
+- name: Create contract deployment directory
+  ansible.builtin.file:
+    path: "{{ safe_install_dir }}/deploy-contracts"
+    state: directory
+    mode: '0755'
+  when: safe_deploy_key is defined and safe_deploy_key != ""
+
+- name: Copy contract deployment script
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/safe/deploy-contracts.sh"
+    dest: "{{ safe_install_dir }}/deploy-contracts/deploy-contracts.sh"
+    mode: '0755'
+  when: safe_deploy_key is defined and safe_deploy_key != ""
+
+- name: Copy contract initcodes
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/safe/initcodes/"
+    dest: "{{ safe_install_dir }}/deploy-contracts/initcodes/"
+    mode: '0644'
+  when: safe_deploy_key is defined and safe_deploy_key != ""
+
+- name: Check if cast (Foundry) is available
+  ansible.builtin.command: which cast
+  register: safe_cast_check
+  changed_when: false
+  failed_when: false
+  when: safe_deploy_key is defined and safe_deploy_key != ""
+
+- name: Install Foundry (if cast not available)
+  ansible.builtin.shell: |
+    curl -L https://foundry.paradigm.xyz | bash
+    export PATH="$HOME/.foundry/bin:$PATH"
+    foundryup
+  args:
+    executable: /bin/bash
+  when:
+    - safe_deploy_key is defined and safe_deploy_key != ""
+    - safe_cast_check.rc != 0
+  changed_when: true
+
+- name: Deploy Safe contracts via Singleton Factory
+  ansible.builtin.shell: |
+    export PATH="$HOME/.foundry/bin:$PATH"
+    cd {{ safe_install_dir }}/deploy-contracts
+    RPC_URL="{{ safe_rpc_url }}" \
+    PRIVATE_KEY="{{ safe_deploy_key }}" \
+    ./deploy-contracts.sh
+  args:
+    executable: /bin/bash
+  register: safe_contract_deploy
+  when: safe_deploy_key is defined and safe_deploy_key != ""
+  changed_when: "'deployed' in safe_contract_deploy.stdout"
+
+- name: Show contract deployment result
+  ansible.builtin.debug:
+    msg: "{{ safe_contract_deploy.stdout_lines | default(['Contract deployment skipped']) }}"
+  when: safe_deploy_key is defined and safe_deploy_key != ""
+
 - name: Wait for PostgreSQL (TXS) to be healthy
   ansible.builtin.command:
     cmd: docker exec safe-postgres-txs pg_isready -U {{ safe_db_user }} -d {{ safe_txs_db_name }}
@@ -567,12 +636,20 @@
       --chain-name "{{ safe_chain_name }}"
       --short-name "{{ safe_chain_short_name }}"
       --rpc-url "https://{{ safe_host }}/rpc"
-      --block-explorer-url "https://{{ safe_host }}/explorer"
+      --block-explorer-url "https://{{ safe_host }}:4443"
       --currency-name "{{ safe_native_currency_name }}"
       --currency-symbol "{{ safe_native_currency_symbol }}"
       --txs-url "http://safe-txs-web:8888"
       --l2 "{{ safe_use_l2 | lower }}"
       --gas-price "{{ safe_gas_price_wei }}"
+      --safe-singleton "{{ safe_contracts.safe_singleton }}"
+      --proxy-factory "{{ safe_contracts.proxy_factory }}"
+      --multi-send "{{ safe_contracts.multi_send }}"
+      --multi-send-call-only "{{ safe_contracts.multi_send_call_only }}"
+      --fallback-handler "{{ safe_contracts.fallback_handler }}"
+      --create-call "{{ safe_contracts.create_call }}"
+      --sign-message-lib "{{ safe_contracts.sign_message_lib }}"
+      --simulate-tx-accessor "{{ safe_contracts.simulate_tx_accessor }}"
   register: safe_cfg_init
   changed_when: "'Created chain' in safe_cfg_init.stdout"
   failed_when: safe_cfg_init.rc != 0 and 'already exists' not in safe_cfg_init.stdout
@@ -599,6 +676,40 @@
   register: safe_txs_init
   changed_when: "'Created' in safe_txs_init.stdout"
   failed_when: safe_txs_init.rc != 0
+
+# Setup Celery beat periodic tasks for indexing
+# TXS uses DatabaseScheduler, so periodic tasks must be created in the DB
+- name: Setup indexing periodic tasks
+  ansible.builtin.shell:
+    cmd: |
+      docker exec safe-txs-web python manage.py shell -c "
+      from django_celery_beat.models import PeriodicTask, IntervalSchedule
+      every_10s, _ = IntervalSchedule.objects.get_or_create(every=10, period=IntervalSchedule.SECONDS)
+      every_30s, _ = IntervalSchedule.objects.get_or_create(every=30, period=IntervalSchedule.SECONDS)
+      every_60s, _ = IntervalSchedule.objects.get_or_create(every=60, period=IntervalSchedule.SECONDS)
+      every_5m, _ = IntervalSchedule.objects.get_or_create(every=5, period=IntervalSchedule.MINUTES)
+      every_1h, _ = IntervalSchedule.objects.get_or_create(every=1, period=IntervalSchedule.HOURS)
+      tasks = [
+          ('index_internal_txs', 'safe_transaction_service.history.tasks.index_internal_txs_task', every_10s),
+          ('index_safe_events', 'safe_transaction_service.history.tasks.index_safe_events_task', every_10s),
+          ('index_erc20_events', 'safe_transaction_service.history.tasks.index_erc20_events_task', every_10s),
+          ('index_new_proxies', 'safe_transaction_service.history.tasks.index_new_proxies_task', every_30s),
+          ('check_reorgs', 'safe_transaction_service.history.tasks.check_reorgs_task', every_60s),
+          ('process_decoded_internal_txs', 'safe_transaction_service.history.tasks.process_decoded_internal_txs_task', every_30s),
+          ('reindex_master_copies', 'safe_transaction_service.history.tasks.reindex_master_copies_task', every_1h),
+          ('check_sync_status', 'safe_transaction_service.history.tasks.check_sync_status_task', every_5m),
+      ]
+      created_count = 0
+      for name, task, interval in tasks:
+          obj, created = PeriodicTask.objects.update_or_create(
+              name=name, defaults={'task': task, 'interval': interval, 'enabled': True}
+          )
+          if created:
+              created_count += 1
+      print('Created ' + str(created_count) + ' periodic tasks, total: ' + str(PeriodicTask.objects.count()))
+      "
+  register: safe_periodic_tasks
+  changed_when: "'Created' in safe_periodic_tasks.stdout and 'Created 0' not in safe_periodic_tasks.stdout"
 
 # Validation - ensure chain and contracts are properly registered
 - name: Verify chain registered in Config Service
@@ -638,7 +749,7 @@
       Safe Multisig Infrastructure Deployed Successfully!
 
       Web UI (HTTPS):      https://{{ safe_host }}/
-      Block Explorer:      https://{{ safe_host }}/explorer/
+      Block Explorer:      https://{{ safe_host }}:4443/
       RPC (HTTPS):         https://{{ safe_host }}/rpc
 
       Internal Services (for debugging):

@@ -198,6 +198,10 @@ enable_staking_key_backup = true  # S3 backup for staking keys
 Primary validator runtime config is stored at:
 `configs/primary-network/node/primary-validator-node-config.json`
 
+## Kubernetes Alternative
+
+This guide covers the Terraform + Ansible path (AWS). To deploy Primary Network nodes on an existing Kubernetes cluster instead, see the [Kubernetes deployment guide](../kubernetes/README.md).
+
 ## Next Steps
 
 - [Operations guide](OPERATIONS.md) (upgrades, monitoring, health checks)

@@ -1,21 +1,22 @@
 ---
 # Deploy Safe Multisig Infrastructure
-# Usage: ansible-playbook playbooks/05-deploy-safe.yml -e "chain_id=<CHAIN_ID> evm_chain_id=<EVM_CHAIN_ID>"
+# Usage: make safe  (auto-detects chain_id/evm_chain_id from l1.env)
+#   or:  ansible-playbook playbooks/05-deploy-safe.yml -e "chain_id=<CHAIN_ID> evm_chain_id=<EVM_CHAIN_ID>"
 
 - name: Deploy Safe Multisig Infrastructure
   hosts: rpc
   become: true
-  # chain_id and evm_chain_id must be provided via -e or group_vars
+  # chain_id and evm_chain_id must be provided via -e, group_vars, or auto-detected from l1.env
 
   pre_tasks:
     - name: Verify chain_id is provided
       ansible.builtin.fail:
-        msg: "chain_id must be provided. Use -e 'chain_id=<value>'"
+        msg: "chain_id must be provided. Use -e 'chain_id=<value>' or ensure l1.env exists"
       when: chain_id is not defined
 
     - name: Verify evm_chain_id is provided
       ansible.builtin.fail:
-        msg: "evm_chain_id must be provided. Use -e 'evm_chain_id=<value>'"
+        msg: "evm_chain_id must be provided. Use -e 'evm_chain_id=<value>' or ensure l1.env exists"
       when: evm_chain_id is not defined
 
     - name: Check if avalanchego is running
