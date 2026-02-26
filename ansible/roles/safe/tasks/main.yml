@@ -306,6 +306,19 @@
     docker rm safe-ui-build
     rm -rf /tmp/safe-ui-scripts
 
+    # Post-build: replace hardcoded gateway URLs in compiled JS bundles
+    # The Safe UI has fallback gateway URLs hardcoded in the source code that
+    # survive even when .env.production sets NEXT_PUBLIC_GATEWAY_URL_*.
+    # We must sed-replace them in the compiled output.
+    {% set safe_host = safe_domain if safe_domain else ansible_host %}
+    GATEWAY_URL="https://{{ safe_host }}/cgw"
+    echo "Replacing hardcoded gateway URLs with $GATEWAY_URL..."
+    find /tmp/safe-ui-patched/_next/static/chunks -name '*.js' -exec \
+      sed -i "s|safe-client\.safe\.global|{{ safe_host }}/cgw|g" {} +
+    find /tmp/safe-ui-patched/_next/static/chunks -name '*.js' -exec \
+      sed -i "s|safe-client\.staging\.5afe\.dev|{{ safe_host }}/cgw|g" {} +
+    echo "Gateway URL replacement complete"
+
     # Verify the chain ID was compiled into the JS bundles
     if ! grep -rl '{{ evm_chain_id }}' /tmp/safe-ui-patched/_next/static/chunks/*.js >/dev/null 2>&1; then
       echo "ERROR: Chain {{ evm_chain_id }} not found in built JS bundles. Patch may have failed." >&2

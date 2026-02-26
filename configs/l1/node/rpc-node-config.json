@@ -1,5 +1,6 @@
 {
   "index-enabled": true,
+  "index-allow-incomplete": true,
   "api-admin-enabled": false,
   "api-info-enabled": true,
   "api-health-enabled": true,
