@@ -34,18 +34,52 @@
       ansible.builtin.wait_for_connection:
         timeout: 300
 
+    - name: Wait for cloud-init to finish
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+      timeout: 300
+
+    - name: Stop unattended-upgrades to prevent mid-deploy reboot
+      ansible.builtin.systemd:
+        name: unattended-upgrades
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Wait for any running dpkg/apt locks to release
+      ansible.builtin.shell: while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 5; done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      timeout: 300
+
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
       when: ansible_os_family == "Debian"
 
-    - name: Install AWS CLI for S3 backup
+    - name: Install unzip for AWS CLI installation
       ansible.builtin.apt:
-        name:
-          - awscli
+        name: unzip
         state: present
-      when: staking_keys_bucket is defined and staking_keys_bucket != ""
+      when:
+        - ansible_os_family == "Debian"
+        - staking_keys_bucket is defined
+        - staking_keys_bucket != ""
+
+    - name: Install AWS CLI v2 for S3 backup # noqa: command-instead-of-module
+      ansible.builtin.shell: |
+        curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip"
+        unzip -q -o /tmp/awscliv2.zip -d /tmp
+        /tmp/aws/install --update
+        rm -rf /tmp/awscliv2.zip /tmp/aws
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/aws
+      when:
+        - staking_keys_bucket is defined
+        - staking_keys_bucket != ""
 
   roles:
     - role: avalanchego

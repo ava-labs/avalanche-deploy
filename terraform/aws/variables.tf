@@ -170,28 +170,6 @@ variable "monitoring_disk_size_gb" {
   default     = 50
 }
 
-#
-# Primary Network Validator Configuration
-#
-
-variable "primary_validator_count" {
-  description = "Number of Primary Network validators"
-  type        = number
-  default     = 0 # Disabled by default, L1 focus
-}
-
-variable "primary_validator_instance_type" {
-  description = "EC2 instance type for Primary Network validators (must have NVMe)"
-  type        = string
-  default     = "i4i.xlarge" # 4 vCPU, 32GB RAM, 937GB NVMe
-}
-
-variable "primary_validator_root_disk_gb" {
-  description = "Root EBS disk size for Primary Network validators (OS only)"
-  type        = number
-  default     = 50 # OS + binaries only, data on NVMe
-}
-
 variable "enable_staking_key_backup" {
   description = "Enable S3 backup for validator staking keys"
   type        = bool

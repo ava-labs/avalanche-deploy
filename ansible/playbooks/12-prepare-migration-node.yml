@@ -54,9 +54,19 @@
     - name: Install required packages
       ansible.builtin.apt:
         name:
-          - awscli
+          - unzip
           - lz4
         state: present
+
+    - name: Install AWS CLI v2 # noqa: command-instead-of-module
+      ansible.builtin.shell: |
+        curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip"
+        unzip -q -o /tmp/awscliv2.zip -d /tmp
+        /tmp/aws/install --update
+        rm -rf /tmp/awscliv2.zip /tmp/aws
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/aws
 
   roles:
     - role: avalanchego

@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer init-validator-manager initialize-validator-manager primary-infra primary-deploy primary-status backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
+.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer init-validator-manager initialize-validator-manager primary-infra primary-infra-plan primary-deploy primary-status primary-destroy backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
 
 # Default cloud provider
 CLOUD ?= aws
@@ -18,6 +18,8 @@ AUTO_APPROVE ?= false
 TF_INIT_RETRIES ?= 3
 SKIP_TERRAFORM_VALIDATE ?= false
 ANSIBLE_INVENTORY = inventory/$(CLOUD)_hosts
+PRIMARY_TF_DIR = terraform/aws-primary-network
+PRIMARY_ANSIBLE_INVENTORY = inventory/aws_primary_hosts
 ANSIBLE_SYNTAX_INVENTORY ?= ../tests/fixtures/syntax_inventory.ini
 L1_CONFIG_DIR ?= configs/l1
 PRIMARY_NETWORK_CONFIG_DIR ?= configs/primary-network
@@ -250,27 +252,31 @@ initialize-validator-manager:
 # Primary Network Validators
 #
 primary-infra: check-primary-cloud
-	@echo "Creating Primary Network validator infrastructure (no L1 validators/RPC)..."
-	@cd terraform/$(CLOUD) && terraform init && terraform apply \
-		-var="validator_count=0" \
-		-var="rpc_archive_count=0" \
-		-var="rpc_pruned_count=0" \
-		-var="primary_validator_count=1"
+	@echo "Creating Primary Network validator infrastructure..."
+	@cd $(PRIMARY_TF_DIR) && terraform init && terraform apply
 	@echo ""
 	@echo "Done! Run 'make primary-deploy' next."
 
+primary-infra-plan: check-primary-cloud
+	@cd $(PRIMARY_TF_DIR) && terraform init -input=false && terraform plan
+
 primary-deploy: check-primary-cloud
 	@echo "Deploying Primary Network validators..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/10-deploy-primary-network.yml -e network=$(NETWORK)
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/10-deploy-primary-network.yml -e network=$(NETWORK)
 	@echo ""
 	@echo "Done! Run 'make primary-status' to check sync progress."
 
 primary-status: check-primary-cloud
 	@CLOUD=$(CLOUD) ./scripts/check-primary-sync.sh
 
+primary-destroy: check-primary-cloud
+	@echo "Destroying Primary Network infrastructure..."
+	@cd $(PRIMARY_TF_DIR) && terraform destroy $(if $(filter true,$(AUTO_APPROVE)),-auto-approve,)
+	@echo "Done!"
+
 backup-keys: check-primary-cloud
-	@echo "Backing up staking keys to S3 (L1 + Primary Network validators)..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/11-backup-staking-keys.yml
+	@echo "Backing up staking keys to S3..."
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/11-backup-staking-keys.yml
 
 restore-keys: check-primary-cloud
 	@if [ -z "$(SOURCE)" ]; then echo "Usage: make restore-keys SOURCE=primary-validator-1 TARGET_IP=10.0.1.50"; exit 1; fi
@@ -280,7 +286,7 @@ restore-keys: check-primary-cloud
 prepare-migration: check-primary-cloud
 	@if [ -z "$(NODE)" ]; then echo "Usage: make prepare-migration NODE=migration-target [SNAPSHOT=true] [SNAPSHOT_NAME=latest]"; exit 1; fi
 	@echo "Preparing migration node $(NODE)..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/12-prepare-migration-node.yml --limit $(NODE) \
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/12-prepare-migration-node.yml --limit $(NODE) \
 		$(if $(SNAPSHOT),-e "use_snapshot=$(SNAPSHOT)",) \
 		$(if $(SNAPSHOT_NAME),-e "snapshot_name=$(SNAPSHOT_NAME)",)
 
@@ -288,7 +294,7 @@ migrate-validator: check-primary-cloud
 	@if [ -z "$(SOURCE)" ]; then echo "Usage: make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target"; exit 1; fi
 	@if [ -z "$(TARGET)" ]; then echo "Usage: make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target"; exit 1; fi
 	@echo "Migrating validator from $(SOURCE) to $(TARGET)..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/13-migrate-validator.yml \
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/13-migrate-validator.yml \
 		-e "source_host=$(SOURCE)" \
 		-e "target_host=$(TARGET)"
 
@@ -298,13 +304,13 @@ migrate-validator: check-primary-cloud
 create-snapshot: check-primary-cloud
 	@if [ -z "$(NODE)" ]; then echo "Usage: make create-snapshot NODE=primary-validator-1 [NAME=my-snapshot]"; exit 1; fi
 	@echo "Creating database snapshot from $(NODE)..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/14-create-snapshot.yml --limit $(NODE) \
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/14-create-snapshot.yml --limit $(NODE) \
 		$(if $(NAME),-e "snapshot_name=$(NAME)",)
 
 restore-snapshot: check-primary-cloud
 	@if [ -z "$(TARGET)" ]; then echo "Usage: make restore-snapshot TARGET=migration-target [SNAPSHOT=latest]"; exit 1; fi
 	@echo "Restoring snapshot to $(TARGET)..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/15-restore-snapshot.yml --limit $(TARGET) \
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/15-restore-snapshot.yml --limit $(TARGET) \
 		$(if $(SNAPSHOT),-e "snapshot_name=$(SNAPSHOT)",)
 
 list-snapshots: check-primary-cloud
@@ -481,6 +487,7 @@ lint:
 	@echo ""
 	@echo "Checking Terraform format..."
 	@cd terraform/aws && terraform fmt -check -recursive
+	@cd terraform/aws-primary-network && terraform fmt -check -recursive
 	@cd terraform/gcp && terraform fmt -check -recursive
 	@cd terraform/azure && terraform fmt -check -recursive
 	@echo ""
@@ -550,6 +557,7 @@ validate: validate-config-layout
 			return 1; \
 		}; \
 		validate_terraform terraform/aws AWS; \
+		validate_terraform terraform/aws-primary-network "AWS Primary Network"; \
 		validate_terraform terraform/gcp GCP; \
 		validate_terraform terraform/azure Azure; \
 	fi
@@ -651,22 +659,26 @@ help-l1:
 	@echo "  make k8s-help-l1"
 
 help-primary:
-	@echo "Primary Network Workflow (AWS-only)"
+	@echo "Primary Network Workflow (AWS-only, separate terraform state)"
 	@echo ""
 	@echo "Core flow:"
 	@echo "  make setup"
-	@echo "  make primary-infra CLOUD=aws"
-	@echo "  make primary-deploy CLOUD=aws NETWORK=fuji|mainnet"
-	@echo "  make primary-status CLOUD=aws"
+	@echo "  make primary-infra"
+	@echo "  make primary-deploy NETWORK=fuji|mainnet"
+	@echo "  make primary-status"
+	@echo "  make primary-destroy"
+	@echo ""
+	@echo "Planning:"
+	@echo "  make primary-infra-plan"
 	@echo ""
 	@echo "Maintenance + security:"
-	@echo "  make backup-keys CLOUD=aws"
-	@echo "  make restore-keys CLOUD=aws SOURCE=... TARGET_IP=..."
-	@echo "  make create-snapshot CLOUD=aws NODE=..."
-	@echo "  make list-snapshots CLOUD=aws"
-	@echo "  make restore-snapshot CLOUD=aws TARGET=... [SNAPSHOT=...]"
-	@echo "  make prepare-migration CLOUD=aws NODE=... [SNAPSHOT=true]"
-	@echo "  make migrate-validator CLOUD=aws SOURCE=... TARGET=..."
+	@echo "  make backup-keys"
+	@echo "  make restore-keys SOURCE=... TARGET_IP=..."
+	@echo "  make create-snapshot NODE=..."
+	@echo "  make list-snapshots"
+	@echo "  make restore-snapshot TARGET=... [SNAPSHOT=...]"
+	@echo "  make prepare-migration NODE=... [SNAPSHOT=true]"
+	@echo "  make migrate-validator SOURCE=... TARGET=..."
 	@echo ""
 	@echo "Kubernetes equivalent:"
 	@echo "  make k8s-help-primary"
@@ -682,10 +694,12 @@ help-all:
 	@echo "  make create-l1    Build the create-l1 tool"
 	@echo "  make destroy      Tear down infrastructure (stops billing!)"
 	@echo ""
-	@echo "Primary Network Validators:"
+	@echo "Primary Network Validators (separate terraform state):"
 	@echo "  make primary-infra      Create Primary Network validator infrastructure"
+	@echo "  make primary-infra-plan Show planned changes for Primary Network infra"
 	@echo "  make primary-deploy     Deploy avalanchego for Primary Network"
 	@echo "  make primary-status     Check Primary Network sync status (P/X/C chains)"
+	@echo "  make primary-destroy    Destroy Primary Network infrastructure"
 	@echo "  make backup-keys        Backup staking keys to S3"
 	@echo "  make restore-keys       Restore staking keys from S3"
 	@echo "  make prepare-migration  Prepare a new node for migration (supports SNAPSHOT=true)"
@@ -767,14 +781,14 @@ help-all:
 	@echo "  make deploy NETWORK=mainnet"
 	@echo "  make upgrade VERSION=1.12.0"
 	@echo ""
-	@echo "  # Primary Network Validators"
-	@echo "  make primary-infra CLOUD=aws"
-	@echo "  make primary-deploy CLOUD=aws NETWORK=mainnet"
-	@echo "  make backup-keys CLOUD=aws"
-	@echo "  make create-snapshot CLOUD=aws NODE=primary-validator-1"
-	@echo "  make list-snapshots CLOUD=aws"
-	@echo "  make prepare-migration CLOUD=aws NODE=migration-target SNAPSHOT=true"
-	@echo "  make migrate-validator CLOUD=aws SOURCE=primary-validator-1 TARGET=migration-target"
+	@echo "  # Primary Network Validators (separate terraform state)"
+	@echo "  make primary-infra"
+	@echo "  make primary-deploy NETWORK=mainnet"
+	@echo "  make backup-keys"
+	@echo "  make create-snapshot NODE=primary-validator-1"
+	@echo "  make list-snapshots"
+	@echo "  make prepare-migration NODE=migration-target SNAPSHOT=true"
+	@echo "  make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target"
 	@echo ""
 	@echo "  # Developer Tools"
 	@echo "  make faucet CHAIN_ID=xxx EVM_CHAIN_ID=99999 FAUCET_KEY=0x..."

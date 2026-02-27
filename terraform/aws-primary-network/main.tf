@@ -21,10 +21,11 @@ data "http" "operator_ip" {
 locals {
   operator_cidr = var.operator_ip != "" ? var.operator_ip : "${chomp(data.http.operator_ip.response_body)}/32"
   common_tags = {
-    Project     = "avalanche-l1"
+    Project     = "avalanche-primary-network"
     Environment = var.environment
     ManagedBy   = "terraform"
   }
+  enable_key_backup = var.enable_staking_key_backup && var.primary_validator_count > 0
 }
 
 #
@@ -81,12 +82,24 @@ resource "aws_route_table_association" "public" {
 }
 
 #
+# SSH KEY
+#
+
+resource "aws_key_pair" "main" {
+  count      = var.ssh_public_key != "" ? 1 : 0
+  key_name   = "${var.name_prefix}-key"
+  public_key = var.ssh_public_key
+
+  tags = local.common_tags
+}
+
+#
 # SECURITY GROUPS
 #
 
-resource "aws_security_group" "validators" {
-  name        = "${var.name_prefix}-validators"
-  description = "Security group for Avalanche L1 validators"
+resource "aws_security_group" "primary_validators" {
+  name        = "${var.name_prefix}-primary-validators"
+  description = "Security group for Avalanche Primary Network validators"
   vpc_id      = aws_vpc.main.id
 
   # SSH - operator only
@@ -98,7 +111,7 @@ resource "aws_security_group" "validators" {
     cidr_blocks = [local.operator_cidr]
   }
 
-  # Avalanche HTTP API - operator only
+  # Avalanche HTTP API - operator only (no public RPC)
   ingress {
     description = "Avalanche HTTP API"
     from_port   = 9650
@@ -116,15 +129,6 @@ resource "aws_security_group" "validators" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Inter-validator communication
-  ingress {
-    description = "Inter-validator"
-    from_port   = 9650
-    to_port     = 9651
-    protocol    = "tcp"
-    self        = true
-  }
-
   # Avalanche metrics scraping from within VPC
   ingress {
     description = "Avalanche metrics from VPC"
@@ -152,124 +156,7 @@ resource "aws_security_group" "validators" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-validators-sg"
-  })
-}
-
-resource "aws_security_group" "rpc" {
-  name        = "${var.name_prefix}-rpc"
-  description = "Security group for Avalanche L1 RPC nodes"
-  vpc_id      = aws_vpc.main.id
-
-  # SSH - operator only
-  ingress {
-    description = "SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [local.operator_cidr]
-  }
-
-  # RPC API - configurable (operator or public)
-  ingress {
-    description = "Avalanche RPC API"
-    from_port   = 9650
-    to_port     = 9650
-    protocol    = "tcp"
-    cidr_blocks = var.enable_public_rpc ? ["0.0.0.0/0"] : [local.operator_cidr]
-  }
-
-  # Staking port - public (required for P2P sync)
-  ingress {
-    description = "Avalanche P2P"
-    from_port   = 9651
-    to_port     = 9651
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Blockscout API - configurable (runs on RPC node)
-  ingress {
-    description = "Blockscout API"
-    from_port   = 4000
-    to_port     = 4000
-    protocol    = "tcp"
-    cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
-  }
-
-  # Blockscout Frontend - configurable (runs on RPC node)
-  ingress {
-    description = "Blockscout Frontend"
-    from_port   = 4001
-    to_port     = 4001
-    protocol    = "tcp"
-    cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
-  }
-
-  # Blockscout Stats API - configurable (runs on RPC node, needed for frontend charts)
-  ingress {
-    description = "Blockscout Stats"
-    from_port   = 8050
-    to_port     = 8050
-    protocol    = "tcp"
-    cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
-  }
-
-  # Safe Multisig UI - configurable (runs on RPC node)
-  ingress {
-    description = "Safe UI"
-    from_port   = 3000
-    to_port     = 3000
-    protocol    = "tcp"
-    cidr_blocks = var.enable_public_safe ? ["0.0.0.0/0"] : [local.operator_cidr]
-  }
-
-  # Safe Client Gateway - configurable (runs on RPC node, needed by UI)
-  ingress {
-    description = "Safe Client Gateway"
-    from_port   = 8003
-    to_port     = 8003
-    protocol    = "tcp"
-    cidr_blocks = var.enable_public_safe ? ["0.0.0.0/0"] : [local.operator_cidr]
-  }
-
-  # Safe HTTPS - required for wallet connection (Web Crypto API needs secure context)
-  ingress {
-    description = "Safe HTTPS"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = var.enable_public_safe ? ["0.0.0.0/0"] : [local.operator_cidr]
-  }
-
-  # Avalanche metrics scraping from within VPC
-  ingress {
-    description = "Avalanche metrics from VPC"
-    from_port   = 9650
-    to_port     = 9650
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
-
-  # Node exporter metrics from within VPC
-  ingress {
-    description = "Node exporter metrics from VPC"
-    from_port   = 9100
-    to_port     = 9100
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
-
-  egress {
-    description = "All outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-rpc-sg"
+    Name = "${var.name_prefix}-primary-validators-sg"
   })
 }
 
@@ -319,19 +206,7 @@ resource "aws_security_group" "monitoring" {
 }
 
 #
-# SSH KEY
-#
-
-resource "aws_key_pair" "main" {
-  count      = var.ssh_public_key != "" ? 1 : 0
-  key_name   = "${var.name_prefix}-key"
-  public_key = var.ssh_public_key
-
-  tags = local.common_tags
-}
-
-#
-# EC2 INSTANCES - VALIDATORS
+# EC2 INSTANCES - PRIMARY NETWORK VALIDATORS
 #
 
 data "aws_ami" "ubuntu" {
@@ -349,14 +224,14 @@ data "aws_ami" "ubuntu" {
   }
 }
 
-resource "aws_instance" "validators" {
-  count = var.validator_count
+resource "aws_instance" "primary_validators" {
+  count = var.primary_validator_count
 
   ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.validator_instance_type
+  instance_type          = var.primary_validator_instance_type
   key_name               = var.ssh_key_name != "" ? var.ssh_key_name : (length(aws_key_pair.main) > 0 ? aws_key_pair.main[0].key_name : null)
   subnet_id              = aws_subnet.public[count.index % length(aws_subnet.public)].id
-  vpc_security_group_ids = [aws_security_group.validators.id]
+  vpc_security_group_ids = [aws_security_group.primary_validators.id]
   iam_instance_profile   = local.enable_key_backup ? aws_iam_instance_profile.validator[0].name : null
 
   metadata_options {
@@ -365,85 +240,19 @@ resource "aws_instance" "validators" {
     http_put_response_hop_limit = 2
   }
 
+  # Small root EBS for OS only (data goes on NVMe)
   root_block_device {
-    volume_size = var.disk_size_gb
+    volume_size = var.primary_validator_root_disk_gb
     volume_type = "gp3"
-    iops        = var.disk_iops
-    throughput  = var.disk_throughput
     encrypted   = true
   }
 
-  tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-validator-${count.index + 1}"
-    Role = "validator"
-  })
-}
-
-#
-# EC2 INSTANCES - ARCHIVE RPC NODES (full history, debug APIs)
-#
-
-resource "aws_instance" "rpc_archive" {
-  count = var.rpc_archive_count
-
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.rpc_archive_instance_type
-  key_name               = var.ssh_key_name != "" ? var.ssh_key_name : (length(aws_key_pair.main) > 0 ? aws_key_pair.main[0].key_name : null)
-  subnet_id              = aws_subnet.public[count.index % length(aws_subnet.public)].id
-  vpc_security_group_ids = [aws_security_group.rpc.id]
-
-  metadata_options {
-    http_endpoint               = "enabled"
-    http_tokens                 = "required"
-    http_put_response_hop_limit = 2
-  }
-
-  root_block_device {
-    volume_size = var.rpc_archive_disk_size_gb
-    volume_type = "gp3"
-    iops        = var.disk_iops
-    throughput  = var.disk_throughput
-    encrypted   = true
-  }
+  # NVMe is ephemeral and attached automatically with i4i instances
 
   tags = merge(local.common_tags, {
-    Name    = "${var.name_prefix}-rpc-archive-${count.index + 1}"
-    Role    = "rpc"
-    RpcType = "archive"
-  })
-}
-
-#
-# EC2 INSTANCES - PRUNED RPC NODES (state-sync, minimal APIs)
-#
-
-resource "aws_instance" "rpc_pruned" {
-  count = var.rpc_pruned_count
-
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.rpc_pruned_instance_type
-  key_name               = var.ssh_key_name != "" ? var.ssh_key_name : (length(aws_key_pair.main) > 0 ? aws_key_pair.main[0].key_name : null)
-  subnet_id              = aws_subnet.public[count.index % length(aws_subnet.public)].id
-  vpc_security_group_ids = [aws_security_group.rpc.id]
-
-  metadata_options {
-    http_endpoint               = "enabled"
-    http_tokens                 = "required"
-    http_put_response_hop_limit = 2
-  }
-
-  root_block_device {
-    volume_size = var.rpc_pruned_disk_size_gb
-    volume_type = "gp3"
-    iops        = var.disk_iops
-    throughput  = var.disk_throughput
-    encrypted   = true
-  }
-
-  tags = merge(local.common_tags, {
-    Name    = "${var.name_prefix}-rpc-pruned-${count.index + 1}"
-    Role    = "rpc"
-    RpcType = "pruned"
+    Name     = "${var.name_prefix}-primary-validator-${count.index + 1}"
+    Role     = "primary-validator"
+    NodeType = "primary-network"
   })
 }
 
@@ -479,11 +288,6 @@ resource "aws_instance" "monitoring" {
 #
 # S3 BUCKET FOR STAKING KEY BACKUPS
 #
-
-# Local to determine if we need staking key backup infrastructure
-locals {
-  enable_key_backup = var.enable_staking_key_backup && var.validator_count > 0
-}
 
 resource "aws_s3_bucket" "staking_keys" {
   count         = local.enable_key_backup ? 1 : 0
@@ -602,4 +406,3 @@ resource "aws_iam_instance_profile" "validator" {
   name  = "${var.name_prefix}-validator-profile"
   role  = aws_iam_role.validator[0].name
 }
-

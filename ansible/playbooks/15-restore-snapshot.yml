@@ -26,7 +26,7 @@
 
   vars:
     snapshot_name: "latest"
-    temp_dir: /tmp/snapshot-restore
+    temp_dir: /var/lib/avalanchego/snapshot-restore
     db_path: /var/lib/avalanchego/db
     verify_integrity: false
 

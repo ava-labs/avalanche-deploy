@@ -6,6 +6,7 @@
 # - Infrastructure creation (with migration target)
 # - Validator deployment
 # - Chain sync verification
+# - Upgrade / downgrade
 # - Staking key backup
 # - Snapshot creation
 # - Snapshot restoration
@@ -24,6 +25,10 @@
 #   AWS_ACCESS_KEY_ID
 #   AWS_SECRET_ACCESS_KEY
 #
+# Optional environment variables:
+#   DEPLOY_VERSION  - Initial avalanchego version (default: 1.14.0)
+#   UPGRADE_VERSION - Version to upgrade to (default: 1.14.1)
+#
 # Note: In --dry-run mode, these credentials are not required.
 #
 # Note: This test does NOT register validators on P-Chain (requires staking).
@@ -34,6 +39,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
+
+# Primary network uses its own terraform directory and inventory
+PRIMARY_TF_DIR="terraform/aws-primary-network"
+PRIMARY_ANSIBLE_INVENTORY="inventory/aws_primary_hosts"
 
 # Colors
 RED='\033[0;31m'
@@ -47,8 +56,9 @@ SKIP_INFRA=false
 SKIP_DESTROY=false
 SKIP_SYNC_WAIT=false
 DRY_RUN=false
-CLOUD="${CLOUD:-aws}"
 NETWORK="${NETWORK:-fuji}"
+DEPLOY_VERSION="${DEPLOY_VERSION:-1.14.0}"
+UPGRADE_VERSION="${UPGRADE_VERSION:-1.14.1}"
 
 # Parse arguments
 for arg in "$@"; do
@@ -100,8 +110,8 @@ section() {
 cleanup() {
     if [ "$SKIP_DESTROY" = false ]; then
         section "Cleanup"
-        log "Destroying infrastructure..."
-        make destroy CLOUD=$CLOUD AUTO_APPROVE=true || log_warning "Destroy failed (may already be destroyed)"
+        log "Destroying Primary Network infrastructure..."
+        make primary-destroy AUTO_APPROVE=true || log_warning "Destroy failed (may already be destroyed)"
     else
         log_warning "Skipping destroy (--skip-destroy)"
     fi
@@ -130,19 +140,15 @@ if [ "$DRY_RUN" = true ]; then
 fi
 
 if [ "$DRY_RUN" = false ]; then
-    if [ "$CLOUD" != "aws" ]; then
-        log_error "Primary Network E2E currently supports CLOUD=aws only"
+    # Accept either env-var credentials or SSO/profile-based auth
+    if [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+        log_success "AWS credentials configured (env vars)"
+    elif aws sts get-caller-identity &>/dev/null; then
+        log_success "AWS credentials configured (SSO/profile)"
+    else
+        log_error "No AWS credentials found. Export AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or run 'aws sso login'"
         exit 1
     fi
-    if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
-        log_error "AWS_ACCESS_KEY_ID not set"
-        exit 1
-    fi
-    if [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-        log_error "AWS_SECRET_ACCESS_KEY not set"
-        exit 1
-    fi
-    log_success "AWS credentials configured"
 else
     log_success "Dry-run: skipping AWS credential requirement"
 fi
@@ -194,7 +200,7 @@ if [ "$DRY_RUN" = true ]; then
         log_error "Primary cloud guard check failed"
         exit 1
     fi
-    log_warning "Skipping infrastructure, sync, backup, snapshots, migration, and restart in dry-run mode"
+    log_warning "Skipping infrastructure, sync, upgrade/downgrade, backup, snapshots, migration, and restart in dry-run mode"
     section "E2E Dry Run Complete"
     log_success "Primary Network dry-run checks passed"
     exit 0
@@ -207,31 +213,21 @@ if [ "$SKIP_INFRA" = true ]; then
     log_warning "Skipping infrastructure creation (--skip-infra)"
 else
     log "Creating Primary Network validator infrastructure..."
-    log "  - 1 primary validator (will be migration source)"
-    log "  - 1 migration target node"
+    log "  - 2 primary validators (one will be migration target)"
     log "  - 1 monitoring node"
 
-    cd terraform/$CLOUD
-    terraform init -input=false
-
-    # Create infra with 2 primary validators (one will be migration target)
-    # We use primary_validator_count=2 to have both source and target
-    terraform apply -auto-approve \
-        -var="validator_count=0" \
-        -var="rpc_archive_count=0" \
-        -var="rpc_pruned_count=0" \
-        -var="primary_validator_count=2" \
-        -var="environment=$NETWORK" \
-        -var="enable_staking_key_backup=true"
-    cd "$REPO_ROOT"
-
-    log_success "Infrastructure created"
+    if make primary-infra; then
+        log_success "Infrastructure created"
+    else
+        log_error "Infrastructure creation failed"
+        exit 1
+    fi
 fi
 
 # Get node info
 section "Node Information"
 
-cd terraform/$CLOUD
+cd "$PRIMARY_TF_DIR"
 PRIMARY_IPS=$(terraform output -json primary_validator_ips 2>/dev/null | jq -r '.[]' || echo "")
 MONITORING_IP=$(terraform output -raw monitoring_ip 2>/dev/null || echo "")
 cd "$REPO_ROOT"
@@ -251,8 +247,8 @@ log "Monitoring: $MONITORING_IP"
 # Deployment
 section "Primary Network Deployment"
 
-log "Deploying avalanchego to primary validators..."
-if make primary-deploy NETWORK=$NETWORK; then
+log "Deploying avalanchego v${DEPLOY_VERSION} to primary validators..."
+if make primary-deploy NETWORK=$NETWORK VERSION=$DEPLOY_VERSION; then
     log_success "Primary Network validators deployed"
 else
     log_error "Primary Network deployment failed"
@@ -263,9 +259,11 @@ fi
 section "Monitoring"
 
 log "Deploying Prometheus + Grafana..."
-if make monitoring; then
+if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/03-setup-monitoring.yml; then
+    cd "$REPO_ROOT"
     log_success "Monitoring deployed"
 else
+    cd "$REPO_ROOT"
     log_error "Monitoring deployment failed"
 fi
 
@@ -311,6 +309,93 @@ else
     fi
 fi
 
+# Upgrade Test
+section "Upgrade Test"
+
+if [ "$SKIP_SYNC_WAIT" = true ]; then
+    log_warning "Skipping upgrade test (nodes not synced)"
+else
+    log "Recording current version..."
+    CURRENT_VERSION=$(curl -s "http://$PRIMARY_IP_1:9650/ext/info" \
+        -X POST -H "Content-Type: application/json" \
+        -d '{"jsonrpc":"2.0","id":1,"method":"info.getNodeVersion"}' \
+        2>/dev/null | jq -r '.result.version' || echo "unknown")
+    log "Current version: $CURRENT_VERSION"
+
+    log "Upgrading to avalanchego v${UPGRADE_VERSION}..."
+    if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/upgrade-nodes.yml -e "avalanchego_version=$UPGRADE_VERSION"; then
+        cd "$REPO_ROOT"
+        log_success "Upgrade command completed"
+    else
+        cd "$REPO_ROOT"
+        log_error "Upgrade to v${UPGRADE_VERSION} failed"
+    fi
+
+    # Verify new version on primary validator 1
+    sleep 10
+    UPGRADED_VERSION=$(curl -s "http://$PRIMARY_IP_1:9650/ext/info" \
+        -X POST -H "Content-Type: application/json" \
+        -d '{"jsonrpc":"2.0","id":1,"method":"info.getNodeVersion"}' \
+        2>/dev/null | jq -r '.result.version' || echo "unknown")
+    log "Post-upgrade version: $UPGRADED_VERSION"
+
+    if echo "$UPGRADED_VERSION" | grep -q "$UPGRADE_VERSION"; then
+        log_success "Version verified: $UPGRADED_VERSION"
+    else
+        log_error "Version mismatch after upgrade: expected v${UPGRADE_VERSION}, got $UPGRADED_VERSION"
+    fi
+
+    # Verify health after upgrade
+    log "Verifying health after upgrade..."
+    if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/health-checks.yml; then
+        cd "$REPO_ROOT"
+        log_success "Health checks passed after upgrade"
+    else
+        cd "$REPO_ROOT"
+        log_error "Health checks failed after upgrade"
+    fi
+fi
+
+# Downgrade Test
+section "Downgrade Test"
+
+if [ "$SKIP_SYNC_WAIT" = true ]; then
+    log_warning "Skipping downgrade test (nodes not synced)"
+else
+    log "Downgrading back to avalanchego v${DEPLOY_VERSION}..."
+    if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/upgrade-nodes.yml -e "avalanchego_version=$DEPLOY_VERSION"; then
+        cd "$REPO_ROOT"
+        log_success "Downgrade command completed"
+    else
+        cd "$REPO_ROOT"
+        log_error "Downgrade to v${DEPLOY_VERSION} failed"
+    fi
+
+    # Verify old version restored on primary validator 1
+    sleep 10
+    DOWNGRADED_VERSION=$(curl -s "http://$PRIMARY_IP_1:9650/ext/info" \
+        -X POST -H "Content-Type: application/json" \
+        -d '{"jsonrpc":"2.0","id":1,"method":"info.getNodeVersion"}' \
+        2>/dev/null | jq -r '.result.version' || echo "unknown")
+    log "Post-downgrade version: $DOWNGRADED_VERSION"
+
+    if echo "$DOWNGRADED_VERSION" | grep -q "$DEPLOY_VERSION"; then
+        log_success "Version verified after downgrade: $DOWNGRADED_VERSION"
+    else
+        log_error "Version mismatch after downgrade: expected v${DEPLOY_VERSION}, got $DOWNGRADED_VERSION"
+    fi
+
+    # Verify health after downgrade
+    log "Verifying health after downgrade..."
+    if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/health-checks.yml; then
+        cd "$REPO_ROOT"
+        log_success "Health checks passed after downgrade"
+    else
+        cd "$REPO_ROOT"
+        log_error "Health checks failed after downgrade"
+    fi
+fi
+
 # Staking Key Backup
 section "Staking Key Backup"
 
@@ -323,7 +408,7 @@ fi
 
 # Verify backup exists
 log "Verifying backup in S3..."
-S3_BUCKET=$(cd terraform/$CLOUD && terraform output -raw staking_keys_bucket 2>/dev/null || echo "")
+S3_BUCKET=$(cd "$PRIMARY_TF_DIR" && terraform output -raw staking_keys_bucket 2>/dev/null || echo "")
 if [ -n "$S3_BUCKET" ]; then
     if aws s3 ls "s3://$S3_BUCKET/" --recursive | grep -q "staking-keys.tar.gz"; then
         log_success "Staking keys found in S3"
@@ -407,9 +492,11 @@ fi
 section "Health Checks"
 
 log "Running health checks..."
-if make health-checks; then
+if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/health-checks.yml; then
+    cd "$REPO_ROOT"
     log_success "Health checks passed"
 else
+    cd "$REPO_ROOT"
     log_error "Health checks failed"
 fi
 
@@ -417,9 +504,11 @@ fi
 section "Rolling Restart"
 
 log "Testing rolling restart..."
-if make rolling-restart; then
+if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/rolling-restart.yml; then
+    cd "$REPO_ROOT"
     log_success "Rolling restart completed"
 else
+    cd "$REPO_ROOT"
     log_error "Rolling restart failed"
 fi
 

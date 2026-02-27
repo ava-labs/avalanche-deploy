@@ -29,34 +29,25 @@
           - staking_keys_bucket != ""
         fail_msg: "S3 backup not configured. Set staking_keys_bucket in inventory."
 
-    - name: Check staking directory exists
-      ansible.builtin.stat:
-        path: /var/lib/avalanchego/staking/
-      register: staking_dir
-
-    - name: Verify staking keys exist
-      ansible.builtin.assert:
-        that:
-          - staking_dir.stat.exists
-          - staking_dir.stat.isdir
-        fail_msg: "Staking directory not found. Node may not be initialized yet."
-
-    - name: Check for staker.crt
+    - name: Check for staking keys in configured path
       ansible.builtin.stat:
         path: /var/lib/avalanchego/staking/staker.crt
-      register: staker_crt
+      register: staker_crt_configured
 
-    - name: Check for staker.key
+    - name: Check for staking keys in default path
       ansible.builtin.stat:
-        path: /var/lib/avalanchego/staking/staker.key
-      register: staker_key
+        path: /home/avalanche/.avalanchego/staking/staker.crt
+      register: staker_crt_default
+
+    - name: Set staking directory
+      ansible.builtin.set_fact:
+        staking_dir: "{{ '/var/lib/avalanchego/staking' if staker_crt_configured.stat.exists else '/home/avalanche/.avalanchego/staking' }}"
 
     - name: Verify staking files exist
       ansible.builtin.assert:
         that:
-          - staker_crt.stat.exists
-          - staker_key.stat.exists
-        fail_msg: "Staking keys not found. Node may not be initialized yet."
+          - staker_crt_configured.stat.exists or staker_crt_default.stat.exists
+        fail_msg: "Staking keys not found in /var/lib/avalanchego/staking/ or ~/.avalanchego/staking/. Node may not be initialized yet."
 
     - name: Get current timestamp
       ansible.builtin.set_fact:
@@ -65,7 +56,7 @@
     - name: Create backup archive
       ansible.builtin.shell: |
         set -euo pipefail
-        tar -czf /tmp/staking-keys-{{ inventory_hostname }}.tar.gz -C /var/lib/avalanchego/staking .
+        tar -czf /tmp/staking-keys-{{ inventory_hostname }}.tar.gz -C {{ staking_dir }} .
         chmod 600 /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
       args:
         executable: /bin/bash

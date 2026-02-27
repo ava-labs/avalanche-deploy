@@ -13,7 +13,7 @@
 # Requirements:
 #   - Node must be fully synced (all chains bootstrapped)
 #   - S3 bucket configured (staking_keys_bucket)
-#   - Sufficient disk space for temporary archive (~50% of db size)
+#   - Sufficient disk space on NVMe for temporary archive (~50% of db size)
 #   - lz4 compression utility
 
 - name: Create Database Snapshot
@@ -23,7 +23,7 @@
 
   vars:
     snapshot_name: "{{ inventory_hostname }}-{{ ansible_date_time.date }}"
-    temp_dir: /tmp/snapshot
+    temp_dir: /var/lib/avalanchego/snapshot-tmp
     db_path: /var/lib/avalanchego/db
 
   pre_tasks:
@@ -129,7 +129,7 @@
       ansible.builtin.shell: |
         set -o pipefail
         cd {{ db_path | dirname }}
-        tar cf - db | lz4 -9 > {{ temp_dir }}/{{ snapshot_name }}.tar.lz4
+        tar cf - db | lz4 > {{ temp_dir }}/{{ snapshot_name }}.tar.lz4
       args:
         executable: /bin/bash
       register: snapshot_create

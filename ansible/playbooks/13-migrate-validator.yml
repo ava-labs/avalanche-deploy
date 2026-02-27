@@ -127,13 +127,27 @@
       failed_when: false
       changed_when: false
 
+    - name: Check for staking keys in configured path
+      ansible.builtin.stat:
+        path: /var/lib/avalanchego/staking/staker.crt
+      register: staker_crt_configured
+
+    - name: Check for staking keys in default path
+      ansible.builtin.stat:
+        path: /home/avalanche/.avalanchego/staking/staker.crt
+      register: staker_crt_default
+
+    - name: Set staking directory
+      ansible.builtin.set_fact:
+        source_staking_dir: "{{ '/var/lib/avalanchego/staking' if staker_crt_configured.stat.exists else '/home/avalanche/.avalanchego/staking' }}"
+
     - name: Backup keys if not in S3
       when: s3_check.rc != 0
       block:
         - name: Create backup archive
           ansible.builtin.shell: |
             set -euo pipefail
-            tar -czf /tmp/staking-keys-{{ source_host }}.tar.gz -C /var/lib/avalanchego/staking .
+            tar -czf /tmp/staking-keys-{{ source_host }}.tar.gz -C {{ source_staking_dir }} .
             chmod 600 /tmp/staking-keys-{{ source_host }}.tar.gz
           args:
             executable: /bin/bash
@@ -182,14 +196,28 @@
         name: avalanchego
         state: stopped
 
+    - name: Check for existing staking keys in configured path
+      ansible.builtin.stat:
+        path: /var/lib/avalanchego/staking/staker.crt
+      register: target_crt_configured
+
+    - name: Check for existing staking keys in default path
+      ansible.builtin.stat:
+        path: /home/avalanche/.avalanchego/staking/staker.crt
+      register: target_crt_default
+
+    - name: Set target staking directory
+      ansible.builtin.set_fact:
+        target_staking_dir: "{{ '/var/lib/avalanchego/staking' if target_crt_configured.stat.exists else '/home/avalanche/.avalanchego/staking' }}"
+
     - name: Clear existing staking keys on target
       ansible.builtin.file:
-        path: /var/lib/avalanchego/staking/
+        path: "{{ target_staking_dir }}/"
         state: absent
 
     - name: Recreate staking directory
       ansible.builtin.file:
-        path: /var/lib/avalanchego/staking/
+        path: "{{ target_staking_dir }}/"
         state: directory
         owner: avalanche
         group: avalanche
@@ -205,7 +233,7 @@
     - name: Extract staking keys
       ansible.builtin.unarchive:
         src: /tmp/staking-keys.tar.gz
-        dest: /var/lib/avalanchego/staking/
+        dest: "{{ target_staking_dir }}/"
         remote_src: true
         owner: avalanche
         group: avalanche
@@ -305,13 +333,22 @@
           1. Monitor new validator health:
              curl http://{{ hostvars[target_host]['ansible_host'] }}:9650/ext/health
 
-          2. Update monitoring/alerting with new IP
-
-          3. Optionally terminate old instance:
-             - Remove {{ source_host }} from inventory
-             - Terminate in AWS console or via Terraform
-
-          4. Back up keys on new node:
+          2. Back up keys on new node:
              make backup-keys
+
+          3. Update monitoring/alerting with new IP
+
+          4. To remove the old instance via Terraform:
+             Terraform uses index-based ordering, so scaling down always
+             removes the highest-indexed instance. If you migrated TO a
+             higher-indexed instance, swap them in Terraform state first:
+
+               cd terraform/aws-primary-network
+               terraform state mv \
+                 'aws_instance.primary_validators[1]' \
+                 'aws_instance.primary_validators[0]'
+
+             Then reduce primary_validator_count and apply:
+               terraform apply
 
           ============================================

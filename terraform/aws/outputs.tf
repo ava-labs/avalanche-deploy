@@ -8,16 +8,6 @@ output "validator_private_ips" {
   value       = aws_instance.validators[*].private_ip
 }
 
-output "primary_validator_ips" {
-  description = "Public IPs of Primary Network validators"
-  value       = aws_instance.primary_validators[*].public_ip
-}
-
-output "primary_validator_private_ips" {
-  description = "Private IPs of Primary Network validators"
-  value       = aws_instance.primary_validators[*].private_ip
-}
-
 output "staking_keys_bucket" {
   description = "S3 bucket for staking key backups"
   value       = local.enable_key_backup ? aws_s3_bucket.staking_keys[0].id : ""
@@ -105,14 +95,8 @@ rpc-pruned-${i + 1} ansible_host=${inst.public_ip} ansible_user=ubuntu node_type
 rpc_archive
 rpc_pruned
 
-[primary_validators]
-%{for i, inst in aws_instance.primary_validators~}
-primary-validator-${i + 1} ansible_host=${inst.public_ip} ansible_user=ubuntu node_type=primary-validator
-%{endfor~}
-
 [all_validators:children]
 validators
-primary_validators
 
 [monitoring]
 monitoring-1 ansible_host=${aws_instance.monitoring.public_ip} ansible_user=ubuntu
@@ -147,14 +131,8 @@ rpc-pruned-${i + 1} ansible_host=${inst.public_ip} private_ip=${inst.private_ip}
 rpc_archive
 rpc_pruned
 
-[primary_validators]
-%{for i, inst in aws_instance.primary_validators~}
-primary-validator-${i + 1} ansible_host=${inst.public_ip} private_ip=${inst.private_ip} ansible_user=ubuntu node_type=primary-validator
-%{endfor~}
-
 [all_validators:children]
 validators
-primary_validators
 
 [monitoring]
 monitoring-1 ansible_host=${aws_instance.monitoring.public_ip} private_ip=${aws_instance.monitoring.private_ip} ansible_user=ubuntu
@@ -185,9 +163,6 @@ RPC_ARCHIVE_${i + 1}_IP=${ip}
 %{endfor~}
 %{for i, ip in aws_instance.rpc_pruned[*].public_ip~}
 RPC_PRUNED_${i + 1}_IP=${ip}
-%{endfor~}
-%{for i, ip in aws_instance.primary_validators[*].public_ip~}
-PRIMARY_VALIDATOR_${i + 1}_IP=${ip}
 %{endfor~}
 %{if local.enable_key_backup~}
 STAKING_KEYS_BUCKET=${aws_s3_bucket.staking_keys[0].id}
