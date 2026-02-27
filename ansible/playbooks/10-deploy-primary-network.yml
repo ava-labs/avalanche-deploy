@@ -11,10 +11,14 @@
 #   ansible-playbook playbooks/10-deploy-primary-network.yml
 #   ansible-playbook playbooks/10-deploy-primary-network.yml -e network=mainnet
 #
-# After deployment:
-#   1. Wait for all chains to bootstrap (check scripts/check-primary-sync.sh)
-#   2. Register validator with P-Chain (requires staking)
-#   3. Back up staking keys: make backup-keys
+# After deployment completes, the playbook automatically:
+#   1. Waits for all chains (P, X, C) to fully bootstrap
+#   2. Backs up staking keys to S3 (encrypted with KMS)
+#   3. Creates a database snapshot and uploads to S3
+#   4. Restarts the node
+#
+# To skip the snapshot (e.g., when restoring from an existing one):
+#   ansible-playbook playbooks/10-deploy-primary-network.yml -e skip_snapshot=true
 
 - name: Deploy Primary Network Validators
   hosts: primary_validators
@@ -115,6 +119,67 @@
       delegate_to: localhost
       become: false
 
+- name: Wait for all chains to bootstrap
+  hosts: primary_validators
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Wait for P-Chain to bootstrap
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.isBootstrapped"
+          params:
+            chain: "P"
+        return_content: true
+      register: pchain_status
+      until: pchain_status.json.result.isBootstrapped | default(false)
+      retries: 180
+      delay: 30
+
+    - name: Wait for X-Chain to bootstrap
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.isBootstrapped"
+          params:
+            chain: "X"
+        return_content: true
+      register: xchain_status
+      until: xchain_status.json.result.isBootstrapped | default(false)
+      retries: 180
+      delay: 30
+
+    - name: Wait for C-Chain to bootstrap
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.isBootstrapped"
+          params:
+            chain: "C"
+        return_content: true
+      register: cchain_status
+      until: cchain_status.json.result.isBootstrapped | default(false)
+      retries: 180
+      delay: 30
+
+    - name: Display sync status
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: All chains bootstrapped (P, X, C)"
+
 - name: Backup staking keys to S3
   hosts: primary_validators
   become: true
@@ -127,10 +192,24 @@
     - name: Backup staking keys to S3
       when: s3_backup_enabled | bool
       block:
+        - name: Check for staking keys in configured path
+          ansible.builtin.stat:
+            path: /var/lib/avalanchego/staking/staker.crt
+          register: staker_crt_configured
+
+        - name: Check for staking keys in default path
+          ansible.builtin.stat:
+            path: /home/avalanche/.avalanchego/staking/staker.crt
+          register: staker_crt_default
+
+        - name: Set staking directory
+          ansible.builtin.set_fact:
+            staking_dir: "{{ '/var/lib/avalanchego/staking' if staker_crt_configured.stat.exists else '/home/avalanche/.avalanchego/staking' }}"
+
         - name: Create backup archive
           ansible.builtin.shell: |
             set -euo pipefail
-            tar -czf /tmp/staking-keys-{{ inventory_hostname }}.tar.gz -C /var/lib/avalanchego/staking .
+            tar -czf /tmp/staking-keys-{{ inventory_hostname }}.tar.gz -C {{ staking_dir }} .
             chmod 600 /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
           args:
             executable: /bin/bash
@@ -154,7 +233,175 @@
             path: /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
             state: absent
 
-- name: Display next steps
+- name: Create database snapshot
+  hosts: primary_validators
+  become: true
+  gather_facts: true
+  serial: 1
+
+  vars:
+    snapshot_name: "{{ inventory_hostname }}-{{ ansible_date_time.date }}"
+    temp_dir: /var/lib/avalanchego/snapshot-tmp
+    db_path: /var/lib/avalanchego/db
+    skip_snapshot: false
+
+  tasks:
+    - name: Skip snapshot if requested
+      ansible.builtin.meta: end_host
+      when: skip_snapshot | bool
+
+    - name: Skip snapshot if S3 not configured
+      ansible.builtin.meta: end_host
+      when: staking_keys_bucket is not defined or staking_keys_bucket == ''
+
+    - name: Skip snapshot on remaining hosts (only first node needed)
+      ansible.builtin.meta: end_host
+      when: inventory_hostname != groups['primary_validators'][0]
+
+    - name: Install lz4 compression
+      ansible.builtin.apt:
+        name: lz4
+        state: present
+
+    - name: Get database size
+      ansible.builtin.command: du -sh {{ db_path }}
+      register: db_size
+      changed_when: false
+
+    - name: Display snapshot start
+      ansible.builtin.debug:
+        msg: "Creating snapshot of {{ db_size.stdout.split()[0] }} database..."
+
+    - name: Create temp directory
+      ansible.builtin.file:
+        path: "{{ temp_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Stop avalanchego for consistent snapshot
+      ansible.builtin.systemd:
+        name: avalanchego
+        state: stopped
+
+    - name: Create compressed snapshot
+      ansible.builtin.shell: |
+        set -o pipefail
+        cd {{ db_path | dirname }}
+        tar cf - db | lz4 > {{ temp_dir }}/{{ snapshot_name }}.tar.lz4
+      args:
+        executable: /bin/bash
+      async: 7200
+      poll: 30
+      changed_when: true
+
+    - name: Start avalanchego
+      ansible.builtin.systemd:
+        name: avalanchego
+        state: started
+
+    - name: Get snapshot size
+      ansible.builtin.stat:
+        path: "{{ temp_dir }}/{{ snapshot_name }}.tar.lz4"
+      register: snapshot_stat
+
+    - name: Generate SHA256 checksum
+      ansible.builtin.shell: set -o pipefail && sha256sum {{ temp_dir }}/{{ snapshot_name }}.tar.lz4 | awk '{print $1}'
+      args:
+        executable: /bin/bash
+      register: snapshot_checksum
+      changed_when: false
+
+    - name: Save checksum to file
+      ansible.builtin.copy:
+        content: "{{ snapshot_checksum.stdout }}  {{ snapshot_name }}.tar.lz4\n"
+        dest: "{{ temp_dir }}/{{ snapshot_name }}.sha256"
+        mode: '0644'
+
+    - name: Upload snapshot to S3
+      ansible.builtin.command: >
+        aws s3 cp {{ temp_dir }}/{{ snapshot_name }}.tar.lz4
+        s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4
+        --sse aws:kms
+        --sse-kms-key-id {{ staking_keys_kms_arn }}
+      async: 7200
+      poll: 60
+      changed_when: true
+
+    - name: Create 'latest' pointer
+      ansible.builtin.command: >
+        aws s3 cp {{ temp_dir }}/{{ snapshot_name }}.tar.lz4
+        s3://{{ staking_keys_bucket }}/snapshots/latest.tar.lz4
+        --sse aws:kms
+        --sse-kms-key-id {{ staking_keys_kms_arn }}
+      changed_when: true
+
+    - name: Upload checksum to S3
+      ansible.builtin.command: >
+        aws s3 cp {{ temp_dir }}/{{ snapshot_name }}.sha256
+        s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.sha256
+        --sse aws:kms
+        --sse-kms-key-id {{ staking_keys_kms_arn }}
+      changed_when: true
+
+    - name: Update latest checksum
+      ansible.builtin.command: >
+        aws s3 cp {{ temp_dir }}/{{ snapshot_name }}.sha256
+        s3://{{ staking_keys_bucket }}/snapshots/latest.sha256
+        --sse aws:kms
+        --sse-kms-key-id {{ staking_keys_kms_arn }}
+      changed_when: true
+
+    - name: Create snapshot metadata
+      ansible.builtin.copy:
+        content: |
+          {
+            "name": "{{ snapshot_name }}",
+            "created": "{{ ansible_date_time.iso8601 }}",
+            "source_host": "{{ inventory_hostname }}",
+            "size_bytes": {{ snapshot_stat.stat.size }},
+            "sha256": "{{ snapshot_checksum.stdout }}",
+            "network": "{{ network | default('fuji') }}",
+            "chains": ["P", "X", "C"]
+          }
+        dest: "{{ temp_dir }}/{{ snapshot_name }}.json"
+        mode: '0644'
+
+    - name: Upload snapshot metadata
+      ansible.builtin.command: >
+        aws s3 cp {{ temp_dir }}/{{ snapshot_name }}.json
+        s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.json
+        --sse aws:kms
+        --sse-kms-key-id {{ staking_keys_kms_arn }}
+      changed_when: true
+
+    - name: Update latest metadata
+      ansible.builtin.command: >
+        aws s3 cp {{ temp_dir }}/{{ snapshot_name }}.json
+        s3://{{ staking_keys_bucket }}/snapshots/latest.json
+        --sse aws:kms
+        --sse-kms-key-id {{ staking_keys_kms_arn }}
+      changed_when: true
+
+    - name: Clean up temp files
+      ansible.builtin.file:
+        path: "{{ temp_dir }}"
+        state: absent
+
+    - name: Wait for node to be healthy
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/health"
+        method: GET
+        return_content: true
+      register: health_check
+      until: health_check.status == 200
+      retries: 30
+      delay: 10
+
+    - name: Display snapshot status
+      ansible.builtin.debug:
+        msg: "Snapshot uploaded: s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4 ({{ (snapshot_stat.stat.size / 1073741824) | round(2) }}GB)"
+
+- name: Display summary
   hosts: localhost
   gather_facts: false
   tasks:
@@ -163,25 +410,22 @@
         msg: |
 
           ============================================
-          Primary Network Validators Deployed
+          Primary Network Validators Ready
           ============================================
 
           Node IDs saved to: ansible/primary_validator_node_ids.txt
 
+          All chains bootstrapped (P, X, C).
+          Staking keys backed up to S3.
+          Database snapshot uploaded to S3.
+
           Next steps:
-          1. Wait for all chains to bootstrap (P, X, C):
-             ./scripts/check-primary-sync.sh
-
-          2. Check bootstrap progress:
-             curl http://<node-ip>:9650/ext/info -X POST \
-               -H 'Content-Type: application/json' \
-               -d '{"jsonrpc":"2.0","id":1,"method":"info.isBootstrapped","params":{"chain":"P"}}'
-
-          3. Register as validator on P-Chain:
+          1. Register as validator on P-Chain:
              - Requires minimum stake (2000 AVAX on Mainnet, 1 AVAX on Fuji)
              - Use Avalanche Core wallet or CLI
 
-          4. Verify staking keys are backed up:
-             aws s3 ls s3://<bucket>/primary-validator-1/
+          2. To restore snapshot on a new node:
+             ansible-playbook playbooks/15-restore-snapshot.yml \
+               --limit <target-node>
 
           ============================================
