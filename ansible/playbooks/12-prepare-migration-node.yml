@@ -143,8 +143,12 @@
           ansible.builtin.debug:
             msg: "Snapshot restored from s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4"
 
-    # Wait for sync (both paths)
-    - name: Wait for P-Chain to start bootstrapping
+    # Wait for all chains to fully bootstrap
+    - name: Display sync start
+      ansible.builtin.debug:
+        msg: "Waiting for all chains to bootstrap ({{ 'from snapshot' if use_snapshot | bool else 'via state-sync' }})..."
+
+    - name: Wait for P-Chain to bootstrap
       ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
@@ -157,17 +161,47 @@
             chain: "P"
         return_content: true
       register: pchain_status
-      until: pchain_status.status == 200
-      retries: 60
-      delay: 10
+      until: pchain_status.json.result.isBootstrapped | default(false)
+      retries: 180
+      delay: 30
 
-    - name: Display sync status
+    - name: Wait for X-Chain to bootstrap
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.isBootstrapped"
+          params:
+            chain: "X"
+        return_content: true
+      register: xchain_status
+      until: xchain_status.json.result.isBootstrapped | default(false)
+      retries: 180
+      delay: 30
+
+    - name: Wait for C-Chain to bootstrap
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.isBootstrapped"
+          params:
+            chain: "C"
+        return_content: true
+      register: cchain_status
+      until: cchain_status.json.result.isBootstrapped | default(false)
+      retries: 180
+      delay: 30
+
+    - name: Display sync complete
       ansible.builtin.debug:
-        msg: |
-          Node is {{ 'catching up from snapshot' if use_snapshot | bool else 'syncing via state-sync' }}.
-          P-Chain bootstrap status: {{ pchain_status.json.result.isBootstrapped | default(false) }}
-
-          This node does NOT have staking keys yet.
+        msg: "All chains bootstrapped (P, X, C). Node is ready for migration."
 
     - name: Save migration target info
       ansible.builtin.lineinfile:
@@ -187,25 +221,13 @@
         msg: |
 
           ============================================
-          Migration Node Preparation Started
+          Migration Node Ready
           ============================================
 
-          {% if hostvars[groups['all'][0]]['use_snapshot'] | default(false) | bool %}
-          The new node is now catching up from snapshot.
-          {% else %}
-          The new node is now syncing via state-sync.
-          {% endif %}
-          It does NOT have staking keys yet - that happens during migration.
+          All chains bootstrapped (P, X, C).
+          The node does NOT have staking keys yet - that happens during migration.
 
-          Monitor sync progress:
-            ./scripts/check-primary-sync.sh <node-ip>
-
-          Or check manually:
-            curl http://<node-ip>:9650/ext/info -X POST \
-              -H 'Content-Type: application/json' \
-              -d '{"jsonrpc":"2.0","id":1,"method":"info.isBootstrapped","params":{"chain":"P"}}'
-
-          When all chains are bootstrapped, run migration:
+          Run migration now:
             ansible-playbook playbooks/13-migrate-validator.yml \
               -e source_host=<current-validator> \
               -e target_host=<this-node>
