@@ -1,0 +1,119 @@
+# eRPC - EVM RPC load balancer / proxy
+
+# Number of replicas
+replicaCount: 1
+
+# eRPC Docker image
+image:
+  repository: ghcr.io/erpc/erpc
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Service configuration
+service:
+  type: ClusterIP        # LoadBalancer for external access
+  port: 4000             # Main RPC proxy
+  metricsPort: 4001      # Admin/metrics
+
+# L1 Configuration (required)
+l1:
+  chainId: ""            # Avalanche blockchain ID (hex, from create-l1)
+  evmChainId: ""         # EVM chain ID (decimal, from genesis)
+
+# Upstream RPC endpoints to load balance across
+# If empty, a single upstream is auto-constructed from avalanchego service
+# Each entry: { id: "rpc-1", endpoint: "http://host:9650/ext/bc/<chainId>/rpc", type: "archive" }
+upstreams: []
+
+# AvalancheGo service to connect to (within cluster)
+# Used to construct default upstream when upstreams list is empty
+avalanchego:
+  serviceName: "l1-rpc"
+  httpPort: 9650
+
+# Project ID (used in logs and metrics)
+projectId: avalanche-l1
+
+# Log level
+logLevel: info
+
+# Server timeout
+timeout: 30s
+
+# Cache configuration
+cache:
+  enabled: true
+  maxItems: 100000
+
+# Retry configuration
+retry:
+  maxAttempts: 3
+  delay: 500ms
+  backoffMaxDelay: 10s
+  backoffFactor: 2
+  jitter: 200ms
+
+# Hedging (send parallel requests after delay)
+hedge:
+  delay: 1s
+  maxCount: 2
+
+# Circuit breaker (per-upstream)
+circuitBreaker:
+  failureThreshold: 10
+  capacity: 100
+  halfOpenAfter: 30s
+  successThreshold: 5
+  successCapacity: 10
+
+# Rate limiting (disabled by default)
+rateLimiting:
+  enabled: false
+  maxCount: 1000
+  period: 1s
+
+# Resource limits
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+# Autoscaling
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Liveness probe
+livenessProbe:
+  httpGet:
+    path: /healthcheck
+    port: metrics
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+# Readiness probe
+readinessProbe:
+  httpGet:
+    path: /healthcheck
+    port: metrics
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}

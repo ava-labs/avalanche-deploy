@@ -1,0 +1,6 @@
+apiVersion: v2
+name: faucet
+description: Token faucet for distributing test tokens on an Avalanche L1
+type: application
+version: 0.1.0
+appVersion: "latest"

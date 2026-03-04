@@ -1,0 +1,124 @@
+# Graph Node - Blockchain indexing and GraphQL API
+
+# Graph Node image
+graphNode:
+  image:
+    repository: graphprotocol/graph-node
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+  # Graph Node log level
+  logLevel: info
+  # Enable experimental subgraph version switching
+  experimentalVersionSwitching: true
+  # Clean up old blocks from the store
+  cleanupBlocks: true
+
+# PostgreSQL configuration
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "15-alpine"
+    pullPolicy: IfNotPresent
+  user: graph
+  password: ""
+  database: graph
+  storage: 50Gi
+  storageClass: ""
+  resources:
+    requests:
+      cpu: "500m"
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+
+# IPFS configuration
+ipfs:
+  enabled: true
+  image:
+    repository: ipfs/kubo
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  storage: 10Gi
+  storageClass: ""
+  resources:
+    requests:
+      cpu: "250m"
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+# L1 chain configuration (required)
+l1:
+  # Avalanche blockchain ID (from create-l1)
+  chainId: ""
+  # EVM chain ID (from genesis)
+  evmChainId: ""
+  # RPC URL for the L1 chain
+  rpcUrl: ""
+  # Network name used in subgraph manifests and Graph Node logs
+  networkName: "avalanche-l1"
+
+# Service configuration
+service:
+  type: ClusterIP
+  graphqlPort: 8000
+  wsPort: 8001
+  adminPort: 8020
+  statusPort: 8030
+
+# AvalancheGo service (alternative to l1.rpcUrl, for in-cluster nodes)
+avalanchego:
+  serviceName: ""
+  httpPort: 9650
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Service account
+serviceAccount:
+  create: true
+  name: ""
+
+# Liveness probe for Graph Node
+livenessProbe:
+  httpGet:
+    path: /
+    port: status
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  failureThreshold: 6
+
+# Readiness probe for Graph Node
+readinessProbe:
+  httpGet:
+    path: /
+    port: status
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  failureThreshold: 3
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Name overrides
+nameOverride: ""
+fullnameOverride: ""

@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "safe.fullname" . }}-cfg
+  labels:
+    {{- include "safe.cfg.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.cfg.replicas }}
+  selector:
+    matchLabels:
+      {{- include "safe.cfg.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "safe.cfg.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap-cfg.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: cfg
+          image: "{{ .Values.cfg.image.repository }}:{{ .Values.cfg.image.tag }}"
+          imagePullPolicy: {{ .Values.cfg.image.pullPolicy }}
+          command:
+            - docker/web/run_web.sh
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "safe.fullname" . }}-cfg
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safe.fullname" . }}
+                  key: cfg-secret-key
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safe.fullname" . }}
+                  key: postgres-cfg-txs-password
+            - name: CGW_FLUSH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safe.fullname" . }}
+                  key: webhook-token
+            - name: CGW_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safe.fullname" . }}
+                  key: webhook-token
+          livenessProbe:
+            httpGet:
+              path: /api/v1/about/
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /api/v1/about/
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.cfg.resources | nindent 12 }}

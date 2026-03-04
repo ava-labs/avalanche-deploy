@@ -1,0 +1,56 @@
+Blockscout block explorer has been deployed.
+
+Components:
+  - Backend (indexer + API): {{ include "blockscout.fullname" . }}-backend
+  - Frontend (Next.js UI):   {{ include "blockscout.fullname" . }}-frontend
+{{- if .Values.postgres.enabled }}
+  - PostgreSQL:              {{ include "blockscout.fullname" . }}-postgres
+{{- end }}
+{{- if .Values.redis.enabled }}
+  - Redis:                   {{ include "blockscout.fullname" . }}-redis
+{{- end }}
+{{- if .Values.smartContractVerifier.enabled }}
+  - Smart Contract Verifier: {{ include "blockscout.fullname" . }}-verifier
+{{- end }}
+{{- if .Values.visualizer.enabled }}
+  - Visualizer:              {{ include "blockscout.fullname" . }}-visualizer
+{{- end }}
+{{- if .Values.stats.enabled }}
+  - Stats:                   {{ include "blockscout.fullname" . }}-stats
+{{- end }}
+{{- if .Values.sigProvider.enabled }}
+  - Sig Provider:            {{ include "blockscout.fullname" . }}-sig-provider
+{{- end }}
+
+Chain Configuration:
+  - Chain Name:    {{ .Values.l1.chainName }}
+  - EVM Chain ID:  {{ .Values.l1.evmChainId }}
+  - RPC URL:       {{ .Values.l1.rpcUrl }}
+
+Access the explorer:
+
+1. Port-forward the frontend:
+
+   kubectl port-forward svc/{{ include "blockscout.fullname" . }}-frontend {{ .Values.frontend.service.port }}:{{ .Values.frontend.service.port }}
+
+   Then open http://localhost:{{ .Values.frontend.service.port }}
+
+2. Port-forward the API:
+
+   kubectl port-forward svc/{{ include "blockscout.fullname" . }}-backend {{ .Values.backend.service.port }}:{{ .Values.backend.service.port }}
+
+   API available at http://localhost:{{ .Values.backend.service.port }}/api/v2/stats
+
+{{- if .Values.ingress.enabled }}
+
+3. Ingress is enabled:
+   {{- if .Values.ingress.host }}
+   - Frontend: http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}
+   {{- end }}
+   {{- if .Values.ingress.apiHost }}
+   - API:      http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.apiHost }}
+   {{- end }}
+{{- end }}
+
+NOTE: The backend indexer may take several minutes to start indexing blocks.
+      Check status with: kubectl logs -f deploy/{{ include "blockscout.fullname" . }}-backend

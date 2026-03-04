@@ -1,0 +1,45 @@
+eRPC has been deployed successfully.
+
+RPC Proxy:    port {{ .Values.service.port }}
+Metrics:      port {{ .Values.service.metricsPort }}
+
+{{- if eq .Values.service.type "ClusterIP" }}
+
+Access the RPC proxy from within the cluster:
+  http://{{ include "erpc.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+To port-forward for local access:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "erpc.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+
+Then send RPC requests to:
+  curl http://localhost:{{ .Values.service.port }}/{{ .Values.projectId }}/evm/{{ .Values.l1.evmChainId }} \
+    -X POST -H "Content-Type: application/json" \
+    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+
+{{- else if eq .Values.service.type "LoadBalancer" }}
+
+Waiting for the external IP:
+  kubectl get svc -n {{ .Release.Namespace }} {{ include "erpc.fullname" . }} -w
+
+Once available, send RPC requests to:
+  curl http://<EXTERNAL-IP>:{{ .Values.service.port }}/{{ .Values.projectId }}/evm/{{ .Values.l1.evmChainId }} \
+    -X POST -H "Content-Type: application/json" \
+    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+{{- end }}
+
+Health check:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "erpc.fullname" . }} {{ .Values.service.metricsPort }}:{{ .Values.service.metricsPort }}
+  curl http://localhost:{{ .Values.service.metricsPort }}/healthcheck
+
+{{- if not .Values.l1.evmChainId }}
+
+WARNING: l1.evmChainId is not set. You must provide the EVM chain ID:
+  helm upgrade {{ .Release.Name }} . --set l1.evmChainId=99999
+{{- end }}
+
+{{- if and (not .Values.upstreams) (not .Values.l1.chainId) }}
+
+WARNING: No upstreams configured and l1.chainId is not set.
+  Either provide upstreams or set l1.chainId for auto-discovery:
+  helm upgrade {{ .Release.Name }} . --set l1.chainId=<blockchain-id> --set l1.evmChainId=<evm-chain-id>
+{{- end }}

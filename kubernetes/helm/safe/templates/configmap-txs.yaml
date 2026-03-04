@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "safe.fullname" . }}-txs
+  labels:
+    {{- include "safe.txs.labels" . | nindent 4 }}
+data:
+  # Django settings
+  DEBUG: "0"
+  ROOT_LOG_LEVEL: "INFO"
+  DJANGO_ALLOWED_HOSTS: "*"
+  CSRF_TRUSTED_ORIGINS: "http://*,https://*"
+
+  # Database
+  DATABASE_URL: {{ include "safe.txs.databaseUrl" . | quote }}
+
+  # Redis
+  REDIS_URL: {{ include "safe.redis.url" . | quote }}
+
+  # Celery broker
+  CELERY_BROKER_URL: {{ include "safe.rabbitmq.url" . | quote }}
+
+  # Ethereum node (Avalanche L1 RPC)
+  ETHEREUM_NODE_URL: {{ .Values.l1.rpcUrl | quote }}
+  ETHEREUM_TRACING_NODE_URL: {{ .Values.l1.rpcUrl | quote }}
+
+  # Chain configuration
+  ETH_L2_NETWORK: {{ ternary "1" "0" .Values.l1.useL2 | quote }}
+  CHAIN_ID: {{ .Values.l1.evmChainId | quote }}
+
+  # Worker queues (overridden per-worker in deployments)
+  WORKER_QUEUES: "default,indexing,contracts,tokens,notifications,webhooks"
+
+  # Safe contract addresses (v1.4.1 canonical)
+  SAFE_CONTRACT_ADDRESS: {{ .Values.contracts.safeSingleton | quote }}
+  SAFE_V1_4_1_CONTRACT_ADDRESS: {{ .Values.contracts.safeSingleton | quote }}
+  SAFE_L2_CONTRACT_ADDRESS: {{ .Values.contracts.safeSingleton | quote }}
+  SAFE_L2_V1_4_1_CONTRACT_ADDRESS: {{ .Values.contracts.safeSingleton | quote }}
+  DEFAULT_SAFE_CONTRACT_ADDRESS: {{ .Values.contracts.safeSingleton | quote }}
+  PROXY_FACTORY_CONTRACT_ADDRESS: {{ .Values.contracts.proxyFactory | quote }}
+  PROXY_FACTORY_V1_4_1_CONTRACT_ADDRESS: {{ .Values.contracts.proxyFactory | quote }}
+  MULTI_SEND_CONTRACT_ADDRESS: {{ .Values.contracts.multiSend | quote }}
+  MULTI_SEND_V1_4_1_CONTRACT_ADDRESS: {{ .Values.contracts.multiSend | quote }}
+  MULTI_SEND_CALL_ONLY_CONTRACT_ADDRESS: {{ .Values.contracts.multiSendCallOnly | quote }}
+  MULTI_SEND_CALL_ONLY_V1_4_1_CONTRACT_ADDRESS: {{ .Values.contracts.multiSendCallOnly | quote }}
+  FALLBACK_HANDLER_CONTRACT_ADDRESS: {{ .Values.contracts.fallbackHandler | quote }}
+  FALLBACK_HANDLER_V1_4_1_CONTRACT_ADDRESS: {{ .Values.contracts.fallbackHandler | quote }}
+  CREATE_CALL_CONTRACT_ADDRESS: {{ .Values.contracts.createCall | quote }}
+  CREATE_CALL_V1_4_1_CONTRACT_ADDRESS: {{ .Values.contracts.createCall | quote }}
+  SIGN_MESSAGE_LIB_CONTRACT_ADDRESS: {{ .Values.contracts.signMessageLib | quote }}
+  SIGN_MESSAGE_LIB_V1_4_1_CONTRACT_ADDRESS: {{ .Values.contracts.signMessageLib | quote }}
+  SIMULATE_TX_ACCESSOR_CONTRACT_ADDRESS: {{ .Values.contracts.simulateTxAccessor | quote }}
+  SIMULATE_TX_ACCESSOR_V1_4_1_CONTRACT_ADDRESS: {{ .Values.contracts.simulateTxAccessor | quote }}
+
+  # Indexing settings
+  ETH_EVENTS_BLOCK_PROCESS_LIMIT: "1000"
+  ETH_EVENTS_QUERY_CHUNK_SIZE: "1000"
+  ETH_INTERNAL_TXS_BLOCK_PROCESS_LIMIT: "1000"
+  ETH_INTERNAL_NO_FILTER: "1"
+  # Avalanche has instant finality (single-slot), no reorgs possible
+  ETH_REORG_BLOCKS: "0"
+
+  # Token settings
+  TOKENS_LOGO_BASE_URI: ""
+  TOKENS_LOGO_EXTENSION: ".png"
+
+  # AWS (not used, but required by TXS startup)
+  AWS_ACCESS_KEY_ID: ""
+  AWS_SECRET_ACCESS_KEY: ""
+  AWS_STORAGE_BUCKET_NAME: ""

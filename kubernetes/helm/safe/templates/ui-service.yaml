@@ -1,0 +1,17 @@
+{{- if and .Values.ui.image.repository .Values.ui.image.tag }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "safe.fullname" . }}-ui
+  labels:
+    {{- include "safe.ui.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: 8080
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "safe.ui.selectorLabels" . | nindent 4 }}
+{{- end }}

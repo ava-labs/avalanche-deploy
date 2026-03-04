@@ -1,0 +1,28 @@
+The Graph Node has been deployed.
+
+Network: {{ .Values.l1.networkName }}
+RPC URL: {{ include "graph-node.ethereumRpcUrl" . }}
+
+Services:
+  GraphQL HTTP:  port {{ .Values.service.graphqlPort }}
+  GraphQL WS:    port {{ .Values.service.wsPort }}
+  Index Status:  port {{ .Values.service.statusPort }}
+  Admin (JSON-RPC): port {{ .Values.service.adminPort }} (not exposed externally)
+
+To access the GraphQL endpoint locally:
+  kubectl port-forward svc/{{ include "graph-node.fullname" . }} {{ .Values.service.graphqlPort }}:{{ .Values.service.graphqlPort }}
+
+To check indexing status:
+  kubectl port-forward svc/{{ include "graph-node.fullname" . }} {{ .Values.service.statusPort }}:{{ .Values.service.statusPort }}
+  curl -s http://localhost:{{ .Values.service.statusPort }}/graphql \
+    -H 'Content-Type: application/json' \
+    -d '{"query": "{ indexingStatuses { subgraph synced health } }"}'
+
+To deploy a subgraph (admin API, port-forward first):
+  kubectl port-forward svc/{{ include "graph-node.fullname" . }}-admin {{ .Values.service.adminPort }}:{{ .Values.service.adminPort }}
+  graph deploy --node http://localhost:{{ .Values.service.adminPort }}/ \
+    --ipfs http://localhost:5001/ \
+    my-subgraph ./subgraph.yaml
+
+PostgreSQL: {{ include "graph-node.postgresHost" . }}:5432
+IPFS: {{ include "graph-node.ipfsUrl" . }}

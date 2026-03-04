@@ -356,10 +356,23 @@ k8s-help:
 	@echo "  make k8s-help-primary"
 	@echo ""
 	@echo "Common wrappers:"
-	@echo "  make k8s-kind        # Create local kind cluster"
-	@echo "  make k8s-monitoring  # Install/upgrade monitoring chart"
-	@echo "  make k8s-icm-relayer # Deploy ICM Relayer for cross-chain messaging"
-	@echo "  make k8s-cleanup     # Cleanup releases + optional PVC/kind"
+	@echo "  make k8s-kind          # Create local kind cluster"
+	@echo "  make k8s-monitoring    # Install/upgrade monitoring chart"
+	@echo "  make k8s-icm-relayer   # Deploy ICM Relayer for cross-chain messaging"
+	@echo "  make k8s-cleanup       # Cleanup releases + optional PVC/kind"
+	@echo ""
+	@echo "Add-ons:"
+	@echo "  make k8s-erpc          # Deploy eRPC load balancer"
+	@echo "  make k8s-faucet        # Deploy token faucet"
+	@echo "  make k8s-blockscout    # Deploy Blockscout block explorer"
+	@echo "  make k8s-graph-node    # Deploy The Graph Node (subgraph indexing)"
+	@echo "  make k8s-safe          # Deploy Safe multisig infrastructure"
+	@echo ""
+	@echo "Operations:"
+	@echo "  make k8s-backup-keys   # Deploy staking key backup CronJob"
+	@echo "  make k8s-health-checks # Run comprehensive health checks"
+	@echo "  make k8s-reset-l1      # Reset L1 for redeployment"
+	@echo "  make k8s-init-validator-manager # Initialize ValidatorManager contract"
 
 k8s-help-l1:
 	@echo "Kubernetes L1 Workflow"
@@ -463,6 +476,73 @@ k8s-icm-relayer:
 		--set "l1.blockchainId=$(CHAIN_ID)" \
 		--set "relayerPrivateKey=$(RELAYER_KEY)" \
 		--set "network=$(NETWORK)"
+
+k8s-erpc:
+	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make k8s-erpc CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
+	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make k8s-erpc CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
+	@cd "$(K8S_DIR)" && helm upgrade --install erpc ./helm/erpc \
+		--set "l1.chainId=$(CHAIN_ID)" \
+		--set "l1.evmChainId=$(EVM_CHAIN_ID)"
+
+k8s-faucet:
+	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make k8s-faucet CHAIN_ID=xxx EVM_CHAIN_ID=yyy FAUCET_KEY=0x..."; exit 1; fi
+	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make k8s-faucet CHAIN_ID=xxx EVM_CHAIN_ID=yyy FAUCET_KEY=0x..."; exit 1; fi
+	@if [ -z "$(FAUCET_KEY)" ]; then echo "Usage: make k8s-faucet CHAIN_ID=xxx EVM_CHAIN_ID=yyy FAUCET_KEY=0x..."; exit 1; fi
+	@cd "$(K8S_DIR)" && helm upgrade --install faucet ./helm/faucet \
+		--set "l1.chainId=$(CHAIN_ID)" \
+		--set "l1.evmChainId=$(EVM_CHAIN_ID)" \
+		--set "faucet.privateKey=$(FAUCET_KEY)"
+
+k8s-blockscout:
+	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make k8s-blockscout CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
+	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make k8s-blockscout CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
+	@cd "$(K8S_DIR)" && helm upgrade --install blockscout ./helm/blockscout \
+		--set "l1.chainId=$(CHAIN_ID)" \
+		--set "l1.evmChainId=$(EVM_CHAIN_ID)" \
+		$(if $(CHAIN_NAME),--set "l1.chainName=$(CHAIN_NAME)",)
+
+k8s-graph-node:
+	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make k8s-graph-node CHAIN_ID=xxx [NETWORK_NAME=my-l1]"; exit 1; fi
+	@cd "$(K8S_DIR)" && helm upgrade --install graph-node ./helm/graph-node \
+		--set "l1.chainId=$(CHAIN_ID)" \
+		$(if $(NETWORK_NAME),--set "l1.networkName=$(NETWORK_NAME)",)
+
+k8s-safe:
+	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make k8s-safe EVM_CHAIN_ID=yyy [CHAIN_ID=xxx]"; exit 1; fi
+	@cd "$(K8S_DIR)" && helm upgrade --install safe ./helm/safe \
+		--set "l1.evmChainId=$(EVM_CHAIN_ID)" \
+		$(if $(CHAIN_ID),--set "l1.chainId=$(CHAIN_ID)",) \
+		$(if $(CHAIN_NAME),--set "l1.chainName=$(CHAIN_NAME)",)
+
+k8s-backup-keys:
+	@cd "$(K8S_DIR)" && helm upgrade --install staking-key-backup ./helm/staking-key-backup \
+		--set "validatorRelease=$(K8S_L1_RELEASE)" \
+		$(if $(BACKUP_BUCKET),--set "storage.bucket=$(BACKUP_BUCKET)",) \
+		$(if $(BACKUP_PROVIDER),--set "storage.provider=$(BACKUP_PROVIDER)",)
+
+k8s-health-checks:
+	@cd "$(K8S_DIR)" && ./scripts/health-checks.sh \
+		--release="$(K8S_L1_RELEASE)" \
+		--rpc-release="$(K8S_L1_RPC_RELEASE)" \
+		$(if $(CHAIN_ID),--chain-id="$(CHAIN_ID)",)
+
+k8s-reset-l1:
+	@cd "$(K8S_DIR)" && ./scripts/reset-l1.sh \
+		--release="$(K8S_L1_RELEASE)" \
+		--rpc-release="$(K8S_L1_RPC_RELEASE)"
+
+k8s-init-validator-manager:
+	@if [ -z "$(SUBNET_ID)" ]; then echo "Usage: make k8s-init-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
+	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make k8s-init-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
+	@if [ -z "$(CONVERSION_TX)" ]; then echo "Usage: make k8s-init-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
+	@if [ -z "$(PROXY_ADDRESS)" ]; then echo "Usage: make k8s-init-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
+	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make k8s-init-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
+	@cd "$(K8S_DIR)" && ./scripts/init-validator-manager.sh \
+		--subnet-id="$(SUBNET_ID)" \
+		--chain-id="$(CHAIN_ID)" \
+		--conversion-tx="$(CONVERSION_TX)" \
+		--proxy-address="$(PROXY_ADDRESS)" \
+		--evm-chain-id="$(EVM_CHAIN_ID)"
 
 k8s-cleanup:
 	@cd "$(K8S_DIR)" && ./scripts/cleanup.sh
@@ -723,6 +803,15 @@ help-all:
 	@echo "  make k8s-primary-status Check Primary release status"
 	@echo "  make k8s-monitoring     Install/upgrade monitoring chart"
 	@echo "  make k8s-icm-relayer    Deploy ICM Relayer for cross-chain messaging"
+	@echo "  make k8s-erpc           Deploy eRPC load balancer"
+	@echo "  make k8s-faucet         Deploy token faucet"
+	@echo "  make k8s-blockscout     Deploy Blockscout block explorer"
+	@echo "  make k8s-graph-node     Deploy The Graph Node for subgraph indexing"
+	@echo "  make k8s-safe           Deploy Safe multisig infrastructure"
+	@echo "  make k8s-backup-keys    Deploy staking key backup CronJob"
+	@echo "  make k8s-health-checks  Run comprehensive health checks"
+	@echo "  make k8s-reset-l1       Reset L1 for redeployment"
+	@echo "  make k8s-init-validator-manager Initialize ValidatorManager contract"
 	@echo "  make k8s-cleanup        Cleanup Kubernetes resources"
 	@echo ""
 	@echo "Operations:"

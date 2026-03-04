@@ -1,0 +1,168 @@
+{{/*
+One-time backup job. Use with:
+  helm template staking-key-backup ./kubernetes/helm/staking-key-backup \
+    --show-only templates/job.yaml \
+    --set storage.bucket=my-bucket \
+    | kubectl apply -f -
+*/}}
+{{- if .Values.runOnce | default false }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "staking-key-backup.fullname" . }}-{{ now | date "20060102-150405" }}
+  labels:
+    {{- include "staking-key-backup.labels" . | nindent 4 }}
+spec:
+  activeDeadlineSeconds: {{ .Values.activeDeadlineSeconds }}
+  backoffLimit: {{ .Values.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "staking-key-backup.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "staking-key-backup.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      restartPolicy: {{ .Values.restartPolicy }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: backup
+          image: {{ include "staking-key-backup.image" . }}
+          imagePullPolicy: {{ include "staking-key-backup.imagePullPolicy" . }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+
+              TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+              RELEASE="{{ .Values.validatorRelease }}"
+              BUCKET="{{ .Values.storage.bucket }}"
+              PREFIX="{{ .Values.storage.prefix }}"
+              STAKING_PATH="{{ .Values.stakingKeyPath }}"
+              PROVIDER="{{ .Values.storage.provider }}"
+
+              if [ -z "$BUCKET" ]; then
+                echo "Error: storage.bucket is not set"
+                exit 1
+              fi
+
+              echo "============================================"
+              echo "  Staking Key Backup (one-time)"
+              echo "  $(date -u)"
+              echo "============================================"
+              echo ""
+
+              PODS=$(kubectl get pods \
+                {{- range $key, $value := .Values.validatorPodLabels }}
+                -l "{{ $key }}={{ $value }}" \
+                {{- end }}
+                -l "app.kubernetes.io/instance=${RELEASE}" \
+                --field-selector=status.phase=Running \
+                -o jsonpath='{.items[*].metadata.name}')
+
+              if [ -z "$PODS" ]; then
+                echo "Error: no running validator pods found for release: ${RELEASE}"
+                exit 1
+              fi
+
+              SUCCESS=0
+              FAIL=0
+
+              for pod in $PODS; do
+                echo "Backing up keys from ${pod}..."
+
+                TMPDIR="/tmp/backup-${pod}"
+                mkdir -p "$TMPDIR"
+
+                if ! kubectl cp "${pod}:${STAKING_PATH}/staker.key" "${TMPDIR}/staker.key" 2>/dev/null; then
+                  echo "  Warning: failed to copy staker.key from ${pod}"
+                  FAIL=$((FAIL + 1))
+                  rm -rf "$TMPDIR"
+                  continue
+                fi
+
+                if ! kubectl cp "${pod}:${STAKING_PATH}/staker.crt" "${TMPDIR}/staker.crt" 2>/dev/null; then
+                  echo "  Warning: failed to copy staker.crt from ${pod}"
+                  FAIL=$((FAIL + 1))
+                  rm -rf "$TMPDIR"
+                  continue
+                fi
+
+                kubectl cp "${pod}:${STAKING_PATH}/signer.key" "${TMPDIR}/signer.key" 2>/dev/null || true
+
+                ARCHIVE="/tmp/staking-keys-${pod}.tar.gz"
+                tar -czf "$ARCHIVE" -C "$TMPDIR" .
+                rm -rf "$TMPDIR"
+
+                if [ "$PROVIDER" = "s3" ]; then
+                  aws s3 cp "$ARCHIVE" \
+                    "s3://${BUCKET}/${PREFIX}${pod}/staking-keys.tar.gz" \
+                    --region "{{ .Values.storage.region }}" \
+                    --quiet
+                  aws s3 cp "$ARCHIVE" \
+                    "s3://${BUCKET}/${PREFIX}${pod}/backups/staking-keys-${TIMESTAMP}.tar.gz" \
+                    --region "{{ .Values.storage.region }}" \
+                    --quiet
+                elif [ "$PROVIDER" = "gcs" ]; then
+                  gsutil -q cp "$ARCHIVE" \
+                    "gs://${BUCKET}/${PREFIX}${pod}/staking-keys.tar.gz"
+                  gsutil -q cp "$ARCHIVE" \
+                    "gs://${BUCKET}/${PREFIX}${pod}/backups/staking-keys-${TIMESTAMP}.tar.gz"
+                fi
+
+                rm -f "$ARCHIVE"
+                echo "  OK: ${pod}"
+                SUCCESS=$((SUCCESS + 1))
+              done
+
+              echo ""
+              echo "============================================"
+              echo "  Backup Complete"
+              echo "  Success: ${SUCCESS}  Failed: ${FAIL}"
+              echo "============================================"
+
+              if [ "$FAIL" -gt 0 ]; then
+                exit 1
+              fi
+          env:
+            {{- if and (eq .Values.storage.provider "s3") .Values.aws.accessKeyId }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "staking-key-backup.fullname" . }}
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "staking-key-backup.fullname" . }}
+                  key: AWS_SECRET_ACCESS_KEY
+            {{- end }}
+            {{- if eq .Values.storage.provider "s3" }}
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.storage.region | quote }}
+            {{- end }}
+            {{- if and (eq .Values.storage.provider "gcs") .Values.gcs.serviceAccountKey }}
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /etc/gcs/gcs-service-account.json
+            {{- end }}
+          {{- if and (eq .Values.storage.provider "gcs") .Values.gcs.serviceAccountKey }}
+          volumeMounts:
+            - name: gcs-credentials
+              mountPath: /etc/gcs
+              readOnly: true
+          {{- end }}
+      {{- if and (eq .Values.storage.provider "gcs") .Values.gcs.serviceAccountKey }}
+      volumes:
+        - name: gcs-credentials
+          secret:
+            secretName: {{ include "staking-key-backup.fullname" . }}
+      {{- end }}
+{{- end }}

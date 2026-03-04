@@ -1,0 +1,91 @@
+{{- if .Values.smartContractVerifier.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "blockscout.fullname" . }}-verifier
+  labels:
+    {{- include "blockscout.labels" . | nindent 4 }}
+    app.kubernetes.io/component: smart-contract-verifier
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "blockscout.verifierSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "blockscout.verifierSelectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: verifier
+          image: "{{ .Values.smartContractVerifier.image.repository }}:{{ .Values.smartContractVerifier.image.tag }}"
+          imagePullPolicy: {{ .Values.smartContractVerifier.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.smartContractVerifier.port }}
+              protocol: TCP
+          env:
+            - name: SMART_CONTRACT_VERIFIER__SERVER__HTTP__ADDR
+              value: "0.0.0.0:{{ .Values.smartContractVerifier.port }}"
+            - name: SMART_CONTRACT_VERIFIER__SOLIDITY__ENABLED
+              value: "true"
+            - name: SMART_CONTRACT_VERIFIER__SOLIDITY__COMPILERS_DIR
+              value: /tmp/solidity-compilers
+            - name: SMART_CONTRACT_VERIFIER__SOLIDITY__REFRESH_VERSIONS_SCHEDULE
+              value: "0 0 * * * * *"
+            - name: SMART_CONTRACT_VERIFIER__VYPER__ENABLED
+              value: "true"
+            - name: SMART_CONTRACT_VERIFIER__VYPER__COMPILERS_DIR
+              value: /tmp/vyper-compilers
+            - name: SMART_CONTRACT_VERIFIER__VYPER__REFRESH_VERSIONS_SCHEDULE
+              value: "0 0 * * * * *"
+            - name: SMART_CONTRACT_VERIFIER__SOURCIFY__ENABLED
+              value: {{ .Values.backend.features.enableSourcify | quote }}
+            {{- if .Values.backend.features.enableSourcify }}
+            - name: SMART_CONTRACT_VERIFIER__SOURCIFY__API_URL
+              value: "https://sourcify.dev/server/"
+            - name: SMART_CONTRACT_VERIFIER__SOURCIFY__VERIFICATION_URL
+              value: "https://sourcify.dev/server/"
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.smartContractVerifier.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "blockscout.fullname" . }}-verifier
+  labels:
+    {{- include "blockscout.labels" . | nindent 4 }}
+    app.kubernetes.io/component: smart-contract-verifier
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.smartContractVerifier.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "blockscout.verifierSelectorLabels" . | nindent 4 }}
+{{- end }}

@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "safe.fullname" . }}-txs-scheduler
+  labels:
+    {{- include "safe.txsScheduler.labels" . | nindent 4 }}
+spec:
+  # Celery beat must be a singleton - exactly 1 replica
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "safe.txsScheduler.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "safe.txsScheduler.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap-txs.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: txs-scheduler
+          image: "{{ .Values.txs.image.repository }}:{{ .Values.txs.image.tag }}"
+          imagePullPolicy: {{ .Values.txs.image.pullPolicy }}
+          command:
+            - docker/web/celery/scheduler/run.sh
+          envFrom:
+            - configMapRef:
+                name: {{ include "safe.fullname" . }}-txs
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safe.fullname" . }}
+                  key: txs-secret-key
+          resources:
+            {{- toYaml .Values.txs.scheduler.resources | nindent 12 }}

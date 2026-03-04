@@ -1,0 +1,6 @@
+apiVersion: v2
+name: safe
+description: Safe multisig infrastructure for Avalanche L1 blockchains
+type: application
+version: 0.1.0
+appVersion: "v2.92.1"

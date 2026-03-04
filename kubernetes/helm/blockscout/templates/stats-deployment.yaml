@@ -1,0 +1,88 @@
+{{- if .Values.stats.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "blockscout.fullname" . }}-stats
+  labels:
+    {{- include "blockscout.labels" . | nindent 4 }}
+    app.kubernetes.io/component: stats
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "blockscout.statsSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "blockscout.statsSelectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: stats
+          image: "{{ .Values.stats.image.repository }}:{{ .Values.stats.image.tag }}"
+          imagePullPolicy: {{ .Values.stats.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.stats.port }}
+              protocol: TCP
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "blockscout.fullname" . }}
+                  key: db-password
+            - name: STATS__DB_URL
+              value: {{ include "blockscout.databaseUrl" . | quote }}
+            - name: STATS__BLOCKSCOUT_DB_URL
+              value: {{ include "blockscout.databaseUrl" . | quote }}
+            - name: STATS__BLOCKSCOUT_API_URL
+              value: "http://{{ include "blockscout.fullname" . }}-backend:{{ .Values.backend.service.port }}"
+            - name: STATS__CREATE_DATABASE
+              value: "false"
+            - name: STATS__RUN_MIGRATIONS
+              value: "true"
+            - name: STATS__SERVER__HTTP__ADDR
+              value: "0.0.0.0:{{ .Values.stats.port }}"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.stats.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "blockscout.fullname" . }}-stats
+  labels:
+    {{- include "blockscout.labels" . | nindent 4 }}
+    app.kubernetes.io/component: stats
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.stats.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "blockscout.statsSelectorLabels" . | nindent 4 }}
+{{- end }}

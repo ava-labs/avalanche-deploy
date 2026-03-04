@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "erpc.fullname" . }}-config
+  labels:
+    {{- include "erpc.labels" . | nindent 4 }}
+data:
+  erpc.yaml: |
+    # eRPC Configuration
+    # https://docs.erpc.cloud/config/example
+
+    logLevel: {{ .Values.logLevel }}
+
+    server:
+      listenV4: true
+      httpHostV4: "0.0.0.0"
+      httpPort: {{ .Values.service.port }}
+      maxTimeout: {{ .Values.timeout }}
+
+    metrics:
+      enabled: true
+      listenV4: true
+      hostV4: "0.0.0.0"
+      port: {{ .Values.service.metricsPort }}
+
+    {{- if .Values.cache.enabled }}
+    database:
+      evmJsonRpcCache:
+        connectors:
+          - id: memory-cache
+            driver: memory
+            memory:
+              maxItems: {{ .Values.cache.maxItems }}
+    {{- end }}
+
+    projects:
+      - id: {{ .Values.projectId }}
+
+        networks:
+          - architecture: evm
+            evm:
+              chainId: {{ .Values.l1.evmChainId }}
+
+            failsafe:
+              timeout:
+                duration: {{ .Values.timeout }}
+              retry:
+                maxAttempts: {{ .Values.retry.maxAttempts }}
+                delay: {{ .Values.retry.delay }}
+                backoffMaxDelay: {{ .Values.retry.backoffMaxDelay }}
+                backoffFactor: {{ .Values.retry.backoffFactor }}
+                jitter: {{ .Values.retry.jitter }}
+              hedge:
+                delay: {{ .Values.hedge.delay }}
+                maxCount: {{ .Values.hedge.maxCount }}
+
+        upstreams:
+    {{- if .Values.upstreams }}
+    {{- range $i, $upstream := .Values.upstreams }}
+          - id: {{ $upstream.id | default (printf "rpc-%d" (add $i 1)) }}
+            type: evm
+            endpoint: {{ $upstream.endpoint }}
+            evm:
+              chainId: {{ $.Values.l1.evmChainId }}
+    {{- if eq ($upstream.type | default "archive") "pruned" }}
+            ignoreMethods:
+              - "debug_*"
+              - "trace_*"
+    {{- end }}
+    {{- if $upstream.rateLimitBudget }}
+            rateLimitBudget: {{ $upstream.rateLimitBudget }}
+    {{- end }}
+    {{- end }}
+    {{- else }}
+          - id: default-rpc
+            type: evm
+            endpoint: {{ include "erpc.defaultUpstreamEndpoint" . }}
+            evm:
+              chainId: {{ .Values.l1.evmChainId }}
+    {{- end }}
+
+    {{- if .Values.rateLimiting.enabled }}
+    rateLimiters:
+      budgets:
+        - id: default-budget
+          rules:
+            - method: '*'
+              maxCount: {{ .Values.rateLimiting.maxCount }}
+              period: {{ .Values.rateLimiting.period }}
+    {{- end }}

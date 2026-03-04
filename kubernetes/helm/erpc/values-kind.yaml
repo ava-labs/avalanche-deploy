@@ -1,0 +1,16 @@
+# Overrides for local kind development
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+cache:
+  maxItems: 10000
+
+autoscaling:
+  enabled: false

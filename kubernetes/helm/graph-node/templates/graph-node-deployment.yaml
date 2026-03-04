@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "graph-node.fullname" . }}
+  labels:
+    {{- include "graph-node.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "graph-node.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "graph-node.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "graph-node.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
+      containers:
+        - name: graph-node
+          image: "{{ .Values.graphNode.image.repository }}:{{ .Values.graphNode.image.tag }}"
+          imagePullPolicy: {{ .Values.graphNode.image.pullPolicy }}
+          ports:
+            - name: graphql
+              containerPort: 8000
+              protocol: TCP
+            - name: ws
+              containerPort: 8001
+              protocol: TCP
+            - name: admin
+              containerPort: 8020
+              protocol: TCP
+            - name: status
+              containerPort: 8030
+              protocol: TCP
+          env:
+            - name: postgres_host
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "graph-node.fullname" . }}
+                  key: postgres_host
+            - name: postgres_port
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "graph-node.fullname" . }}
+                  key: postgres_port
+            - name: postgres_user
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "graph-node.fullname" . }}
+                  key: postgres_user
+            - name: postgres_pass
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "graph-node.fullname" . }}
+                  key: postgres_pass
+            - name: postgres_db
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "graph-node.fullname" . }}
+                  key: postgres_db
+            - name: ipfs
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "graph-node.fullname" . }}
+                  key: ipfs
+            - name: ethereum
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "graph-node.fullname" . }}
+                  key: ethereum
+            - name: GRAPH_LOG
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "graph-node.fullname" . }}
+                  key: GRAPH_LOG
+            - name: GRAPH_ETHEREUM_CLEANUP_BLOCKS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "graph-node.fullname" . }}
+                  key: GRAPH_ETHEREUM_CLEANUP_BLOCKS
+            {{- if .Values.graphNode.experimentalVersionSwitching }}
+            - name: EXPERIMENTAL_SUBGRAPH_VERSION_SWITCHING_MODE
+              value: "synced"
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.graphNode.resources | nindent 12 }}

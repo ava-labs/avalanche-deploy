@@ -1,0 +1,40 @@
+Avalanche L1 Token Faucet has been deployed.
+
+Release: {{ .Release.Name }}
+Chain ID (EVM): {{ .Values.l1.evmChainId }}
+
+{{- if eq .Values.service.type "LoadBalancer" }}
+
+The faucet is exposed via a LoadBalancer. Get the external IP with:
+
+  kubectl get svc {{ include "faucet.fullname" . }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+
+Then access the faucet at:
+
+  http://<EXTERNAL-IP>:{{ .Values.service.port }}
+
+{{- else if eq .Values.service.type "NodePort" }}
+
+The faucet is exposed via NodePort. Get the port with:
+
+  export NODE_PORT=$(kubectl get svc {{ include "faucet.fullname" . }} -o jsonpath='{.spec.ports[0].nodePort}')
+  export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}')
+  echo "Faucet URL: http://$NODE_IP:$NODE_PORT"
+
+{{- else }}
+
+The faucet is available within the cluster at:
+
+  http://{{ include "faucet.fullname" . }}:{{ .Values.service.port }}
+
+To access the faucet locally, run:
+
+  kubectl port-forward svc/{{ include "faucet.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+
+Then open http://localhost:{{ .Values.service.port }} in your browser.
+
+{{- end }}
+
+To check faucet health:
+
+  kubectl exec deploy/{{ include "faucet.fullname" . }} -- curl -s http://localhost:8000/health

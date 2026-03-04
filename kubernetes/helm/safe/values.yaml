@@ -1,0 +1,217 @@
+# Safe Multisig Infrastructure for Avalanche L1
+#
+# Architecture: CFG + TXS + CGW + UI + 2x PostgreSQL + Redis + RabbitMQ
+# Version compatibility: CFG v2.92.1 + TXS v5.42.1 + CGW v1.102.0
+
+# --- Config Service (Django) ---
+cfg:
+  image:
+    repository: safeglobal/safe-config-service
+    tag: "v2.92.1"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  # Django secret key (auto-generated in init-job if empty)
+  secretKey: ""
+
+# --- Transaction Service (Django + Celery) ---
+txs:
+  image:
+    repository: safeglobal/safe-transaction-service
+    tag: "v5.42.1"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+  # Django secret key (auto-generated in init-job if empty)
+  secretKey: ""
+  # Celery workers
+  worker:
+    replicas: 1
+    # TXS v5.42.1 routes process_decoded_internal_txs_task to "processing" queue
+    # Must include "processing" in addition to default queues
+    queues: "default,indexing,contracts,tokens,notifications,webhooks,processing"
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "512Mi"
+      limits:
+        cpu: "1"
+        memory: "1Gi"
+  # Celery beat scheduler
+  scheduler:
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "250m"
+        memory: "256Mi"
+
+# --- Client Gateway (NestJS) ---
+cgw:
+  image:
+    repository: safeglobal/safe-client-gateway-nest
+    tag: "v1.102.0"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+# --- Safe UI (Next.js, requires custom build for chain support) ---
+ui:
+  # Custom-built image with chain ID patched into safe-deployments
+  # and gateway URLs replaced. See ansible/roles/safe/ for build process.
+  # If empty, the init-job will NOT deploy the UI.
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+  # Base Safe UI version used for custom builds
+  baseVersion: "v1.31.0"
+
+# --- PostgreSQL (shared for CFG + TXS) ---
+postgres:
+  image:
+    repository: postgres
+    tag: "14-alpine"
+    pullPolicy: IfNotPresent
+  cfgTxs:
+    user: "safe"
+    password: ""  # REQUIRED: set via --set or values override
+    cfgDatabase: "safe_cfg"
+    txsDatabase: "safe_txs"
+    storage: 20Gi
+    storageClass: ""
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+  # CGW needs its own database since v1.80+
+  cgw:
+    user: "safe"
+    password: ""  # REQUIRED: set via --set or values override
+    database: "safe_cgw"
+    storage: 5Gi
+    storageClass: ""
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "250m"
+        memory: "256Mi"
+
+# --- Redis ---
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7-alpine"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+
+# --- RabbitMQ ---
+rabbitmq:
+  enabled: true
+  image:
+    repository: rabbitmq
+    tag: "3-management-alpine"
+    pullPolicy: IfNotPresent
+  user: "safe"
+  password: ""  # REQUIRED: set via --set or values override
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+
+# --- L1 Chain Configuration ---
+l1:
+  evmChainId: ""       # REQUIRED: numeric EVM chain ID
+  chainName: "Avalanche L1"
+  shortName: "AVAX-L1"
+  rpcUrl: ""           # REQUIRED: RPC endpoint reachable from within the cluster
+  blockExplorerUrl: "" # Optional: Blockscout URL for block explorer links
+  nativeCurrency:
+    name: "AVAX"
+    symbol: "AVAX"
+    decimals: 18
+  # Whether to use L2 Safe singleton (recommended for Avalanche L1s)
+  useL2: true
+  # Gas price in wei (default 25 gwei)
+  gasPriceWei: 25000000000
+
+# --- Safe Contract Addresses (v1.4.1 canonical CREATE2) ---
+contracts:
+  safeSingleton: "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762"
+  proxyFactory: "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67"
+  multiSend: "0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526"
+  multiSendCallOnly: "0x9641d764fc13c8B624c04430C7356C1C7C8102e2"
+  fallbackHandler: "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99"
+  createCall: "0x9b35Af71d77eaf8d7e40252370304687390A1A52"
+  signMessageLib: "0xd53cd0aB83D845Ac265BE939c57F53AD838012c9"
+  simulateTxAccessor: "0x3d4BA2E0884aa488718476ca2FB8Efc291A46199"
+
+# --- Webhook Auth Token (shared between CFG and CGW) ---
+webhookToken: ""  # REQUIRED: set via --set or values override
+
+# --- Ingress ---
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  tls: false
+  tlsSecretName: ""
+  annotations: {}
+
+# --- Service Configuration ---
+service:
+  type: ClusterIP
+
+# --- Security Context ---
+securityContext: {}
+
+# --- Node Selector / Tolerations / Affinity ---
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# --- Name overrides ---
+nameOverride: ""
+fullnameOverride: ""

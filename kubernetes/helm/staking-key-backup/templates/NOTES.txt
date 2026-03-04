@@ -1,0 +1,32 @@
+============================================
+  Staking Key Backup Installed
+============================================
+
+Schedule: {{ .Values.schedule }}
+Provider: {{ .Values.storage.provider }}
+Bucket:   {{ .Values.storage.bucket }}
+Release:  {{ .Values.validatorRelease }}
+
+The CronJob will backup staking keys from all validator pods
+in the {{ .Values.validatorRelease }} release on the configured schedule.
+
+To trigger an immediate backup:
+  kubectl create job --from=cronjob/{{ include "staking-key-backup.fullname" . }} backup-manual-$(date +%s)
+
+To check backup job status:
+  kubectl get jobs -l {{ include "staking-key-backup.selectorLabels" . | replace ": " "=" | replace "\n" "," }}
+
+To view backup logs:
+  kubectl logs -l job-name -f
+
+{{- if eq .Values.storage.provider "s3" }}
+
+To list backed-up keys:
+  aws s3 ls s3://{{ .Values.storage.bucket }}/{{ .Values.storage.prefix }} --recursive
+{{- else if eq .Values.storage.provider "gcs" }}
+
+To list backed-up keys:
+  gsutil ls gs://{{ .Values.storage.bucket }}/{{ .Values.storage.prefix }}**
+{{- end }}
+
+============================================

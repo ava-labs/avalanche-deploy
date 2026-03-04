@@ -1,0 +1,55 @@
+# Overrides for local kind development
+# Reduced resources and storage for laptop/CI environments
+
+backend:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "250m"
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+frontend:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "500m"
+      memory: 512Mi
+
+postgres:
+  storage:
+    size: 10Gi
+  resources:
+    requests:
+      cpu: "250m"
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+redis:
+  maxMemory: "64mb"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: "250m"
+      memory: 128Mi
+
+smartContractVerifier:
+  enabled: false
+
+visualizer:
+  enabled: false
+
+stats:
+  enabled: false
+
+sigProvider:
+  enabled: false

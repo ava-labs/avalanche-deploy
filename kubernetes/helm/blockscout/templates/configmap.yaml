@@ -1,0 +1,123 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "blockscout.fullname" . }}-backend
+  labels:
+    {{- include "blockscout.labels" . | nindent 4 }}
+data:
+  # Ethereum JSON RPC
+  ETHEREUM_JSONRPC_VARIANT: "geth"
+  ETHEREUM_JSONRPC_HTTP_URL: {{ .Values.l1.rpcUrl | quote }}
+  {{- if .Values.l1.wsUrl }}
+  ETHEREUM_JSONRPC_WS_URL: {{ .Values.l1.wsUrl | quote }}
+  {{- end }}
+  ETHEREUM_JSONRPC_TRACE_URL: {{ include "blockscout.traceUrl" . | quote }}
+
+  # Network configuration
+  NETWORK: {{ .Values.l1.chainName | quote }}
+  SUBNETWORK: {{ .Values.l1.chainShortName | quote }}
+  CHAIN_ID: {{ .Values.l1.chainId | quote }}
+  COIN: {{ .Values.l1.coinSymbol | quote }}
+  COIN_NAME: {{ .Values.l1.coinName | quote }}
+
+  # Server
+  PORT: {{ .Values.backend.port | quote }}
+  POOL_SIZE: "50"
+  ECTO_USE_SSL: "false"
+
+  # Indexer configuration (tuned for Subnet-EVM)
+  INDEXER_DISABLE_PENDING_TRANSACTIONS_FETCHER: {{ .Values.backend.indexer.disablePendingTxs | quote }}
+  INDEXER_DISABLE_INTERNAL_TRANSACTIONS_FETCHER: {{ .Values.backend.indexer.disableInternalTxs | quote }}
+  BLOCK_TRANSFORMER: {{ .Values.backend.indexer.blockTransformer | quote }}
+
+  # Features
+  DISABLE_EXCHANGE_RATES: {{ .Values.backend.features.disableExchangeRates | quote }}
+  DISABLE_WRITE_API: {{ .Values.backend.features.disableWriteMethods | quote }}
+  DISABLE_INDEXER: "false"
+  DISABLE_REALTIME_INDEXER: "false"
+  ENABLE_TXS_STATS: {{ .Values.backend.features.enableTxsStats | quote }}
+
+  {{- if .Values.backend.features.enableSmartContractVerification }}
+  # Smart Contract Verification
+  MICROSERVICE_SC_VERIFIER_ENABLED: "true"
+  MICROSERVICE_SC_VERIFIER_URL: "http://{{ include "blockscout.fullname" . }}-verifier:{{ .Values.smartContractVerifier.port }}"
+  {{- if .Values.backend.features.enableSourcify }}
+  SOURCIFY_INTEGRATION_ENABLED: "true"
+  SOURCIFY_SERVER_URL: "https://sourcify.dev/server"
+  SOURCIFY_REPO_URL: "https://repo.sourcify.dev/contracts"
+  {{- end }}
+  {{- end }}
+
+  # API rate limiting
+  API_RATE_LIMIT_DISABLED: {{ .Values.backend.api.rateLimitDisabled | quote }}
+  API_RATE_LIMIT: {{ .Values.backend.api.rateLimit | quote }}
+  API_RATE_LIMIT_BY_IP: {{ .Values.backend.api.rateLimitByIp | quote }}
+
+  # Redis caching
+  CACHE_ADDRESS_TOKEN_TRANSFERS_COUNTER_PERIOD: "1h"
+  CACHE_ADDRESS_TRANSACTIONS_COUNTER_PERIOD: "1h"
+  ACCOUNT_ENABLED: "false"
+
+  # Misc
+  SHOW_TESTNET_LABEL: "true"
+  TESTNET_LABEL_TEXT: {{ .Values.l1.chainShortName | quote }}
+  HEALTHY_BLOCKS_PERIOD: "60"
+  HISTORY_FETCH_INTERVAL: "30"
+  TXS_HISTORIAN_INIT_LAG: "0"
+  TXS_STATS_DAYS_TO_COMPILE_AT_INIT: "10"
+
+  # Logging
+  LOG_LEVEL: {{ .Values.backend.logLevel | quote }}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "blockscout.fullname" . }}-frontend
+  labels:
+    {{- include "blockscout.labels" . | nindent 4 }}
+data:
+  # API endpoints - backend service within cluster
+  NEXT_PUBLIC_API_HOST: {{ include "blockscout.fullname" . }}-backend
+  NEXT_PUBLIC_API_PORT: {{ .Values.backend.service.port | quote }}
+  NEXT_PUBLIC_API_PROTOCOL: "http"
+  NEXT_PUBLIC_API_WEBSOCKET_PROTOCOL: "ws"
+  NEXT_PUBLIC_API_BASE_PATH: "/"
+
+  # Network info
+  NEXT_PUBLIC_NETWORK_NAME: {{ .Values.l1.chainName | quote }}
+  NEXT_PUBLIC_NETWORK_SHORT_NAME: {{ .Values.l1.chainShortName | quote }}
+  NEXT_PUBLIC_NETWORK_ID: {{ .Values.l1.evmChainId | quote }}
+  NEXT_PUBLIC_NETWORK_CURRENCY_NAME: {{ .Values.l1.coinName | quote }}
+  NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: {{ .Values.l1.coinSymbol | quote }}
+  NEXT_PUBLIC_NETWORK_CURRENCY_DECIMALS: "18"
+
+  # RPC for wallet connection
+  NEXT_PUBLIC_NETWORK_RPC_URL: {{ .Values.l1.rpcUrl | quote }}
+
+  # Branding
+  {{- if .Values.frontend.networkLogoUrl }}
+  NEXT_PUBLIC_NETWORK_LOGO: {{ .Values.frontend.networkLogoUrl | quote }}
+  {{- end }}
+  {{- if .Values.frontend.networkIconUrl }}
+  NEXT_PUBLIC_NETWORK_ICON: {{ .Values.frontend.networkIconUrl | quote }}
+  {{- end }}
+
+  # Features
+  NEXT_PUBLIC_IS_TESTNET: {{ .Values.frontend.isTestnet | quote }}
+  NEXT_PUBLIC_API_SPEC_URL: "https://raw.githubusercontent.com/blockscout/blockscout-api-v2-swagger/main/swagger.yaml"
+
+  {{- if .Values.stats.enabled }}
+  # Stats service
+  NEXT_PUBLIC_STATS_API_HOST: "http://{{ include "blockscout.fullname" . }}-stats:{{ .Values.stats.port }}"
+  {{- end }}
+
+  # Homepage
+  NEXT_PUBLIC_HOMEPAGE_CHARTS: {{ .Values.frontend.homepageCharts | quote }}
+
+  # Footer
+  NEXT_PUBLIC_FOOTER_LINKS: "[]"
+
+  # Ad configuration (disabled)
+  NEXT_PUBLIC_AD_BANNER_PROVIDER: "none"
+  NEXT_PUBLIC_AD_TEXT_PROVIDER: "none"

@@ -1,0 +1,233 @@
+# Blockscout Block Explorer for Avalanche L1
+
+# L1 chain configuration (required)
+l1:
+  # Avalanche chain ID string (used in RPC URL paths)
+  chainId: ""
+  # Numeric EVM chain ID (used for wallet/frontend NETWORK_ID)
+  evmChainId: ""
+  # Chain display name
+  chainName: "Avalanche L1"
+  chainShortName: "AVAX-L1"
+  # Native coin
+  coinName: "AVAX"
+  coinSymbol: "AVAX"
+  # RPC endpoints (HTTP and WebSocket)
+  rpcUrl: ""
+  wsUrl: ""
+  # Trace URL (defaults to rpcUrl if empty)
+  traceUrl: ""
+
+# Backend (Elixir indexer + API)
+backend:
+  image:
+    repository: blockscout/blockscout
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 4000
+  service:
+    type: ClusterIP
+    port: 4000
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+  # Indexer configuration (tuned for Avalanche L1 / Subnet-EVM)
+  indexer:
+    disablePendingTxs: true
+    disableInternalTxs: true
+    blockTransformer: base
+  # Feature flags
+  features:
+    disableExchangeRates: true
+    disableWriteMethods: false
+    enableSmartContractVerification: true
+    enableSourcify: true
+    enableTxsStats: true
+  # API rate limiting (disabled by default for private L1 deployments)
+  api:
+    rateLimitDisabled: true
+    rateLimit: 50
+    rateLimitByIp: true
+  # Logging
+  logLevel: info
+
+# Frontend (Next.js UI)
+frontend:
+  image:
+    repository: ghcr.io/blockscout/frontend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 3000
+  service:
+    type: ClusterIP
+    port: 3000
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  # Network branding
+  networkLogoUrl: ""
+  networkIconUrl: ""
+  isTestnet: true
+  # Homepage charts
+  homepageCharts: "['daily_txs']"
+
+# PostgreSQL database
+postgres:
+  # Set to false to use an external database
+  enabled: true
+  image:
+    repository: postgres
+    tag: "15-alpine"
+    pullPolicy: IfNotPresent
+  port: 5432
+  database: blockscout
+  user: blockscout
+  # Auto-generated if empty; set explicitly for production
+  password: ""
+  # Max connections (Blockscout requires many)
+  maxConnections: 500
+  storage:
+    size: 100Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  resources:
+    requests:
+      cpu: "500m"
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+
+# External database (used when postgres.enabled=false)
+externalDatabase:
+  host: ""
+  port: 5432
+  database: blockscout
+  user: blockscout
+  password: ""
+
+# Redis cache
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7-alpine"
+    pullPolicy: IfNotPresent
+  port: 6379
+  maxMemory: "256mb"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "500m"
+      memory: 512Mi
+
+# Smart Contract Verifier microservice
+smartContractVerifier:
+  enabled: true
+  image:
+    repository: ghcr.io/blockscout/smart-contract-verifier
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  port: 8050
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+# Visualizer microservice (contract graphs)
+visualizer:
+  enabled: true
+  image:
+    repository: ghcr.io/blockscout/visualizer
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  port: 8050
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "500m"
+      memory: 512Mi
+
+# Stats microservice
+stats:
+  enabled: true
+  image:
+    repository: ghcr.io/blockscout/stats
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  port: 8050
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# Sig-provider microservice (function signature lookup)
+sigProvider:
+  enabled: true
+  image:
+    repository: ghcr.io/blockscout/sig-provider
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  port: 8050
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "500m"
+      memory: 256Mi
+
+# Ingress (optional)
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Frontend host
+  host: ""
+  # API host (if different from frontend)
+  apiHost: ""
+  tls: []
+
+# Secret key base for backend (auto-generated if empty)
+secretKeyBase: ""
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Service account
+serviceAccount:
+  create: true
+  name: ""
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}

@@ -1,0 +1,18 @@
+{{- if .Values.ipfs.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "graph-node.fullname" . }}-ipfs
+  labels:
+    {{- include "graph-node.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ipfs
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5001
+      targetPort: api
+      protocol: TCP
+      name: api
+  selector:
+    {{- include "graph-node.ipfs.selectorLabels" . | nindent 4 }}
+{{- end }}

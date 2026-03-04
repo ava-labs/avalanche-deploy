@@ -1,0 +1,71 @@
+{{- if .Values.visualizer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "blockscout.fullname" . }}-visualizer
+  labels:
+    {{- include "blockscout.labels" . | nindent 4 }}
+    app.kubernetes.io/component: visualizer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "blockscout.visualizerSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "blockscout.visualizerSelectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: visualizer
+          image: "{{ .Values.visualizer.image.repository }}:{{ .Values.visualizer.image.tag }}"
+          imagePullPolicy: {{ .Values.visualizer.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.visualizer.port }}
+              protocol: TCP
+          env:
+            - name: VISUALIZER__SERVER__HTTP__ADDR
+              value: "0.0.0.0:{{ .Values.visualizer.port }}"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.visualizer.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "blockscout.fullname" . }}-visualizer
+  labels:
+    {{- include "blockscout.labels" . | nindent 4 }}
+    app.kubernetes.io/component: visualizer
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.visualizer.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "blockscout.visualizerSelectorLabels" . | nindent 4 }}
+{{- end }}

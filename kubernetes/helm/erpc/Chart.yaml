@@ -1,0 +1,6 @@
+apiVersion: v2
+name: erpc
+description: eRPC fault-tolerant EVM RPC proxy and load balancer for Avalanche L1s
+type: application
+version: 0.1.0
+appVersion: "latest"

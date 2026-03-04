@@ -1,0 +1,69 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "safe.fullname" . }}
+  labels:
+    {{- include "safe.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    # Estimation endpoint rewrite: Safe UI calls CGW estimation endpoint
+    # which was removed in CGW v1.80+. Proxy directly to TXS API.
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      location ~ ^/cgw/v1/chains/[0-9]+/safes/(0x[a-fA-F0-9]+)/multisig-transactions/estimations$ {
+        rewrite ^/cgw/v1/chains/[0-9]+/safes/(0x[a-fA-F0-9]+)/multisig-transactions/estimations$ /api/v1/safes/$1/multisig-transactions/estimations/ break;
+        proxy_pass http://{{ include "safe.fullname" . }}-txs:8888;
+      }
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host }}
+      {{- if .Values.ingress.tlsSecretName }}
+      secretName: {{ .Values.ingress.tlsSecretName }}
+      {{- end }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          # Client Gateway API (/cgw/)
+          - path: /cgw/
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "safe.fullname" . }}-cgw
+                port:
+                  number: 3000
+          # Transaction Service API (/txs/)
+          - path: /txs/
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "safe.fullname" . }}-txs
+                port:
+                  number: 8888
+          # Config Service API (/cfg/)
+          - path: /cfg/
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "safe.fullname" . }}-cfg
+                port:
+                  number: 8000
+          {{- if and .Values.ui.image.repository .Values.ui.image.tag }}
+          # Safe UI (default route)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "safe.fullname" . }}-ui
+                port:
+                  number: 8080
+          {{- end }}
+{{- end }}

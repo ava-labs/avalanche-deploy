@@ -1,0 +1,61 @@
+Safe Multisig Infrastructure deployed successfully!
+
+Services:
+  Config Service (CFG):       {{ .Values.cfg.image.repository }}:{{ .Values.cfg.image.tag }}
+  Transaction Service (TXS):  {{ .Values.txs.image.repository }}:{{ .Values.txs.image.tag }}
+  Client Gateway (CGW):       {{ .Values.cgw.image.repository }}:{{ .Values.cgw.image.tag }}
+{{- if and .Values.ui.image.repository .Values.ui.image.tag }}
+  Safe UI:                    {{ .Values.ui.image.repository }}:{{ .Values.ui.image.tag }}
+{{- else }}
+  Safe UI:                    NOT DEPLOYED (no custom image configured)
+    To deploy the UI, build a custom image with chain {{ .Values.l1.evmChainId }} support
+    and set ui.image.repository and ui.image.tag in your values.
+    See ansible/roles/safe/ for the build process.
+{{- end }}
+
+Chain Configuration:
+  EVM Chain ID:    {{ .Values.l1.evmChainId }}
+  Chain Name:      {{ .Values.l1.chainName }}
+  RPC URL:         {{ .Values.l1.rpcUrl }}
+  ETH_REORG_BLOCKS: 0 (Avalanche instant finality)
+
+Internal Endpoints:
+  CFG: {{ include "safe.cfg.internalUrl" . }}/api/v1/about/
+  TXS: {{ include "safe.txs.internalUrl" . }}/api/v1/about/
+  CGW: {{ include "safe.cgw.internalUrl" . }}/about
+
+{{- if .Values.ingress.enabled }}
+
+Ingress:
+  Host: {{ .Values.ingress.host }}
+  {{- if .Values.ingress.tls }}
+  URL:  https://{{ .Values.ingress.host }}/
+  {{- else }}
+  URL:  http://{{ .Values.ingress.host }}/
+  {{- end }}
+{{- else }}
+
+To access the services, use kubectl port-forward:
+  # Config Service
+  kubectl port-forward svc/{{ include "safe.fullname" . }}-cfg 8000:8000
+
+  # Transaction Service
+  kubectl port-forward svc/{{ include "safe.fullname" . }}-txs 8888:8888
+
+  # Client Gateway
+  kubectl port-forward svc/{{ include "safe.fullname" . }}-cgw 3000:3000
+
+  {{- if and .Values.ui.image.repository .Values.ui.image.tag }}
+  # Safe UI
+  kubectl port-forward svc/{{ include "safe.fullname" . }}-ui 8080:8080
+  {{- end }}
+{{- end }}
+
+IMPORTANT NOTES:
+  - The init job runs DB migrations and registers chain/contracts automatically.
+  - TXS workers include the "processing" queue (required for TXS v5.42.1).
+  - CGW has its own dedicated PostgreSQL database (required since v1.80+).
+  - Safe UI requires a custom Docker build with NEXT_PUBLIC_* vars baked in at
+    build time (Next.js DefinePlugin) and safe-deployments patched for chain {{ .Values.l1.evmChainId }}.
+  - Post-build sed replacement of hardcoded safe-client.safe.global URLs is also
+    required for the UI to use your gateway instead of the public Safe gateway.

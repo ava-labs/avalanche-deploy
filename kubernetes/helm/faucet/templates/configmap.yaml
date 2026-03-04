@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "faucet.fullname" . }}
+  labels:
+    {{- include "faucet.labels" . | nindent 4 }}
+data:
+  RPC_URL: {{ .Values.l1.rpcUrl | quote }}
+  CHAIN_ID: {{ .Values.l1.evmChainId | quote }}
+  DROP_SIZE: {{ .Values.faucet.dropAmount | quote }}
+  RATE_LIMIT: {{ .Values.faucet.rateLimit | quote }}

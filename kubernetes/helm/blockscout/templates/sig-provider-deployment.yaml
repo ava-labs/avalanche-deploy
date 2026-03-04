@@ -1,0 +1,68 @@
+{{- if .Values.sigProvider.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "blockscout.fullname" . }}-sig-provider
+  labels:
+    {{- include "blockscout.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sig-provider
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "blockscout.sigProviderSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "blockscout.sigProviderSelectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: sig-provider
+          image: "{{ .Values.sigProvider.image.repository }}:{{ .Values.sigProvider.image.tag }}"
+          imagePullPolicy: {{ .Values.sigProvider.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.sigProvider.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.sigProvider.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "blockscout.fullname" . }}-sig-provider
+  labels:
+    {{- include "blockscout.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sig-provider
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.sigProvider.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "blockscout.sigProviderSelectorLabels" . | nindent 4 }}
+{{- end }}

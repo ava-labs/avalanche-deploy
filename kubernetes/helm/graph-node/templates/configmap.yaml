@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "graph-node.fullname" . }}
+  labels:
+    {{- include "graph-node.labels" . | nindent 4 }}
+data:
+  GRAPH_LOG: {{ .Values.graphNode.logLevel | quote }}
+  GRAPH_ETHEREUM_CLEANUP_BLOCKS: {{ .Values.graphNode.cleanupBlocks | quote }}
+  {{- if .Values.graphNode.experimentalVersionSwitching }}
+  EXPERIMENTAL_SUBGRAPH_VERSION_SWITCHING_MODE: "synced"
+  {{- end }}
+  postgres_host: {{ include "graph-node.postgresHost" . }}
+  postgres_port: "5432"
+  postgres_user: {{ .Values.postgres.user | quote }}
+  postgres_db: {{ .Values.postgres.database | quote }}
+  ipfs: {{ include "graph-node.ipfsUrl" . }}
+  ethereum: "{{ .Values.l1.networkName }}:{{ include "graph-node.ethereumRpcUrl" . }}"
+  POSTGRES_USER: {{ .Values.postgres.user | quote }}
+  POSTGRES_DB: {{ .Values.postgres.database | quote }}
+  POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+  IPFS_PROFILE: "server"

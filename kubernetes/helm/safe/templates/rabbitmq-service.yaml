@@ -1,0 +1,21 @@
+{{- if .Values.rabbitmq.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "safe.fullname" . }}-rabbitmq
+  labels:
+    {{- include "safe.rabbitmq.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5672
+      targetPort: amqp
+      protocol: TCP
+      name: amqp
+    - port: 15672
+      targetPort: management
+      protocol: TCP
+      name: management
+  selector:
+    {{- include "safe.rabbitmq.selectorLabels" . | nindent 4 }}
+{{- end }}

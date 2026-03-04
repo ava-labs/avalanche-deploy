@@ -1,0 +1,67 @@
+{{- if .Values.ipfs.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "graph-node.fullname" . }}-ipfs
+  labels:
+    {{- include "graph-node.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ipfs
+spec:
+  replicas: 1
+  serviceName: {{ include "graph-node.fullname" . }}-ipfs
+  selector:
+    matchLabels:
+      {{- include "graph-node.ipfs.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "graph-node.ipfs.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        fsGroup: {{ .Values.securityContext.fsGroup }}
+      containers:
+        - name: ipfs
+          image: "{{ .Values.ipfs.image.repository }}:{{ .Values.ipfs.image.tag }}"
+          imagePullPolicy: {{ .Values.ipfs.image.pullPolicy }}
+          ports:
+            - name: api
+              containerPort: 5001
+              protocol: TCP
+          env:
+            - name: IPFS_PROFILE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "graph-node.fullname" . }}
+                  key: IPFS_PROFILE
+          livenessProbe:
+            exec:
+              command:
+                - ipfs
+                - dag
+                - stat
+                - /ipfs/QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - ipfs
+                - dag
+                - stat
+                - /ipfs/QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.ipfs.resources | nindent 12 }}
+          volumeMounts:
+            - name: ipfs-data
+              mountPath: /data/ipfs
+      volumes:
+        - name: ipfs-data
+          persistentVolumeClaim:
+            claimName: {{ include "graph-node.fullname" . }}-ipfs
+{{- end }}

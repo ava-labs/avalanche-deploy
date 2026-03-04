@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "safe.fullname" . }}-cfg
+  labels:
+    {{- include "safe.cfg.labels" . | nindent 4 }}
+data:
+  # Django settings
+  DEBUG: "0"
+  ROOT_LOG_LEVEL: "INFO"
+  DJANGO_ALLOWED_HOSTS: "*"
+  CSRF_TRUSTED_ORIGINS: "http://*,https://*"
+
+  # Database connection (CFG uses POSTGRES_* variables)
+  POSTGRES_USER: {{ .Values.postgres.cfgTxs.user | quote }}
+  POSTGRES_NAME: {{ .Values.postgres.cfgTxs.cfgDatabase | quote }}
+  POSTGRES_HOST: {{ include "safe.postgresCfgTxs.host" . | quote }}
+  POSTGRES_PORT: "5432"
+
+  # Gunicorn settings (required by entrypoint)
+  GUNICORN_BIND_SOCKET: "unix:/nginx/gunicorn.socket"
+  GUNICORN_BIND_PORT: "8000"
+  DOCKER_NGINX_VOLUME_ROOT: "/nginx"
+
+  # CGW URL for webhook flush
+  CGW_URL: {{ include "safe.cgw.internalUrl" . | quote }}

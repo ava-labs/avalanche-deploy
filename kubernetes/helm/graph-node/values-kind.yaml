@@ -1,0 +1,30 @@
+# Overrides for local kind development
+
+graphNode:
+  resources:
+    requests:
+      cpu: "250m"
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+postgres:
+  storage: 5Gi
+  resources:
+    requests:
+      cpu: "250m"
+      memory: 256Mi
+    limits:
+      cpu: "500m"
+      memory: 1Gi
+
+ipfs:
+  storage: 2Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: 128Mi
+    limits:
+      cpu: "250m"
+      memory: 512Mi

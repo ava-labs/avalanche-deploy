@@ -1,0 +1,7 @@
+{{/*
+PostgreSQL data persistence is managed by the StatefulSet's volumeClaimTemplates
+in postgres-statefulset.yaml. This ensures PVCs survive pod rescheduling.
+
+This file is intentionally empty. To use a pre-existing PVC, disable the
+built-in PostgreSQL (postgres.enabled=false) and configure externalDatabase.
+*/}}

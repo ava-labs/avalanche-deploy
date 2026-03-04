@@ -1,0 +1,360 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "safe.fullname" . }}-init-{{ .Release.Revision }}
+  labels:
+    {{- include "safe.labels" . | nindent 4 }}
+    app.kubernetes.io/component: init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 5
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: safe-init
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        # Wait for PostgreSQL (CFG/TXS) to be ready
+        - name: wait-postgres-cfg-txs
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for PostgreSQL (CFG/TXS)..."
+              until pg_isready -h {{ include "safe.postgresCfgTxs.host" . }} -U {{ .Values.postgres.cfgTxs.user }}; do
+                echo "  Not ready yet, retrying in 5s..."
+                sleep 5
+              done
+              echo "PostgreSQL (CFG/TXS) is ready."
+
+        # Wait for PostgreSQL (CGW) to be ready
+        - name: wait-postgres-cgw
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for PostgreSQL (CGW)..."
+              until pg_isready -h {{ include "safe.postgresCgw.host" . }} -U {{ .Values.postgres.cgw.user }}; do
+                echo "  Not ready yet, retrying in 5s..."
+                sleep 5
+              done
+              echo "PostgreSQL (CGW) is ready."
+
+        # Create TXS database if it does not exist
+        # (The CFG database is auto-created by the PostgreSQL container via POSTGRES_DB env)
+        - name: create-txs-db
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          env:
+            - name: PGHOST
+              value: {{ include "safe.postgresCfgTxs.host" . | quote }}
+            - name: PGUSER
+              value: {{ .Values.postgres.cfgTxs.user | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safe.fullname" . }}
+                  key: postgres-cfg-txs-password
+          command:
+            - sh
+            - -c
+            - |
+              echo "Ensuring TXS database exists..."
+              psql -tc "SELECT 1 FROM pg_database WHERE datname = '{{ .Values.postgres.cfgTxs.txsDatabase }}'" | grep -q 1 || \
+                psql -c "CREATE DATABASE {{ .Values.postgres.cfgTxs.txsDatabase }}"
+              echo "TXS database ready."
+
+        # Run CFG migrations
+        - name: migrate-cfg
+          image: "{{ .Values.cfg.image.repository }}:{{ .Values.cfg.image.tag }}"
+          command:
+            - python
+            - manage.py
+            - migrate
+            - --noinput
+          envFrom:
+            - configMapRef:
+                name: {{ include "safe.fullname" . }}-cfg
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safe.fullname" . }}
+                  key: cfg-secret-key
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safe.fullname" . }}
+                  key: postgres-cfg-txs-password
+            - name: CGW_FLUSH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safe.fullname" . }}
+                  key: webhook-token
+            - name: CGW_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safe.fullname" . }}
+                  key: webhook-token
+
+        # Run TXS migrations
+        - name: migrate-txs
+          image: "{{ .Values.txs.image.repository }}:{{ .Values.txs.image.tag }}"
+          command:
+            - python
+            - manage.py
+            - migrate
+            - --noinput
+          envFrom:
+            - configMapRef:
+                name: {{ include "safe.fullname" . }}-txs
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safe.fullname" . }}
+                  key: txs-secret-key
+
+      containers:
+        # Initialize chain in CFG, register contracts in TXS, create periodic tasks
+        - name: init-data
+          image: "{{ .Values.txs.image.repository }}:{{ .Values.txs.image.tag }}"
+          envFrom:
+            - configMapRef:
+                name: {{ include "safe.fullname" . }}-txs
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safe.fullname" . }}
+                  key: txs-secret-key
+            # CFG database connection for chain init
+            - name: CFG_POSTGRES_HOST
+              value: {{ include "safe.postgresCfgTxs.host" . | quote }}
+            - name: CFG_POSTGRES_USER
+              value: {{ .Values.postgres.cfgTxs.user | quote }}
+            - name: CFG_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safe.fullname" . }}
+                  key: postgres-cfg-txs-password
+            - name: CFG_POSTGRES_DB
+              value: {{ .Values.postgres.cfgTxs.cfgDatabase | quote }}
+          command:
+            - python
+            - manage.py
+            - shell
+            - -c
+            - |
+              import os, sys
+
+              # ============================================================
+              # Step 1: Register contracts in Transaction Service
+              # ============================================================
+              print("\n=== Step 1: Register contracts in Transaction Service ===\n")
+
+              from safe_transaction_service.contracts.models import Contract
+              from safe_transaction_service.history.models import SafeMasterCopy, ProxyFactory
+
+              contracts = {
+                  "Safe Singleton v1.4.1": "{{ .Values.contracts.safeSingleton }}",
+                  "Safe Proxy Factory v1.4.1": "{{ .Values.contracts.proxyFactory }}",
+                  "MultiSend v1.4.1": "{{ .Values.contracts.multiSend }}",
+                  "MultiSendCallOnly v1.4.1": "{{ .Values.contracts.multiSendCallOnly }}",
+                  "Fallback Handler v1.4.1": "{{ .Values.contracts.fallbackHandler }}",
+                  "CreateCall v1.4.1": "{{ .Values.contracts.createCall }}",
+                  "SignMessageLib v1.4.1": "{{ .Values.contracts.signMessageLib }}",
+                  "SimulateTxAccessor v1.4.1": "{{ .Values.contracts.simulateTxAccessor }}",
+              }
+
+              for name, address in contracts.items():
+                  obj, created = Contract.objects.get_or_create(
+                      address=address.lower(),
+                      defaults={"name": name, "display_name": name},
+                  )
+                  print(f"  {name}: {'Created' if created else 'Exists'}")
+
+              # Register SafeMasterCopy (required for Safe creation/detection)
+              l2 = {{ ternary "True" "False" .Values.l1.useL2 }}
+              mc, created = SafeMasterCopy.objects.get_or_create(
+                  address="{{ .Values.contracts.safeSingleton }}".lower(),
+                  defaults={
+                      "version": "1.4.1",
+                      "l2": l2,
+                      "deployer": "Safe Team",
+                      "initial_block_number": 0,
+                      "tx_block_number": 0,
+                  },
+              )
+              if not created and mc.tx_block_number is None:
+                  mc.tx_block_number = 0
+                  mc.save(update_fields=["tx_block_number"])
+                  print("  MasterCopy: Fixed tx_block_number")
+              else:
+                  print(f"  MasterCopy: {'Created' if created else 'Exists'}")
+
+              # Register ProxyFactory (required for indexing Safe creation events)
+              pf, created = ProxyFactory.objects.get_or_create(
+                  address="{{ .Values.contracts.proxyFactory }}".lower(),
+                  defaults={
+                      "initial_block_number": 0,
+                      "tx_block_number": 0,
+                  },
+              )
+              if not created and pf.tx_block_number is None:
+                  pf.tx_block_number = 0
+                  pf.save(update_fields=["tx_block_number"])
+                  print("  ProxyFactory: Fixed tx_block_number")
+              else:
+                  print(f"  ProxyFactory: {'Created' if created else 'Exists'}")
+
+              # ============================================================
+              # Step 2: Create Celery periodic tasks for indexing
+              # TXS uses DatabaseScheduler - tasks must be created in DB
+              # ============================================================
+              print("\n=== Step 2: Create Celery periodic tasks ===\n")
+
+              from django_celery_beat.models import PeriodicTask, IntervalSchedule
+
+              every_10s, _ = IntervalSchedule.objects.get_or_create(every=10, period=IntervalSchedule.SECONDS)
+              every_30s, _ = IntervalSchedule.objects.get_or_create(every=30, period=IntervalSchedule.SECONDS)
+              every_60s, _ = IntervalSchedule.objects.get_or_create(every=60, period=IntervalSchedule.SECONDS)
+              every_5m, _ = IntervalSchedule.objects.get_or_create(every=5, period=IntervalSchedule.MINUTES)
+              every_1h, _ = IntervalSchedule.objects.get_or_create(every=1, period=IntervalSchedule.HOURS)
+
+              tasks = [
+                  ("index_internal_txs", "safe_transaction_service.history.tasks.index_internal_txs_task", every_10s),
+                  ("index_safe_events", "safe_transaction_service.history.tasks.index_safe_events_task", every_10s),
+                  ("index_erc20_events", "safe_transaction_service.history.tasks.index_erc20_events_task", every_10s),
+                  ("index_new_proxies", "safe_transaction_service.history.tasks.index_new_proxies_task", every_30s),
+                  ("check_reorgs", "safe_transaction_service.history.tasks.check_reorgs_task", every_60s),
+                  ("process_decoded_internal_txs", "safe_transaction_service.history.tasks.process_decoded_internal_txs_task", every_30s),
+                  ("reindex_master_copies", "safe_transaction_service.history.tasks.reindex_master_copies_task", every_1h),
+                  ("check_sync_status", "safe_transaction_service.history.tasks.check_sync_status_task", every_5m),
+              ]
+
+              created_count = 0
+              for name, task, interval in tasks:
+                  obj, created = PeriodicTask.objects.update_or_create(
+                      name=name, defaults={"task": task, "interval": interval, "enabled": True}
+                  )
+                  if created:
+                      created_count += 1
+              print(f"  Created {created_count} periodic tasks, total: {PeriodicTask.objects.count()}")
+
+              # ============================================================
+              # Step 3: Initialize chain in Config Service database
+              # Uses direct psycopg2 connection to CFG database
+              # ============================================================
+              print("\n=== Step 3: Initialize chain in Config Service ===\n")
+
+              import psycopg2
+              import psycopg2.extras
+
+              cfg_conn = psycopg2.connect(
+                  host=os.environ["CFG_POSTGRES_HOST"],
+                  user=os.environ["CFG_POSTGRES_USER"],
+                  password=os.environ["CFG_POSTGRES_PASSWORD"],
+                  dbname=os.environ["CFG_POSTGRES_DB"],
+              )
+              cfg_conn.autocommit = True
+              cur = cfg_conn.cursor()
+
+              chain_id = {{ .Values.l1.evmChainId }}
+
+              # Check if chain exists
+              cur.execute("SELECT id FROM chains_chain WHERE id = %s", (chain_id,))
+              if cur.fetchone():
+                  print(f"  Chain {chain_id} already exists in Config Service")
+              else:
+                  # Insert the chain
+                  cur.execute("""
+                      INSERT INTO chains_chain (
+                          id, name, short_name, description, l2,
+                          rpc_uri, safe_apps_rpc_uri, public_rpc_uri,
+                          rpc_authentication, safe_apps_rpc_authentication, public_rpc_authentication,
+                          block_explorer_uri_address_template, block_explorer_uri_tx_hash_template,
+                          currency_name, currency_symbol, currency_decimals,
+                          transaction_service_uri, vpc_transaction_service_uri,
+                          theme_text_color, theme_background_color,
+                          recommended_master_copy_version,
+                          currency_logo_uri, chain_logo_uri
+                      ) VALUES (
+                          %s, %s, %s, %s, %s,
+                          %s, %s, %s,
+                          'NO_AUTHENTICATION', 'NO_AUTHENTICATION', 'NO_AUTHENTICATION',
+                          %s, %s,
+                          %s, %s, %s,
+                          %s, %s,
+                          '#FFFFFF', '#E84142',
+                          '1.4.1',
+                          '', ''
+                      )
+                  """, (
+                      chain_id,
+                      "{{ .Values.l1.chainName }}",
+                      "{{ .Values.l1.shortName }}",
+                      "{{ .Values.l1.chainName }} - Custom Avalanche L1",
+                      {{ ternary "true" "false" .Values.l1.useL2 }},
+                      "{{ .Values.l1.rpcUrl }}",
+                      "{{ .Values.l1.rpcUrl }}",
+                      "{{ .Values.l1.rpcUrl }}",
+                      "{{ .Values.l1.blockExplorerUrl }}/address/{{`{{address}}`}}" if "{{ .Values.l1.blockExplorerUrl }}" else "",
+                      "{{ .Values.l1.blockExplorerUrl }}/tx/{{`{{txHash}}`}}" if "{{ .Values.l1.blockExplorerUrl }}" else "",
+                      "{{ .Values.l1.nativeCurrency.name }}",
+                      "{{ .Values.l1.nativeCurrency.symbol }}",
+                      {{ .Values.l1.nativeCurrency.decimals }},
+                      "{{ include "safe.txs.internalUrl" . }}",
+                      "{{ include "safe.txs.internalUrl" . }}",
+                  ))
+                  print(f"  Created chain {chain_id}: {{ .Values.l1.chainName }}")
+
+                  # Create EIP-1559 gas price config
+                  cur.execute("""
+                      INSERT INTO chains_gasprice (
+                          chain_id, oracle_uri, oracle_parameter, gwei_factor,
+                          fixed_wei_value, rank,
+                          max_fee_per_gas, max_priority_fee_per_gas
+                      ) VALUES (%s, NULL, '', '1000000000', NULL, 0, %s, '1000000000')
+                  """, (chain_id, {{ .Values.l1.gasPriceWei | int64 }}))
+                  print(f"  Created gas price config")
+
+                  # Create features and associate with chain
+                  features = [
+                      'CONTRACT_INTERACTION', 'DEFAULT_TOKENLIST', 'DOMAIN_LOOKUP',
+                      'EIP_1559', 'ERC721', 'ERC1155', 'SAFE_APPS', 'SPENDING_LIMIT',
+                  ]
+                  for key in features:
+                      cur.execute("""
+                          INSERT INTO chains_feature (key, description, scope)
+                          VALUES (%s, %s, 'PER_CHAIN')
+                          ON CONFLICT (key) DO NOTHING
+                      """, (key, key))
+                      cur.execute("SELECT id FROM chains_feature WHERE key = %s", (key,))
+                      feature_id = cur.fetchone()[0]
+                      cur.execute("""
+                          INSERT INTO chains_feature_chains (feature_id, chain_id)
+                          VALUES (%s, %s)
+                          ON CONFLICT DO NOTHING
+                      """, (feature_id, chain_id))
+                  print(f"  Enabled {len(features)} features")
+
+              cur.close()
+              cfg_conn.close()
+
+              print("\n=== Initialization complete ===\n")

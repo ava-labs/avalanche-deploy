@@ -1,0 +1,80 @@
+# Staking Key Backup
+# Backs up validator staking keys (staker.key, staker.crt) to cloud storage.
+
+# Cron schedule for periodic backups (default: daily at 2 AM UTC)
+schedule: "0 2 * * *"
+
+# Cloud storage configuration
+storage:
+  # Provider: s3 or gcs
+  provider: s3
+  # Bucket name (required)
+  bucket: ""
+  # Key prefix inside the bucket
+  prefix: "staking-keys/"
+  # AWS region (s3 only)
+  region: "us-east-1"
+
+# AWS credentials (s3 provider)
+# Leave empty to use IRSA / instance profile / workload identity
+aws:
+  accessKeyId: ""
+  secretAccessKey: ""
+
+# GCS credentials (gcs provider)
+# Leave empty to use Workload Identity
+gcs:
+  serviceAccountKey: ""  # Base64-encoded service account JSON
+
+# Helm release name of the validator StatefulSet to back up
+validatorRelease: "l1-validators"
+
+# Label selector used to find validator pods (must match the StatefulSet)
+validatorPodLabels:
+  app.kubernetes.io/name: l1-validator
+
+# Path inside the validator pod where staking keys are stored
+stakingKeyPath: "/data/.avalanchego/staking"
+
+# Backup job image
+image:
+  repository: amazon/aws-cli
+  tag: "2.22.35"
+  pullPolicy: IfNotPresent
+
+# GCS image (used when provider=gcs)
+gcsImage:
+  repository: gcr.io/google.com/cloudsdktool/cloud-sdk
+  tag: "slim"
+  pullPolicy: IfNotPresent
+
+# Number of successful/failed job history entries to keep
+successfulJobsHistoryLimit: 7
+failedJobsHistoryLimit: 3
+
+# Restart policy for backup jobs
+restartPolicy: OnFailure
+
+# Backoff limit for failed jobs
+backoffLimit: 3
+
+# Active deadline for backup job (seconds)
+activeDeadlineSeconds: 600
+
+# Service account
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Pod-level security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []

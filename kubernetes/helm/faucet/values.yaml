@@ -1,0 +1,71 @@
+# Avalanche L1 Token Faucet
+
+# Number of replicas (typically 1 - single faucet wallet)
+replicaCount: 1
+
+# Faucet Docker image (from avaplatform/faucet)
+image:
+  repository: avaplatform/faucet
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# Service configuration
+service:
+  type: ClusterIP    # LoadBalancer for external access
+  port: 8010
+
+# L1 chain configuration (required)
+l1:
+  chainId: ""        # Avalanche blockchain ID (from create-l1)
+  evmChainId: ""     # EVM chain ID (from genesis.json)
+  rpcUrl: ""         # Full RPC endpoint URL (e.g., http://l1-rpc:9650/ext/bc/<chainId>/rpc)
+
+# Faucet configuration
+faucet:
+  privateKey: ""     # Required - funded wallet private key (0x...)
+  dropAmount: "1"    # Amount per request in native tokens
+  rateLimit: "1"     # Rate limit: requests allowed per hour per address
+
+# Resource limits
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Liveness probe
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+# Readiness probe
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
