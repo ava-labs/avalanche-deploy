@@ -1,0 +1,32 @@
+---
+# Phase 3: Setup Prometheus and Grafana monitoring
+#
+# Usage:
+#   ansible-playbook playbooks/shared/monitoring.yml
+
+- name: Install Node Exporter on all Avalanche nodes
+  hosts: validators:rpc:primary_validators
+  become: true
+  gather_facts: true
+  roles:
+    - node_exporter
+
+- name: Setup Monitoring Stack
+  hosts: monitoring
+  become: true
+  gather_facts: true
+
+  vars:
+    prometheus_version: "2.54.1"
+    grafana_version: "11.2.2"
+    prometheus_port: 9090
+    grafana_port: 3000
+
+  roles:
+    - prometheus
+    - grafana
+
+  post_tasks:
+    - name: Display Grafana URL
+      ansible.builtin.debug:
+        msg: "Grafana available at: http://{{ ansible_host }}:{{ grafana_port }}"

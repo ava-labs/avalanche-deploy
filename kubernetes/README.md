@@ -370,6 +370,6 @@ cd kubernetes
 ## Links
 
 - [Main README](../README.md)
-- [L1 Deployment Guide](../docs/L1-DEPLOYMENT.md)
-- [Primary Network Guide](../docs/PRIMARY-NETWORK.md)
+- [L1 Deployment Guide](../docs/l1/DEPLOYMENT.md)
+- [Primary Network Guide](../docs/primary-network/DEPLOYMENT.md)
 - [Operations Guide](../docs/OPERATIONS.md)

@@ -1,0 +1,354 @@
+---
+# Migrate Validator (Near-Zero Downtime)
+#
+# Migrates a Primary Network validator to a new node with minimal downtime.
+# The staking keys are transferred via S3, ensuring the same NodeID is maintained.
+#
+# Usage:
+#   ansible-playbook playbooks/primary-network/migrate-validator.yml \
+#     -e source_host=primary-validator-1 \
+#     -e target_host=migration-target
+#
+# Prerequisites:
+#   - Source validator has keys backed up to S3 (run primary-network/backup-staking-keys.yml)
+#   - Target node is fully synced (run primary-network/prepare-migration.yml first)
+#   - Both hosts are in the inventory
+#
+# What happens:
+#   1. Verify target is synced
+#   2. Stop target avalanchego
+#   3. Download staking keys from S3 to target
+#   4. Stop source validator (brief downtime starts)
+#   5. Start target with staking keys (downtime ends)
+#   6. Verify target is healthy
+#   7. Optionally clean up source
+
+- name: Validate Migration Parameters
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check required variables
+      ansible.builtin.assert:
+        that:
+          - source_host is defined
+          - target_host is defined
+        fail_msg: |
+          Missing required variables. Usage:
+            ansible-playbook playbooks/primary-network/migrate-validator.yml \
+              -e source_host=<current-validator> \
+              -e target_host=<new-node>
+
+    - name: Verify source host exists
+      ansible.builtin.assert:
+        that:
+          - source_host in groups['all']
+        fail_msg: "Source host '{{ source_host }}' not found in inventory"
+
+    - name: Verify target host exists
+      ansible.builtin.assert:
+        that:
+          - target_host in groups['all']
+        fail_msg: "Target host '{{ target_host }}' not found in inventory"
+
+- name: Verify Target Node is Ready
+  hosts: "{{ target_host | default('localhost') }}"
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check P-Chain bootstrap status
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.isBootstrapped"
+          params:
+            chain: "P"
+        return_content: true
+      register: pchain_status
+
+    - name: Check X-Chain bootstrap status
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.isBootstrapped"
+          params:
+            chain: "X"
+        return_content: true
+      register: xchain_status
+
+    - name: Check C-Chain bootstrap status
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.isBootstrapped"
+          params:
+            chain: "C"
+        return_content: true
+      register: cchain_status
+
+    - name: Verify all chains are bootstrapped
+      ansible.builtin.assert:
+        that:
+          - pchain_status.json.result.isBootstrapped | default(false)
+          - xchain_status.json.result.isBootstrapped | default(false)
+          - cchain_status.json.result.isBootstrapped | default(false)
+        fail_msg: |
+          Target node is not fully synced!
+          P-Chain: {{ pchain_status.json.result.isBootstrapped | default(false) }}
+          X-Chain: {{ xchain_status.json.result.isBootstrapped | default(false) }}
+          C-Chain: {{ cchain_status.json.result.isBootstrapped | default(false) }}
+
+          Wait for sync to complete before migrating.
+
+    - name: Display target status
+      ansible.builtin.debug:
+        msg: "Target node {{ target_host }} is fully synced and ready for migration"
+
+- name: Ensure Staking Keys are Backed Up
+  hosts: "{{ source_host | default('localhost') }}"
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check S3 backup exists
+      ansible.builtin.command: >
+        aws s3 ls s3://{{ staking_keys_bucket }}/{{ source_host }}/staking-keys.tar.gz
+      register: s3_check
+      failed_when: false
+      changed_when: false
+
+    - name: Check for staking keys in configured path
+      ansible.builtin.stat:
+        path: /var/lib/avalanchego/staking/staker.crt
+      register: staker_crt_configured
+
+    - name: Check for staking keys in default path
+      ansible.builtin.stat:
+        path: /home/avalanche/.avalanchego/staking/staker.crt
+      register: staker_crt_default
+
+    - name: Set staking directory
+      ansible.builtin.set_fact:
+        source_staking_dir: "{{ '/var/lib/avalanchego/staking' if staker_crt_configured.stat.exists else '/home/avalanche/.avalanchego/staking' }}"
+
+    - name: Backup keys if not in S3
+      when: s3_check.rc != 0
+      block:
+        - name: Create backup archive
+          ansible.builtin.shell: |
+            set -euo pipefail
+            tar -czf /tmp/staking-keys-{{ source_host }}.tar.gz -C {{ source_staking_dir }} .
+            chmod 600 /tmp/staking-keys-{{ source_host }}.tar.gz
+          args:
+            executable: /bin/bash
+          changed_when: true
+
+        - name: Upload to S3
+          ansible.builtin.command: >
+            aws s3 cp /tmp/staking-keys-{{ source_host }}.tar.gz
+            s3://{{ staking_keys_bucket }}/{{ source_host }}/staking-keys.tar.gz
+            --sse aws:kms
+            --sse-kms-key-id {{ staking_keys_kms_arn }}
+          changed_when: true
+
+        - name: Clean up temp file
+          ansible.builtin.file:
+            path: /tmp/staking-keys-{{ source_host }}.tar.gz
+            state: absent
+
+    - name: Get source Node ID
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.getNodeID"
+        return_content: true
+      register: source_node_info
+
+    - name: Save source Node ID
+      ansible.builtin.set_fact:
+        source_node_id: "{{ source_node_info.json.result.nodeID }}"
+
+    - name: Display source Node ID
+      ansible.builtin.debug:
+        msg: "Source Node ID: {{ source_node_id }}"
+
+- name: Prepare Target for Key Installation
+  hosts: "{{ target_host | default('localhost') }}"
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Stop avalanchego on target
+      ansible.builtin.systemd:
+        name: avalanchego
+        state: stopped
+
+    - name: Check for existing staking keys in configured path
+      ansible.builtin.stat:
+        path: /var/lib/avalanchego/staking/staker.crt
+      register: target_crt_configured
+
+    - name: Check for existing staking keys in default path
+      ansible.builtin.stat:
+        path: /home/avalanche/.avalanchego/staking/staker.crt
+      register: target_crt_default
+
+    - name: Set target staking directory
+      ansible.builtin.set_fact:
+        target_staking_dir: "{{ '/var/lib/avalanchego/staking' if target_crt_configured.stat.exists else '/home/avalanche/.avalanchego/staking' }}"
+
+    - name: Clear existing staking keys on target
+      ansible.builtin.file:
+        path: "{{ target_staking_dir }}/"
+        state: absent
+
+    - name: Recreate staking directory
+      ansible.builtin.file:
+        path: "{{ target_staking_dir }}/"
+        state: directory
+        owner: avalanche
+        group: avalanche
+        mode: '0700'
+
+    - name: Download staking keys from S3
+      ansible.builtin.command: >
+        aws s3 cp s3://{{ staking_keys_bucket }}/{{ source_host }}/staking-keys.tar.gz
+        /tmp/staking-keys.tar.gz
+      register: s3_download
+      changed_when: s3_download.rc == 0
+
+    - name: Extract staking keys
+      ansible.builtin.unarchive:
+        src: /tmp/staking-keys.tar.gz
+        dest: "{{ target_staking_dir }}/"
+        remote_src: true
+        owner: avalanche
+        group: avalanche
+
+    - name: Clean up downloaded archive
+      ansible.builtin.file:
+        path: /tmp/staking-keys.tar.gz
+        state: absent
+
+    - name: Display preparation status
+      ansible.builtin.debug:
+        msg: "Target node prepared with staking keys from {{ source_host }}"
+
+- name: Execute Migration (DOWNTIME BEGINS)
+  hosts: "{{ source_host | default('localhost') }}"
+  become: true
+  gather_facts: false
+  tasks:
+    - name: "MIGRATION: Stopping source validator (downtime begins)"
+      ansible.builtin.systemd:
+        name: avalanchego
+        state: stopped
+
+    - name: Record migration timestamp
+      ansible.builtin.debug:
+        msg: "Source validator stopped at {{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ')) }}"
+
+- name: Start Target Validator (DOWNTIME ENDS)
+  hosts: "{{ target_host | default('localhost') }}"
+  become: true
+  gather_facts: false
+  tasks:
+    - name: "MIGRATION: Starting target validator (downtime ends)"
+      ansible.builtin.systemd:
+        name: avalanchego
+        state: started
+
+    - name: Wait for target to be healthy
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/health"
+        method: GET
+        return_content: true
+      register: health_check
+      until: health_check.status == 200 and (health_check.json.healthy | default(false))
+      retries: 30
+      delay: 10
+
+    - name: Get target Node ID
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.getNodeID"
+        return_content: true
+      register: target_node_info
+
+    - name: Display target Node ID
+      ansible.builtin.debug:
+        msg: "Target Node ID: {{ target_node_info.json.result.nodeID }}"
+
+- name: Verify Migration Success
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Get source and target Node IDs
+      ansible.builtin.set_fact:
+        source_id: "{{ hostvars[source_host]['source_node_id'] }}"
+        target_id: "{{ hostvars[target_host]['target_node_info']['json']['result']['nodeID'] }}"
+
+    - name: Verify Node IDs match
+      ansible.builtin.assert:
+        that:
+          - source_id == target_id
+        fail_msg: |
+          Node ID mismatch! Migration may have failed.
+          Source: {{ source_id }}
+          Target: {{ target_id }}
+        success_msg: "Node ID verified: {{ source_id }}"
+
+    - name: Display migration summary
+      ansible.builtin.debug:
+        msg: |
+
+          ============================================
+          MIGRATION COMPLETE
+          ============================================
+
+          Node ID: {{ source_id }}
+          From: {{ source_host }} -> {{ target_host }}
+
+          The validator is now running on {{ target_host }}.
+
+          Post-migration tasks:
+          1. Monitor new validator health:
+             curl http://{{ hostvars[target_host]['ansible_host'] }}:9650/ext/health
+
+          2. Back up keys on new node:
+             make backup-keys
+
+          3. Update monitoring/alerting with new IP
+
+          4. To remove the old instance via Terraform:
+             Terraform uses index-based ordering, so scaling down always
+             removes the highest-indexed instance. If you migrated TO a
+             higher-indexed instance, swap them in Terraform state first:
+
+               cd terraform/aws-primary-network
+               terraform state mv \
+                 'aws_instance.primary_validators[1]' \
+                 'aws_instance.primary_validators[0]'
+
+             Then reduce primary_validator_count and apply:
+               terraform apply
+
+          ============================================

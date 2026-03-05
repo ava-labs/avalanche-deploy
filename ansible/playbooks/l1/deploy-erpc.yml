@@ -1,0 +1,200 @@
+---
+# Deploy eRPC Playbook
+#
+# Deploys eRPC load balancer for your L1 chain RPC endpoints.
+# Provides load balancing, automatic failover, caching, and rate limiting.
+#
+# Usage:
+#   ansible-playbook playbooks/l1/deploy-erpc.yml \
+#     -e l1_chain_id=xxx \
+#     -e l1_evm_chain_id=12345
+#
+# Or with l1.env loaded:
+#   source ../l1.env
+#   ansible-playbook playbooks/l1/deploy-erpc.yml \
+#     -e l1_chain_id=$CHAIN_ID \
+#     -e l1_evm_chain_id=$EVM_CHAIN_ID
+#
+# Required variables:
+#   l1_chain_id: L1 chain ID (from create-l1 output)
+#   l1_evm_chain_id: EVM chain ID (from genesis file config.chainId)
+#
+# Optional variables:
+#   erpc_port: HTTP port (default: 4000)
+#   erpc_rate_limit_enabled: Enable rate limiting (default: false)
+
+- name: Validate required variables
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Validate RPC groups exist
+      ansible.builtin.assert:
+        that:
+          - (groups['rpc_archive'] is defined and groups['rpc_archive'] | length > 0) or
+            (groups['rpc_pruned'] is defined and groups['rpc_pruned'] | length > 0) or
+            (groups['rpc'] is defined and groups['rpc'] | length > 0)
+        fail_msg: "Inventory must have at least one node in 'rpc_archive', 'rpc_pruned', or 'rpc' group"
+
+    - name: Validate monitoring or rpc group for eRPC deployment
+      ansible.builtin.assert:
+        that:
+          - (groups['monitoring'] is defined and groups['monitoring'] | length > 0) or
+            (groups['rpc'] is defined and groups['rpc'] | length > 0)
+        fail_msg: "Inventory must have at least one node in 'monitoring' or 'rpc' group for eRPC deployment"
+
+    - name: Check required variables
+      ansible.builtin.fail:
+        msg: "Missing required variable: {{ item }}"
+      when: vars[item] is not defined or vars[item] == ''
+      loop:
+        - l1_chain_id
+        - l1_evm_chain_id
+
+- name: Build upstream list from RPC nodes
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Build archive upstream endpoints
+      ansible.builtin.set_fact:
+        erpc_upstreams: >-
+          {{ erpc_upstreams | default([]) + [{
+            'id': 'rpc-archive-' ~ (idx + 1),
+            'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ l1_chain_id ~ '/rpc',
+            'rpc_type': 'archive'
+          }] }}
+      loop: "{{ groups['rpc_archive'] | default([]) }}"
+      loop_control:
+        index_var: idx
+      when: groups['rpc_archive'] is defined
+
+    - name: Build pruned upstream endpoints
+      ansible.builtin.set_fact:
+        erpc_upstreams: >-
+          {{ erpc_upstreams | default([]) + [{
+            'id': 'rpc-pruned-' ~ (idx + 1),
+            'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ l1_chain_id ~ '/rpc',
+            'rpc_type': 'pruned'
+          }] }}
+      loop: "{{ groups['rpc_pruned'] | default([]) }}"
+      loop_control:
+        index_var: idx
+      when: groups['rpc_pruned'] is defined
+
+    - name: Fallback - build upstream endpoints from generic rpc group
+      ansible.builtin.set_fact:
+        erpc_upstreams: >-
+          {{ erpc_upstreams | default([]) + [{
+            'id': 'rpc-' ~ (idx + 1),
+            'endpoint': 'http://' ~ hostvars[item]['ansible_host'] ~ ':9650/ext/bc/' ~ l1_chain_id ~ '/rpc',
+            'rpc_type': hostvars[item]['rpc_type'] | default('archive')
+          }] }}
+      loop: "{{ groups['rpc'] | default([]) }}"
+      loop_control:
+        index_var: idx
+      when: >-
+        (groups['rpc_archive'] is not defined or groups['rpc_archive'] | length == 0) and
+        (groups['rpc_pruned'] is not defined or groups['rpc_pruned'] | length == 0)
+
+    - name: Display upstream configuration
+      vars:
+        archive_count: "{{ erpc_upstreams | selectattr('rpc_type', 'equalto', 'archive') | list | length }}"
+        pruned_count: "{{ erpc_upstreams | selectattr('rpc_type', 'equalto', 'pruned') | list | length }}"
+      ansible.builtin.debug:
+        msg: "Configured {{ erpc_upstreams | length }} upstream RPC endpoints (archive: {{ archive_count }}, pruned: {{ pruned_count }})"
+
+    - name: Select eRPC deployment host
+      ansible.builtin.set_fact:
+        erpc_deploy_host: "{{ 'monitoring[0]' if (groups.get('monitoring', []) | length) > 0 else 'rpc[0]' }}"
+
+    - name: Show selected eRPC deployment host
+      ansible.builtin.debug:
+        msg: "Deploying eRPC on {{ erpc_deploy_host }}"
+
+- name: Deploy eRPC
+  hosts: monitoring[0]:rpc[0]
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Determine whether this host should run eRPC deployment
+      ansible.builtin.set_fact:
+        deploy_erpc_here: "{{ inventory_hostname == (groups['monitoring'][0] if (groups.get('monitoring', []) | length) > 0 else groups['rpc'][0]) }}"
+
+    - name: Wait for system to become reachable
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+      when: deploy_erpc_here
+
+  roles:
+    - role: erpc
+      when: deploy_erpc_here
+      vars:
+        erpc_chain_id: "{{ hostvars['localhost']['l1_chain_id'] }}"
+        erpc_evm_chain_id: "{{ hostvars['localhost']['l1_evm_chain_id'] }}"
+        erpc_upstreams: "{{ hostvars['localhost']['erpc_upstreams'] }}"
+
+- name: Display eRPC Information
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Get eRPC host
+      ansible.builtin.set_fact:
+        erpc_host: >-
+          {{ hostvars[groups['monitoring'][0]]['ansible_host']
+            if (groups.get('monitoring', []) | length) > 0
+            else hostvars[groups['rpc'][0]]['ansible_host'] }}
+
+    - name: Show eRPC information
+      ansible.builtin.debug:
+        msg: |
+
+          ============================================
+          eRPC Load Balancer Deployed Successfully
+          ============================================
+
+          RPC Endpoint (use this instead of direct RPC):
+            http://{{ erpc_host }}:{{ erpc_port | default(4000) }}
+
+          Health Check:
+            http://{{ erpc_host }}:{{ erpc_admin_port | default(4001) }}/healthcheck
+
+          Metrics (Prometheus):
+            http://{{ erpc_host }}:{{ erpc_metrics_port | default(9090) }}/metrics
+
+          ============================================
+          Load Balancing Configuration
+          ============================================
+
+          Upstream RPC Nodes: {{ erpc_upstreams | length }}
+          {% for upstream in erpc_upstreams %}
+            - {{ upstream.id }}: {{ upstream.endpoint }}
+          {% endfor %}
+
+          Features enabled:
+            ✓ Automatic failover
+            ✓ Response caching ({{ erpc_cache_max_items | default(100000) }} items)
+            ✓ Retry with exponential backoff
+            ✓ Hedged requests (parallel after {{ erpc_hedge_delay | default('1s') }})
+            ✓ Circuit breaker protection
+          {% if erpc_rate_limit_enabled | default(false) %}
+            ✓ Rate limiting ({{ erpc_rate_limit_max | default(1000) }}/{{ erpc_rate_limit_period | default('1s') }})
+          {% else %}
+            ✗ Rate limiting (disabled)
+          {% endif %}
+
+          ============================================
+          Usage Example
+          ============================================
+
+          # Instead of connecting directly to RPC nodes:
+          # curl http://rpc-node:9650/ext/bc/{{ l1_chain_id }}/rpc
+
+          # Connect through eRPC for load balancing:
+          curl -X POST http://{{ erpc_host }}:{{ erpc_port | default(4000) }} \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+
+          # In your dApp, use:
+          # RPC_URL=http://{{ erpc_host }}:{{ erpc_port | default(4000) }}
+
+          ============================================

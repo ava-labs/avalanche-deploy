@@ -256,7 +256,7 @@ else
     log "Creating infrastructure (3 validators, 1 archive RPC, 1 pruned RPC)..."
 
     # Use minimal config for testing
-    cd terraform/$CLOUD
+    cd terraform/l1/$CLOUD
     terraform init -input=false
     terraform apply -auto-approve \
         -var="validator_count=3" \
@@ -293,7 +293,7 @@ fi
 log "Waiting for P-Chain bootstrap (this may take a few minutes)..."
 MAX_WAIT=600  # 10 minutes
 WAITED=0
-FIRST_VALIDATOR_IP=$(cd terraform/$CLOUD && terraform output -json validator_ips | jq -r '.[0]')
+FIRST_VALIDATOR_IP=$(cd terraform/l1/$CLOUD && terraform output -json validator_ips | jq -r '.[0]')
 while [ $WAITED -lt $MAX_WAIT ]; do
     BOOTSTRAP_STATUS=$(curl -sf -X POST --data '{"jsonrpc":"2.0","id":1,"method":"info.isBootstrapped","params":{"chain":"P"}}' -H 'content-type:application/json' "http://$FIRST_VALIDATOR_IP:9650/ext/info" 2>/dev/null || echo '{}')
     if echo "$BOOTSTRAP_STATUS" | jq -e '.result.isBootstrapped == true' > /dev/null 2>&1; then
@@ -322,7 +322,7 @@ else
 fi
 
 log "Getting validator IPs..."
-VALIDATOR_IPS=$(cd terraform/$CLOUD && terraform output -json validator_ips | jq -r 'join(",")')
+VALIDATOR_IPS=$(cd terraform/l1/$CLOUD && terraform output -json validator_ips | jq -r 'join(",")')
 log "Validators: $VALIDATOR_IPS"
 
 # Genesis proxy address (pre-deployed TransparentProxy in genesis file)
@@ -409,8 +409,8 @@ if [ "$FOUNDRY_AVAILABLE" = true ] && [ -n "${ICM_CONTRACTS_PATH:-}" ] && [ -n "
     fi
 
     # Get first RPC IP for chain RPC URL
-    RPC_IP=$(cd terraform/$CLOUD && terraform output -json rpc_archive_ips 2>/dev/null | jq -r '.[0]' || \
-             cd terraform/$CLOUD && terraform output -json rpc_ips 2>/dev/null | jq -r '.[0]' || \
+    RPC_IP=$(cd terraform/l1/$CLOUD && terraform output -json rpc_archive_ips 2>/dev/null | jq -r '.[0]' || \
+             cd terraform/l1/$CLOUD && terraform output -json rpc_ips 2>/dev/null | jq -r '.[0]' || \
              echo "$VALIDATOR_IPS" | cut -d',' -f1)
 
     log "Using RPC endpoint: http://$RPC_IP:9650/ext/bc/$CHAIN_ID/rpc"

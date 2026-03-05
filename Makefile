@@ -18,7 +18,7 @@ AUTO_APPROVE ?= false
 TF_INIT_RETRIES ?= 3
 SKIP_TERRAFORM_VALIDATE ?= false
 ANSIBLE_INVENTORY = inventory/$(CLOUD)_hosts
-PRIMARY_TF_DIR = terraform/aws-primary-network
+PRIMARY_TF_DIR = terraform/primary-network/aws
 PRIMARY_ANSIBLE_INVENTORY = inventory/aws_primary_hosts
 ANSIBLE_SYNTAX_INVENTORY ?= ../tests/fixtures/syntax_inventory.ini
 L1_CONFIG_DIR ?= configs/l1
@@ -104,59 +104,59 @@ doctor:
 #
 infra:
 	@echo "Creating $(CLOUD) infrastructure..."
-	@cd terraform/$(CLOUD) && terraform init && terraform apply
+	@cd terraform/l1/$(CLOUD) && terraform init && terraform apply
 	@echo ""
 	@echo "Done! Run 'make deploy' next."
 
 infra-plan:
-	@cd terraform/$(CLOUD) && terraform plan
+	@cd terraform/l1/$(CLOUD) && terraform plan
 
 #
 # Deploy
 #
 deploy:
 	@echo "Deploying nodes..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/01-deploy-nodes.yml -e network=$(NETWORK)
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/l1/deploy-nodes.yml -e network=$(NETWORK)
 	@echo ""
 	@echo "Done! Run 'make status' to check sync progress."
 
 configure-l1:
 	@if [ -z "$(SUBNET_ID)" ]; then echo "Usage: make configure-l1 SUBNET_ID=xxx CHAIN_ID=yyy [SKIP_ERPC=true]"; exit 1; fi
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/02-configure-l1.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/l1/configure.yml \
 		-e subnet_id=$(SUBNET_ID) \
 		-e chain_id=$(CHAIN_ID) \
 		$(if $(SKIP_ERPC),-e skip_erpc=true,)
 
 reset-l1:
 	@echo "Resetting L1 chain data on all nodes..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/00-reset-l1.yml
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/l1/reset.yml
 
 monitoring:
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/03-setup-monitoring.yml
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/shared/monitoring.yml
 
 rolling-restart:
 	@echo "Performing rolling restart of all nodes..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/rolling-restart.yml
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/shared/rolling-restart.yml
 
 health-checks:
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/health-checks.yml $(if $(CHAIN_ID),-e chain_id=$(CHAIN_ID),)
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/shared/health-checks.yml $(if $(CHAIN_ID),-e chain_id=$(CHAIN_ID),)
 
 upgrade:
 	@if [ -z "$(VERSION)" ]; then echo "Usage: make upgrade VERSION=1.12.0"; exit 1; fi
 	@echo "Upgrading nodes to avalanchego $(VERSION)..."
 	@echo "NOTE: subnet-evm is bundled with avalanchego and will be updated automatically."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/upgrade-nodes.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/shared/upgrade-nodes.yml \
 		-e "avalanchego_version=$(VERSION)"
 
 #
 # Status
 #
 status:
-	@./scripts/status.sh $(CLOUD)
+	@./scripts/l1/status.sh $(CLOUD)
 
 logs:
-	@IP=$$(cd terraform/$(CLOUD) && terraform output -json validator_ips 2>/dev/null | jq -r '.[0]'); \
-	KEY=$$(cd terraform/$(CLOUD) && terraform output -raw ssh_private_key_file 2>/dev/null || echo "~/.ssh/avalanche-deploy"); \
+	@IP=$$(cd terraform/l1/$(CLOUD) && terraform output -json validator_ips 2>/dev/null | jq -r '.[0]'); \
+	KEY=$$(cd terraform/l1/$(CLOUD) && terraform output -raw ssh_private_key_file 2>/dev/null || echo "~/.ssh/avalanche-deploy"); \
 	ssh -i $$KEY ubuntu@$$IP "sudo journalctl -u avalanchego -f --no-pager -n 50"
 
 #
@@ -174,7 +174,7 @@ deploy-blockscout:
 	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make deploy-blockscout CHAIN_ID=xxx EVM_CHAIN_ID=yyy [CHAIN_NAME=name]"; exit 1; fi
 	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make deploy-blockscout CHAIN_ID=xxx EVM_CHAIN_ID=yyy [CHAIN_NAME=name]"; exit 1; fi
 	@echo "Deploying Blockscout block explorer..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/04-deploy-blockscout.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/l1/deploy-blockscout.yml \
 		-e "l1_chain_id=$(CHAIN_ID)" \
 		-e "l1_evm_chain_id=$(EVM_CHAIN_ID)" \
 		-e "l1_name=$(or $(CHAIN_NAME),Avalanche L1)"
@@ -187,7 +187,7 @@ faucet:
 	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make faucet CHAIN_ID=xxx EVM_CHAIN_ID=yyy FAUCET_KEY=0x..."; exit 1; fi
 	@if [ -z "$(FAUCET_KEY)" ]; then echo "Usage: make faucet CHAIN_ID=xxx EVM_CHAIN_ID=yyy FAUCET_KEY=0x..."; exit 1; fi
 	@echo "Deploying faucet..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/06-deploy-faucet.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/l1/deploy-faucet.yml \
 		-e "l1_chain_id=$(CHAIN_ID)" \
 		-e "l1_evm_chain_id=$(EVM_CHAIN_ID)" \
 		-e "faucet_private_key=$(FAUCET_KEY)"
@@ -198,7 +198,7 @@ faucet:
 graph-node:
 	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make graph-node CHAIN_ID=xxx [NETWORK_NAME=my-l1]"; exit 1; fi
 	@echo "Deploying The Graph Node..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/07-deploy-graph-node.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/l1/deploy-graph-node.yml \
 		-e "l1_chain_id=$(CHAIN_ID)" \
 		$(if $(NETWORK_NAME),-e "graph_network_name=$(NETWORK_NAME)",)
 
@@ -206,7 +206,7 @@ erpc:
 	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make erpc CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
 	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make erpc CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
 	@echo "Deploying eRPC load balancer..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/08-deploy-erpc.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/l1/deploy-erpc.yml \
 		-e "l1_chain_id=$(CHAIN_ID)" \
 		-e "l1_evm_chain_id=$(EVM_CHAIN_ID)"
 
@@ -218,7 +218,7 @@ icm-relayer:
 	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make icm-relayer SUBNET_ID=xxx CHAIN_ID=yyy RELAYER_KEY=0x..."; exit 1; fi
 	@if [ -z "$(RELAYER_KEY)" ]; then echo "Usage: make icm-relayer SUBNET_ID=xxx CHAIN_ID=yyy RELAYER_KEY=0x..."; exit 1; fi
 	@echo "Deploying ICM Relayer..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/16-deploy-icm-relayer.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/l1/deploy-icm-relayer.yml \
 		-e "l1_subnet_id=$(SUBNET_ID)" \
 		-e "l1_chain_id=$(CHAIN_ID)" \
 		-e "relayer_private_key=$(RELAYER_KEY)" \
@@ -239,7 +239,7 @@ initialize-validator-manager:
 	@if [ -z "$(PROXY_ADDRESS)" ]; then echo "Usage: make initialize-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
 	@if [ -z "$(EVM_CHAIN_ID)" ]; then echo "Usage: make initialize-validator-manager SUBNET_ID=xxx CHAIN_ID=yyy CONVERSION_TX=zzz PROXY_ADDRESS=0x... EVM_CHAIN_ID=12345"; exit 1; fi
 	@echo "Initializing Validator Manager..."
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/09-initialize-validator-manager.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/l1/initialize-validator-manager.yml \
 		-e "subnet_id=$(SUBNET_ID)" \
 		-e "chain_id=$(CHAIN_ID)" \
 		-e "conversion_tx=$(CONVERSION_TX)" \
@@ -262,12 +262,12 @@ primary-infra-plan: check-primary-cloud
 
 primary-deploy: check-primary-cloud
 	@echo "Deploying Primary Network validators..."
-	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/10-deploy-primary-network.yml -e network=$(NETWORK)
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/primary-network/deploy.yml -e network=$(NETWORK)
 	@echo ""
 	@echo "Done! Run 'make primary-status' to check sync progress."
 
 primary-status: check-primary-cloud
-	@CLOUD=$(CLOUD) ./scripts/check-primary-sync.sh
+	@CLOUD=$(CLOUD) ./scripts/primary-network/check-sync.sh
 
 primary-destroy: check-primary-cloud
 	@echo "Destroying Primary Network infrastructure..."
@@ -276,17 +276,17 @@ primary-destroy: check-primary-cloud
 
 backup-keys: check-primary-cloud
 	@echo "Backing up staking keys to S3..."
-	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/11-backup-staking-keys.yml
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/primary-network/backup-staking-keys.yml
 
 restore-keys: check-primary-cloud
 	@if [ -z "$(SOURCE)" ]; then echo "Usage: make restore-keys SOURCE=primary-validator-1 TARGET_IP=10.0.1.50"; exit 1; fi
 	@if [ -z "$(TARGET_IP)" ]; then echo "Usage: make restore-keys SOURCE=primary-validator-1 TARGET_IP=10.0.1.50"; exit 1; fi
-	@./scripts/restore-staking-keys.sh $(SOURCE) $(TARGET_IP)
+	@./scripts/primary-network/restore-staking-keys.sh $(SOURCE) $(TARGET_IP)
 
 prepare-migration: check-primary-cloud
 	@if [ -z "$(NODE)" ]; then echo "Usage: make prepare-migration NODE=migration-target [SNAPSHOT=true] [SNAPSHOT_NAME=latest]"; exit 1; fi
 	@echo "Preparing migration node $(NODE)..."
-	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/12-prepare-migration-node.yml --limit $(NODE) \
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/primary-network/prepare-migration.yml --limit $(NODE) \
 		$(if $(SNAPSHOT),-e "use_snapshot=$(SNAPSHOT)",) \
 		$(if $(SNAPSHOT_NAME),-e "snapshot_name=$(SNAPSHOT_NAME)",)
 
@@ -294,7 +294,7 @@ migrate-validator: check-primary-cloud
 	@if [ -z "$(SOURCE)" ]; then echo "Usage: make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target"; exit 1; fi
 	@if [ -z "$(TARGET)" ]; then echo "Usage: make migrate-validator SOURCE=primary-validator-1 TARGET=migration-target"; exit 1; fi
 	@echo "Migrating validator from $(SOURCE) to $(TARGET)..."
-	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/13-migrate-validator.yml \
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/primary-network/migrate-validator.yml \
 		-e "source_host=$(SOURCE)" \
 		-e "target_host=$(TARGET)"
 
@@ -304,17 +304,17 @@ migrate-validator: check-primary-cloud
 create-snapshot: check-primary-cloud
 	@if [ -z "$(NODE)" ]; then echo "Usage: make create-snapshot NODE=primary-validator-1 [NAME=my-snapshot]"; exit 1; fi
 	@echo "Creating database snapshot from $(NODE)..."
-	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/14-create-snapshot.yml --limit $(NODE) \
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/primary-network/create-snapshot.yml --limit $(NODE) \
 		$(if $(NAME),-e "snapshot_name=$(NAME)",)
 
 restore-snapshot: check-primary-cloud
 	@if [ -z "$(TARGET)" ]; then echo "Usage: make restore-snapshot TARGET=migration-target [SNAPSHOT=latest]"; exit 1; fi
 	@echo "Restoring snapshot to $(TARGET)..."
-	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/15-restore-snapshot.yml --limit $(TARGET) \
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/primary-network/restore-snapshot.yml --limit $(TARGET) \
 		$(if $(SNAPSHOT),-e "snapshot_name=$(SNAPSHOT)",)
 
 list-snapshots: check-primary-cloud
-	@./scripts/list-snapshots.sh
+	@./scripts/primary-network/list-snapshots.sh
 
 #
 # Safe Multisig
@@ -327,20 +327,20 @@ safe:
 		echo "Error: CHAIN_ID/EVM_CHAIN_ID not found. Run 'make create-l1' first or pass explicitly."; exit 1; fi
 	@if [ -n "$(AVALANCHE_PRIVATE_KEY)" ]; then \
 		echo "Deploying Safe contracts via Singleton Factory..."; \
-		RPC_URL=$$(cd terraform/$(CLOUD) && terraform output -json rpc_ips 2>/dev/null | jq -r '.[0]' 2>/dev/null || echo ""); \
+		RPC_URL=$$(cd terraform/l1/$(CLOUD) && terraform output -json rpc_ips 2>/dev/null | jq -r '.[0]' 2>/dev/null || echo ""); \
 		if [ -n "$$RPC_URL" ] && [ "$$RPC_URL" != "null" ]; then \
 			RPC_URL="http://$$RPC_URL:9650/ext/bc/$(_CHAIN_ID)/rpc" \
 			PRIVATE_KEY="$(AVALANCHE_PRIVATE_KEY)" \
-			./scripts/safe/deploy-contracts.sh; \
+			./scripts/l1/safe/deploy-contracts.sh; \
 		else \
 			echo "Warning: Could not determine RPC URL from terraform. Skipping contract deployment."; \
-			echo "Deploy manually: RPC_URL=... PRIVATE_KEY=... ./scripts/safe/deploy-contracts.sh"; \
+			echo "Deploy manually: RPC_URL=... PRIVATE_KEY=... ./scripts/l1/safe/deploy-contracts.sh"; \
 		fi; \
 	else \
 		echo "Note: AVALANCHE_PRIVATE_KEY not set, skipping contract deployment."; \
-		echo "Contracts must already be deployed (or deploy manually with scripts/safe/deploy-contracts.sh)."; \
+		echo "Contracts must already be deployed (or deploy manually with scripts/l1/safe/deploy-contracts.sh)."; \
 	fi
-	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/05-deploy-safe.yml \
+	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/l1/deploy-safe.yml \
 		-e "chain_id=$(_CHAIN_ID)" \
 		-e "evm_chain_id=$(_EVM_CHAIN_ID)" \
 		$(if $(_CHAIN_NAME),-e "safe_chain_name=$(_CHAIN_NAME)" -e "safe_chain_short_name=$(_CHAIN_NAME)")
@@ -563,13 +563,13 @@ lint:
 			pip3 install --user ansible-lint; \
 		fi; \
 	}
-	@cd ansible && ansible-lint playbooks/*.yml
+	@cd ansible && ansible-lint playbooks/l1/*.yml playbooks/primary-network/*.yml playbooks/shared/*.yml
 	@echo ""
 	@echo "Checking Terraform format..."
-	@cd terraform/aws && terraform fmt -check -recursive
-	@cd terraform/aws-primary-network && terraform fmt -check -recursive
-	@cd terraform/gcp && terraform fmt -check -recursive
-	@cd terraform/azure && terraform fmt -check -recursive
+	@cd terraform/l1/aws && terraform fmt -check -recursive
+	@cd terraform/primary-network/aws && terraform fmt -check -recursive
+	@cd terraform/l1/gcp && terraform fmt -check -recursive
+	@cd terraform/l1/azure && terraform fmt -check -recursive
 	@echo ""
 	@echo "Checking shell scripts..."
 	@if command -v shellcheck > /dev/null 2>&1; then \
@@ -606,7 +606,7 @@ validate-config-layout:
 validate: validate-config-layout
 	@echo "Validating Ansible playbooks..."
 	@mkdir -p "$(ANSIBLE_LOCAL_TEMP)"
-	@cd ansible && for f in playbooks/*.yml; do \
+	@cd ansible && for f in playbooks/l1/*.yml playbooks/primary-network/*.yml playbooks/shared/*.yml; do \
 		echo "  Checking $$f..."; \
 		ansible-playbook --syntax-check -i "$(ANSIBLE_SYNTAX_INVENTORY)" "$$f" > /dev/null || exit 1; \
 	done
@@ -636,10 +636,10 @@ validate: validate-config-layout
 			echo "✗ $$label terraform validation failed after $(TF_INIT_RETRIES) attempts"; \
 			return 1; \
 		}; \
-		validate_terraform terraform/aws AWS; \
-		validate_terraform terraform/aws-primary-network "AWS Primary Network"; \
-		validate_terraform terraform/gcp GCP; \
-		validate_terraform terraform/azure Azure; \
+		validate_terraform terraform/l1/aws AWS; \
+		validate_terraform terraform/primary-network/aws "AWS Primary Network"; \
+		validate_terraform terraform/l1/gcp GCP; \
+		validate_terraform terraform/l1/azure Azure; \
 	fi
 	@echo ""
 	@echo "All validations passed!"
@@ -681,7 +681,7 @@ test: test-incremental
 #
 destroy:
 	@echo "Destroying $(CLOUD) infrastructure..."
-	@cd terraform/$(CLOUD) && terraform destroy $(if $(filter true,$(AUTO_APPROVE)),-auto-approve,)
+	@cd terraform/l1/$(CLOUD) && terraform destroy $(if $(filter true,$(AUTO_APPROVE)),-auto-approve,)
 	@echo "Done!"
 
 clean:

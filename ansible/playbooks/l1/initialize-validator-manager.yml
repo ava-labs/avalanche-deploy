@@ -1,0 +1,279 @@
+---
+# Initialize Validator Manager Playbook
+#
+# Deploys and initializes the ValidatorManager contract on your L1 chain.
+# This must run AFTER create-l1 has completed and nodes are synced.
+#
+# Usage:
+#   ansible-playbook playbooks/l1/initialize-validator-manager.yml \
+#     -e subnet_id=xxx \
+#     -e chain_id=yyy \
+#     -e conversion_tx=zzz \
+#     -e proxy_address=0x... \
+#     -e evm_chain_id=12345
+#
+# Or with l1.env loaded:
+#   source ../l1.env
+#   ansible-playbook playbooks/l1/initialize-validator-manager.yml \
+#     -e subnet_id=$SUBNET_ID \
+#     -e chain_id=$CHAIN_ID \
+#     -e conversion_tx=$CONVERSION_TX \
+#     -e proxy_address=$PROXY_ADDRESS \
+#     -e evm_chain_id=12345
+#
+# Required variables:
+#   subnet_id: L1 subnet ID (from create-l1 output)
+#   chain_id: L1 blockchain ID (from create-l1 output)
+#   conversion_tx: ConvertSubnetToL1Tx hash (from create-l1 output)
+#   proxy_address: Genesis proxy address for validator manager
+#   evm_chain_id: EVM chain ID (from genesis file config.chainId)
+#
+# Optional variables:
+#   manager_type: poa (default), native-staking, or erc20-staking
+#   churn_period: Churn period in seconds (default: 0)
+#   max_churn_percent: Maximum churn percentage (default: 20)
+#   network: fuji (default) or mainnet
+#   glacier_api_key: Glacier API key for signature aggregation
+#   use_local_sig_agg: Use local signature aggregator instead of Glacier (default: false)
+#   icm_contracts_path: Path to icm-contracts repository
+
+- name: Validate required variables
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Validate rpc group exists
+      ansible.builtin.assert:
+        that:
+          - groups['rpc'] is defined
+          - groups['rpc'] | length > 0
+        fail_msg: "Inventory must have at least one node in 'rpc' group"
+
+    - name: Validate validators group exists
+      ansible.builtin.assert:
+        that:
+          - groups['validators'] is defined
+          - groups['validators'] | length > 0
+        fail_msg: "Inventory must have at least one node in 'validators' group"
+
+    - name: Check required variables
+      ansible.builtin.fail:
+        msg: "Missing required variable: {{ item }}"
+      when: vars[item] is not defined or vars[item] == ''
+      loop:
+        - subnet_id
+        - chain_id
+        - conversion_tx
+        - proxy_address
+        - evm_chain_id
+
+    - name: Set default values
+      ansible.builtin.set_fact:
+        manager_type: "{{ manager_type | default('poa') }}"
+        churn_period: "{{ churn_period | default(0) }}"
+        max_churn_percent: "{{ max_churn_percent | default(20) }}"
+        network: "{{ network | default('fuji') }}"
+        use_local_sig_agg: "{{ use_local_sig_agg | default(false) }}"
+
+- name: Verify prerequisites
+  hosts: localhost
+  gather_facts: true
+  tasks:
+    - name: Check for private key
+      ansible.builtin.fail:
+        msg: "AVALANCHE_PRIVATE_KEY environment variable is required"
+      when: lookup('env', 'AVALANCHE_PRIVATE_KEY') == ''
+
+    - name: Check for forge (foundry)
+      ansible.builtin.command: which forge
+      register: forge_check
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if forge not found
+      ansible.builtin.fail:
+        msg: |
+          Foundry is required but not installed.
+          Install with: curl -L https://foundry.paradigm.xyz | bash && foundryup
+      when: forge_check.rc != 0
+
+    - name: Check for cast (foundry)
+      ansible.builtin.command: which cast
+      register: cast_check
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if cast not found
+      ansible.builtin.fail:
+        msg: |
+          Foundry (cast) is required but not installed.
+          Install with: curl -L https://foundry.paradigm.xyz | bash && foundryup
+      when: cast_check.rc != 0
+
+    - name: Check for initialize-validator-manager tool
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../../tools/initialize-validator-manager/initialize-validator-manager"
+      register: tool_check
+
+    - name: Build initialize-validator-manager if needed
+      ansible.builtin.command: go build -o initialize-validator-manager .
+      args:
+        chdir: "{{ playbook_dir }}/../../tools/initialize-validator-manager"
+      when: not tool_check.stat.exists
+      changed_when: true
+
+- name: Get RPC endpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Get first RPC node IP
+      ansible.builtin.set_fact:
+        rpc_ip: "{{ hostvars[groups['rpc'][0]]['ansible_host'] }}"
+
+    - name: Build RPC URL
+      ansible.builtin.set_fact:
+        rpc_url: "http://{{ rpc_ip }}:9650/ext/bc/{{ chain_id }}/rpc"
+
+    - name: Display configuration
+      ansible.builtin.debug:
+        msg: |
+          === Validator Manager Initialization ===
+          Network:       {{ network }}
+          RPC URL:       {{ rpc_url }}
+          Subnet ID:     {{ subnet_id }}
+          Chain ID:      {{ chain_id }}
+          EVM Chain ID:  {{ evm_chain_id }}
+          Proxy Address: {{ proxy_address }}
+          Manager Type:  {{ manager_type }}
+          Conversion TX: {{ conversion_tx }}
+
+- name: Get validator IPs
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Build validator IP list
+      ansible.builtin.set_fact:
+        validator_ips: "{{ groups['validators'] | map('extract', hostvars, 'ansible_host') | join(',') }}"
+
+    - name: Display validator IPs
+      ansible.builtin.debug:
+        msg: "Validator IPs: {{ validator_ips }}"
+
+- name: Wait for L1 chain to be ready
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Wait for RPC to respond
+      ansible.builtin.uri:
+        url: "{{ rpc_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: eth_chainId
+          params: []
+          id: 1
+        status_code: 200
+      register: chain_check
+      retries: 30
+      delay: 10
+      until: chain_check.status == 200
+
+    - name: Verify chain ID matches
+      ansible.builtin.assert:
+        that:
+          - chain_check.json.result | int(base=16) == evm_chain_id | int
+        fail_msg: "Chain ID mismatch: expected {{ evm_chain_id }}, got {{ chain_check.json.result | int(base=16) }}"
+
+    - name: L1 chain is ready
+      ansible.builtin.debug:
+        msg: "L1 chain is ready (chainId: {{ evm_chain_id }})"
+
+- name: Initialize Validator Manager
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Build tool command
+      ansible.builtin.set_fact:
+        init_cmd: >-
+          {{ playbook_dir }}/../../tools/initialize-validator-manager/initialize-validator-manager
+          --rpc-url={{ rpc_url }}
+          --proxy-address={{ proxy_address }}
+          --subnet-id={{ subnet_id }}
+          --chain-id={{ chain_id }}
+          --conversion-tx={{ conversion_tx }}
+          --manager-type={{ manager_type }}
+          --network={{ network }}
+          --validator-ips={{ validator_ips }}
+          --churn-period={{ churn_period }}
+          --max-churn-percent={{ max_churn_percent }}
+          --output={{ playbook_dir }}/../../validator-manager.json
+          --json
+          {% if icm_contracts_path is defined and icm_contracts_path != '' %}
+          --contracts-path={{ icm_contracts_path }}
+          {% endif %}
+          {% if use_local_sig_agg | bool %}
+          --local-sig-agg
+          {% endif %}
+          {% if glacier_api_key is defined and glacier_api_key != '' %}
+          --glacier-api-key={{ glacier_api_key }}
+          {% endif %}
+
+    - name: Run initialize-validator-manager
+      ansible.builtin.command: "{{ init_cmd }}"
+      environment:
+        AVALANCHE_PRIVATE_KEY: "{{ lookup('env', 'AVALANCHE_PRIVATE_KEY') }}"
+        ICM_CONTRACTS_PATH: "{{ icm_contracts_path | default(lookup('env', 'ICM_CONTRACTS_PATH')) }}"
+        GLACIER_API_KEY: "{{ glacier_api_key | default(lookup('env', 'GLACIER_API_KEY')) }}"
+      register: init_result
+      changed_when: true
+
+    - name: Parse output
+      ansible.builtin.set_fact:
+        vm_output: "{{ init_result.stdout | from_json }}"
+
+    - name: Check for errors
+      ansible.builtin.fail:
+        msg: "Validator Manager initialization failed: {{ vm_output.error }}"
+      when: not vm_output.success
+
+    - name: Save output to file
+      ansible.builtin.copy:
+        content: "{{ vm_output | to_nice_json }}"
+        dest: "{{ playbook_dir }}/../../validator-manager.json"
+        mode: '0644'
+      delegate_to: localhost
+
+- name: Display Results
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Show completion message
+      ansible.builtin.debug:
+        msg: |
+
+          ============================================
+          Validator Manager Initialized Successfully!
+          ============================================
+
+          Implementation: {{ vm_output.implementation }}
+          Proxy:          {{ vm_output.proxy }}
+          {% if vm_output.poa_manager is defined and vm_output.poa_manager != '' %}
+          PoA Manager:    {{ vm_output.poa_manager }}
+          {% endif %}
+
+          Settings TX:    {{ vm_output.init_settings_tx | default('skipped') }}
+          Validators TX:  {{ vm_output.init_validators_tx | default('skipped') }}
+
+          Output saved:   validator-manager.json
+
+          ============================================
+
+          Your L1 validator manager is now active!
+          {% if manager_type == 'poa' %}
+
+          PoA Manager Commands:
+            - Add validator: call PoAManager.initializeValidatorRegistration()
+            - Remove validator: call PoAManager.initializeEndValidation()
+          {% endif %}
+
+          ============================================

@@ -1,0 +1,122 @@
+---
+# Backup Staking Keys to S3
+#
+# Backs up validator staking keys to S3 with KMS encryption.
+# Works with both L1 validators and Primary Network validators.
+# Can be run on demand or scheduled via cron.
+#
+# Usage:
+#   ansible-playbook playbooks/primary-network/backup-staking-keys.yml                    # All validators
+#   ansible-playbook playbooks/primary-network/backup-staking-keys.yml --limit validators # L1 only
+#   ansible-playbook playbooks/primary-network/backup-staking-keys.yml --limit primary_validators  # Primary only
+#   ansible-playbook playbooks/primary-network/backup-staking-keys.yml --limit validator-1  # Specific node
+#
+# Requirements:
+#   - S3 bucket and KMS key (created by Terraform with enable_staking_key_backup=true)
+#   - IAM instance profile attached to validators
+#   - AWS CLI installed on validators
+
+- name: Backup Staking Keys to S3
+  hosts: validators:primary_validators
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Verify S3 backup is configured
+      ansible.builtin.assert:
+        that:
+          - staking_keys_bucket is defined
+          - staking_keys_bucket != ""
+        fail_msg: "S3 backup not configured. Set staking_keys_bucket in inventory."
+
+    - name: Check for staking keys in configured path
+      ansible.builtin.stat:
+        path: /var/lib/avalanchego/staking/staker.crt
+      register: staker_crt_configured
+
+    - name: Check for staking keys in default path
+      ansible.builtin.stat:
+        path: /home/avalanche/.avalanchego/staking/staker.crt
+      register: staker_crt_default
+
+    - name: Set staking directory
+      ansible.builtin.set_fact:
+        staking_dir: "{{ '/var/lib/avalanchego/staking' if staker_crt_configured.stat.exists else '/home/avalanche/.avalanchego/staking' }}"
+
+    - name: Verify staking files exist
+      ansible.builtin.assert:
+        that:
+          - staker_crt_configured.stat.exists or staker_crt_default.stat.exists
+        fail_msg: "Staking keys not found in /var/lib/avalanchego/staking/ or ~/.avalanchego/staking/. Node may not be initialized yet."
+
+    - name: Get current timestamp
+      ansible.builtin.set_fact:
+        backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+
+    - name: Create backup archive
+      ansible.builtin.shell: |
+        set -euo pipefail
+        tar -czf /tmp/staking-keys-{{ inventory_hostname }}.tar.gz -C {{ staking_dir }} .
+        chmod 600 /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Upload current backup to S3
+      ansible.builtin.command: >
+        aws s3 cp /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
+        s3://{{ staking_keys_bucket }}/{{ inventory_hostname }}/staking-keys.tar.gz
+        --sse aws:kms
+        --sse-kms-key-id {{ staking_keys_kms_arn }}
+      register: s3_upload
+      changed_when: s3_upload.rc == 0
+
+    - name: Upload timestamped backup to S3
+      ansible.builtin.command: >
+        aws s3 cp /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
+        s3://{{ staking_keys_bucket }}/{{ inventory_hostname }}/backups/staking-keys-{{ backup_timestamp }}.tar.gz
+        --sse aws:kms
+        --sse-kms-key-id {{ staking_keys_kms_arn }}
+      register: s3_upload_timestamped
+      changed_when: s3_upload_timestamped.rc == 0
+
+    - name: Clean up temp file
+      ansible.builtin.file:
+        path: /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
+        state: absent
+
+    - name: Display backup status
+      ansible.builtin.debug:
+        msg: |
+          Staking keys backed up successfully!
+          Latest: s3://{{ staking_keys_bucket }}/{{ inventory_hostname }}/staking-keys.tar.gz
+          Archive: s3://{{ staking_keys_bucket }}/{{ inventory_hostname }}/backups/staking-keys-{{ backup_timestamp }}.tar.gz
+
+- name: Display summary
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Show backup summary
+      ansible.builtin.debug:
+        msg: |
+
+          ============================================
+          Staking Key Backup Complete
+          ============================================
+
+          Backed up keys for:
+          - L1 Validators: {{ groups['validators'] | default([]) | length }}
+          - Primary Network Validators: {{ groups['primary_validators'] | default([]) | length }}
+
+          To list backups:
+            aws s3 ls s3://<bucket>/<hostname>/backups/
+
+          To restore keys (Primary Network):
+            ansible-playbook playbooks/primary-network/migrate-validator.yml \
+              -e source_host=<old-host> \
+              -e target_host=<new-host>
+
+          To restore keys (L1):
+            ./scripts/primary-network/restore-staking-keys.sh <source-host> <target-ip>
+
+          ============================================

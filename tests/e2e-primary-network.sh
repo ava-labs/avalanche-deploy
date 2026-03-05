@@ -41,7 +41,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 # Primary network uses its own terraform directory and inventory
-PRIMARY_TF_DIR="terraform/aws-primary-network"
+PRIMARY_TF_DIR="terraform/primary-network/aws"
 PRIMARY_ANSIBLE_INVENTORY="inventory/aws_primary_hosts"
 
 # Colors
@@ -183,12 +183,12 @@ fi
 if [ "$DRY_RUN" = true ]; then
     section "Dry Run"
     log "Running script-level sanity checks..."
-    if bash -n scripts/check-primary-sync.sh \
-        scripts/backup-staking-keys.sh \
-        scripts/create-snapshot.sh \
-        scripts/restore-snapshot.sh \
-        scripts/list-snapshots.sh \
-        scripts/restore-staking-keys.sh; then
+    if bash -n scripts/primary-network/check-sync.sh \
+        scripts/primary-network/backup-staking-keys.sh \
+        scripts/primary-network/create-snapshot.sh \
+        scripts/primary-network/restore-snapshot.sh \
+        scripts/primary-network/list-snapshots.sh \
+        scripts/primary-network/restore-staking-keys.sh; then
         log_success "Primary operation scripts passed syntax checks"
     else
         log_error "Primary operation script syntax check failed"
@@ -259,7 +259,7 @@ fi
 section "Monitoring"
 
 log "Deploying Prometheus + Grafana..."
-if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/03-setup-monitoring.yml; then
+if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/shared/monitoring.yml; then
     cd "$REPO_ROOT"
     log_success "Monitoring deployed"
 else
@@ -280,7 +280,7 @@ else
     MAX_WAIT=1800  # 30 minutes
     WAITED=0
     while [ $WAITED -lt $MAX_WAIT ]; do
-        if ./scripts/check-primary-sync.sh "$PRIMARY_IP_1" 2>&1 | grep -q "P-Chain: SYNCED"; then
+        if ./scripts/primary-network/check-sync.sh "$PRIMARY_IP_1" 2>&1 | grep -q "P-Chain: SYNCED"; then
             log_success "P-Chain bootstrapped on primary-validator-1"
             break
         fi
@@ -296,13 +296,13 @@ else
 
     # Check X and C chains
     log "Checking X-Chain and C-Chain..."
-    if ./scripts/check-primary-sync.sh "$PRIMARY_IP_1" 2>&1 | grep -q "X-Chain: SYNCED"; then
+    if ./scripts/primary-network/check-sync.sh "$PRIMARY_IP_1" 2>&1 | grep -q "X-Chain: SYNCED"; then
         log_success "X-Chain bootstrapped"
     else
         log_warning "X-Chain not yet bootstrapped"
     fi
 
-    if ./scripts/check-primary-sync.sh "$PRIMARY_IP_1" 2>&1 | grep -q "C-Chain: SYNCED"; then
+    if ./scripts/primary-network/check-sync.sh "$PRIMARY_IP_1" 2>&1 | grep -q "C-Chain: SYNCED"; then
         log_success "C-Chain bootstrapped"
     else
         log_warning "C-Chain not yet bootstrapped"
@@ -323,7 +323,7 @@ else
     log "Current version: $CURRENT_VERSION"
 
     log "Upgrading to avalanchego v${UPGRADE_VERSION}..."
-    if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/upgrade-nodes.yml -e "avalanchego_version=$UPGRADE_VERSION"; then
+    if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/shared/upgrade-nodes.yml -e "avalanchego_version=$UPGRADE_VERSION"; then
         cd "$REPO_ROOT"
         log_success "Upgrade command completed"
     else
@@ -347,7 +347,7 @@ else
 
     # Verify health after upgrade
     log "Verifying health after upgrade..."
-    if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/health-checks.yml; then
+    if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/shared/health-checks.yml; then
         cd "$REPO_ROOT"
         log_success "Health checks passed after upgrade"
     else
@@ -363,7 +363,7 @@ if [ "$SKIP_SYNC_WAIT" = true ]; then
     log_warning "Skipping downgrade test (nodes not synced)"
 else
     log "Downgrading back to avalanchego v${DEPLOY_VERSION}..."
-    if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/upgrade-nodes.yml -e "avalanchego_version=$DEPLOY_VERSION"; then
+    if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/shared/upgrade-nodes.yml -e "avalanchego_version=$DEPLOY_VERSION"; then
         cd "$REPO_ROOT"
         log_success "Downgrade command completed"
     else
@@ -387,7 +387,7 @@ else
 
     # Verify health after downgrade
     log "Verifying health after downgrade..."
-    if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/health-checks.yml; then
+    if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/shared/health-checks.yml; then
         cd "$REPO_ROOT"
         log_success "Health checks passed after downgrade"
     else
@@ -492,7 +492,7 @@ fi
 section "Health Checks"
 
 log "Running health checks..."
-if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/health-checks.yml; then
+if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/shared/health-checks.yml; then
     cd "$REPO_ROOT"
     log_success "Health checks passed"
 else
@@ -504,7 +504,7 @@ fi
 section "Rolling Restart"
 
 log "Testing rolling restart..."
-if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/rolling-restart.yml; then
+if cd ansible && ansible-playbook -i "$PRIMARY_ANSIBLE_INVENTORY" playbooks/shared/rolling-restart.yml; then
     cd "$REPO_ROOT"
     log_success "Rolling restart completed"
 else

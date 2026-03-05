@@ -525,14 +525,14 @@
 
 - name: Copy contract deployment script
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../scripts/safe/deploy-contracts.sh"
+    src: "{{ playbook_dir }}/../../../scripts/l1/safe/deploy-contracts.sh"
     dest: "{{ safe_install_dir }}/deploy-contracts/deploy-contracts.sh"
     mode: '0755'
   when: safe_deploy_key is defined and safe_deploy_key != ""
 
 - name: Copy contract initcodes
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../scripts/safe/initcodes/"
+    src: "{{ playbook_dir }}/../../../scripts/l1/safe/initcodes/"
     dest: "{{ safe_install_dir }}/deploy-contracts/initcodes/"
     mode: '0644'
   when: safe_deploy_key is defined and safe_deploy_key != ""

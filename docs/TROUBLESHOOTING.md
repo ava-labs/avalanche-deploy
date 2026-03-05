@@ -115,7 +115,7 @@ ssh ubuntu@<node-ip> "curl -s localhost:9650/ext/health"
 
 **Solution:** Wait for full sync before migration:
 ```bash
-./scripts/check-primary-sync.sh <target-ip>
+./scripts/primary-network/check-sync.sh <target-ip>
 ```
 
 All chains must show `SYNCED`

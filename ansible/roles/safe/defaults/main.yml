@@ -41,7 +41,7 @@ safe_rabbitmq_user: "safe"
 safe_rabbitmq_password: ""
 
 # Safe contract addresses - canonical CREATE2 addresses from @safe-global/safe-deployments v1.4.1
-# Deployed at runtime via Singleton Factory (scripts/safe/deploy-contracts.sh)
+# Deployed at runtime via Singleton Factory (scripts/l1/safe/deploy-contracts.sh)
 #
 # To use custom addresses (e.g., for non-L2 Safe), override these in your playbook:
 #   safe_contracts:
