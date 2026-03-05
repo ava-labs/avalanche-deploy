@@ -399,7 +399,9 @@
 
     - name: Display snapshot status
       ansible.builtin.debug:
-        msg: "Snapshot uploaded: s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4 ({{ (snapshot_stat.stat.size / 1073741824) | round(2) }}GB)"
+        msg: >-
+          Snapshot uploaded: s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4
+          ({{ (snapshot_stat.stat.size / 1073741824) | round(2) }}GB)
 
 - name: Display summary
   hosts: localhost

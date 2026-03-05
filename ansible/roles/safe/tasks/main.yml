@@ -544,9 +544,19 @@
   failed_when: false
   when: safe_deploy_key is defined and safe_deploy_key != ""
 
+- name: Download Foundry installer
+  ansible.builtin.get_url:
+    url: https://foundry.paradigm.xyz
+    dest: /tmp/foundry-install.sh
+    mode: '0755'
+  when:
+    - safe_deploy_key is defined and safe_deploy_key != ""
+    - safe_cast_check.rc != 0
+
 - name: Install Foundry (if cast not available)
   ansible.builtin.shell: |
-    curl -L https://foundry.paradigm.xyz | bash
+    set -o pipefail
+    bash /tmp/foundry-install.sh
     export PATH="$HOME/.foundry/bin:$PATH"
     foundryup
   args:
