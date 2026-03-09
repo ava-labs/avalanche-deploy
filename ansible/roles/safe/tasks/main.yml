@@ -19,16 +19,19 @@
     src: "{{ safe_install_dir }}/.db_password"
   register: safe_existing_db_password
   when: safe_db_password_file.stat.exists
+  no_log: true
 
 - name: Generate new DB password
   ansible.builtin.set_fact:
     safe_db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
   when: not safe_db_password_file.stat.exists
+  no_log: true
 
 - name: Use existing DB password
   ansible.builtin.set_fact:
     safe_db_password: "{{ safe_existing_db_password.content | b64decode | trim }}"
   when: safe_db_password_file.stat.exists
+  no_log: true
 
 - name: Check for existing RabbitMQ password
   ansible.builtin.stat:
@@ -40,16 +43,19 @@
     src: "{{ safe_install_dir }}/.rabbitmq_password"
   register: safe_existing_rabbitmq_password
   when: safe_rabbitmq_password_file.stat.exists
+  no_log: true
 
 - name: Generate new RabbitMQ password
   ansible.builtin.set_fact:
     safe_rabbitmq_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
   when: not safe_rabbitmq_password_file.stat.exists
+  no_log: true
 
 - name: Use existing RabbitMQ password
   ansible.builtin.set_fact:
     safe_rabbitmq_password: "{{ safe_existing_rabbitmq_password.content | b64decode | trim }}"
   when: safe_rabbitmq_password_file.stat.exists
+  no_log: true
 
 # Django secret key generation - critical for session security
 - name: Check for existing TXS secret key
@@ -62,16 +68,19 @@
     src: "{{ safe_install_dir }}/.txs_secret_key"
   register: safe_existing_txs_secret
   when: safe_txs_secret_file.stat.exists
+  no_log: true
 
 - name: Generate new TXS secret key
   ansible.builtin.set_fact:
     safe_txs_secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
   when: not safe_txs_secret_file.stat.exists and (safe_txs_secret_key == "" or safe_txs_secret_key is not defined)
+  no_log: true
 
 - name: Use existing TXS secret key
   ansible.builtin.set_fact:
     safe_txs_secret_key: "{{ safe_existing_txs_secret.content | b64decode | trim }}"
   when: safe_txs_secret_file.stat.exists
+  no_log: true
 
 - name: Check for existing CFG secret key
   ansible.builtin.stat:
@@ -83,16 +92,19 @@
     src: "{{ safe_install_dir }}/.cfg_secret_key"
   register: safe_existing_cfg_secret
   when: safe_cfg_secret_file.stat.exists
+  no_log: true
 
 - name: Generate new CFG secret key
   ansible.builtin.set_fact:
     safe_cfg_secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
   when: not safe_cfg_secret_file.stat.exists and (safe_cfg_secret_key == "" or safe_cfg_secret_key is not defined)
+  no_log: true
 
 - name: Use existing CFG secret key
   ansible.builtin.set_fact:
     safe_cfg_secret_key: "{{ safe_existing_cfg_secret.content | b64decode | trim }}"
   when: safe_cfg_secret_file.stat.exists
+  no_log: true
 
 # Webhook token generation for CGW <-> Config Service
 - name: Check for existing webhook token
@@ -105,16 +117,19 @@
     src: "{{ safe_install_dir }}/.webhook_token"
   register: safe_existing_webhook_token
   when: safe_webhook_token_file.stat.exists
+  no_log: true
 
 - name: Generate new webhook token
   ansible.builtin.set_fact:
     safe_webhook_token: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
   when: not safe_webhook_token_file.stat.exists and (safe_webhook_token == "" or safe_webhook_token is not defined)
+  no_log: true
 
 - name: Use existing webhook token
   ansible.builtin.set_fact:
     safe_webhook_token: "{{ safe_existing_webhook_token.content | b64decode | trim }}"
   when: safe_webhook_token_file.stat.exists
+  no_log: true
 
 - name: Check if Docker is installed
   ansible.builtin.command: docker --version
@@ -167,30 +182,35 @@
     content: "{{ safe_db_password }}"
     dest: "{{ safe_install_dir }}/.db_password"
     mode: '0600'
+  no_log: true
 
 - name: Generate RabbitMQ password file
   ansible.builtin.copy:
     content: "{{ safe_rabbitmq_password }}"
     dest: "{{ safe_install_dir }}/.rabbitmq_password"
     mode: '0600'
+  no_log: true
 
 - name: Save TXS secret key
   ansible.builtin.copy:
     content: "{{ safe_txs_secret_key }}"
     dest: "{{ safe_install_dir }}/.txs_secret_key"
     mode: '0600'
+  no_log: true
 
 - name: Save CFG secret key
   ansible.builtin.copy:
     content: "{{ safe_cfg_secret_key }}"
     dest: "{{ safe_install_dir }}/.cfg_secret_key"
     mode: '0600'
+  no_log: true
 
 - name: Save webhook token
   ansible.builtin.copy:
     content: "{{ safe_webhook_token }}"
     dest: "{{ safe_install_dir }}/.webhook_token"
     mode: '0600'
+  no_log: true
 
 - name: Template docker-compose.yml
   ansible.builtin.template:
@@ -204,6 +224,7 @@
     src: txs.env.j2
     dest: "{{ safe_install_dir }}/txs.env"
     mode: '0600'
+  no_log: true
   notify: Restart safe services
 
 - name: Template Config Service environment
@@ -211,6 +232,7 @@
     src: cfg.env.j2
     dest: "{{ safe_install_dir }}/cfg.env"
     mode: '0600'
+  no_log: true
   notify: Restart safe services
 
 - name: Template Client Gateway environment
@@ -218,6 +240,7 @@
     src: cgw.env.j2
     dest: "{{ safe_install_dir }}/cgw.env"
     mode: '0600'
+  no_log: true
   notify: Restart safe services
 
 - name: Template UI environment
@@ -578,6 +601,7 @@
   register: safe_contract_deploy
   when: safe_deploy_key is defined and safe_deploy_key != ""
   changed_when: "'deployed' in safe_contract_deploy.stdout"
+  no_log: true
 
 - name: Show contract deployment result
   ansible.builtin.debug:

@@ -12,7 +12,7 @@ grafana_port: 3000
 # Authentication
 grafana_anonymous_enabled: true
 grafana_admin_user: admin
-grafana_admin_password: admin
+grafana_admin_password: admin  # Override this in production! Default is insecure.
 
 # Prometheus datasource
 grafana_prometheus_url: "http://localhost:9090"

@@ -79,6 +79,7 @@
     owner: icmrelayer
     group: icmrelayer
     mode: '0600'
+  no_log: true
   notify: Restart icm-relayer
 
 - name: Create docker-compose file

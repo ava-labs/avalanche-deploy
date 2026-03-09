@@ -81,6 +81,7 @@
     owner: faucet
     group: faucet
     mode: '0600'
+  no_log: true
 
 - name: Create faucet systemd service
   ansible.builtin.template:
