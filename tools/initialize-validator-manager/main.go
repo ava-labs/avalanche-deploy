@@ -174,6 +174,7 @@ func run() error {
 	}
 
 	var implAddress string
+	var libAddress string
 
 	// Step 1: Deploy ValidatorManager implementation
 	if !skipDeploy {
@@ -181,13 +182,14 @@ func run() error {
 			fmt.Println("[1/4] Deploying ValidatorManager implementation...")
 		}
 
-		implAddress, err = deployImplementation(ctx, contractsPath, rpcURL, privKeyHex, managerType)
+		implAddress, libAddress, err = deployImplementation(ctx, contractsPath, rpcURL, privKeyHex, managerType)
 		if err != nil {
 			return fmt.Errorf("failed to deploy implementation: %w", err)
 		}
 		output.Implementation = implAddress
 
 		if !jsonOutput {
+			fmt.Printf("  ValidatorMessages library: %s\n", libAddress)
 			fmt.Printf("  Implementation: %s\n", implAddress)
 		}
 	} else {
@@ -244,7 +246,7 @@ func run() error {
 			fmt.Println("  Deploying PoAManager...")
 		}
 
-		poaAddress, err := deployPoAManager(ctx, contractsPath, rpcURL, privKeyHex, ownerAddress, proxyAddress)
+		poaAddress, err := deployPoAManager(ctx, contractsPath, rpcURL, privKeyHex, ownerAddress, proxyAddress, libAddress)
 		if err != nil {
 			return fmt.Errorf("failed to deploy PoAManager: %w", err)
 		}
@@ -389,7 +391,22 @@ func getAddressFromPrivateKey(privKeyHex string) (string, error) {
 	return privKey.Address().String(), nil
 }
 
-func deployImplementation(ctx context.Context, contractsPath, rpcURL, privKey, managerType string) (string, error) {
+// validatorMessagesLibraryFlag returns the --libraries flag for linking ValidatorMessages.
+func validatorMessagesLibraryFlag(libAddr string) string {
+	return fmt.Sprintf("--libraries=src/validator-manager/ValidatorMessages.sol:ValidatorMessages:%s", libAddr)
+}
+
+func deployImplementation(ctx context.Context, contractsPath, rpcURL, privKey, managerType string) (implAddr string, libAddr string, err error) {
+	// Deploy ValidatorMessages library first (required by all ValidatorManager variants).
+	// Foundry no longer supports automatic dynamic linking in forge create.
+	libAddr, err = forgeCreate(ctx, contractsPath, rpcURL, privKey,
+		"src/validator-manager/ValidatorMessages.sol:ValidatorMessages")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to deploy ValidatorMessages library: %w", err)
+	}
+
+	librariesFlag := validatorMessagesLibraryFlag(libAddr)
+
 	var contract string
 	switch managerType {
 	case "poa":
@@ -399,11 +416,12 @@ func deployImplementation(ctx context.Context, contractsPath, rpcURL, privKey, m
 	case "erc20-staking":
 		contract = "src/validator-manager/ERC20TokenStakingManager.sol:ERC20TokenStakingManager"
 	default:
-		return "", fmt.Errorf("unknown manager type: %s", managerType)
+		return "", "", fmt.Errorf("unknown manager type: %s", managerType)
 	}
 
 	// Deploy with ICMInitializable.Allowed = 0
-	return forgeCreate(ctx, contractsPath, rpcURL, privKey, contract, "--constructor-args", "0")
+	implAddr, err = forgeCreate(ctx, contractsPath, rpcURL, privKey, contract, librariesFlag, "--constructor-args", "0")
+	return implAddr, libAddr, err
 }
 
 func upgradeProxy(ctx context.Context, contractsPath, rpcURL, privKey, proxyAddress, implAddress string) error {
@@ -422,10 +440,14 @@ func initializeSettings(ctx context.Context, contractsPath, rpcURL, privKey, pro
 	return castSend(ctx, rpcURL, privKey, proxyAddress, "initialize((address,bytes32,uint64,uint8))", settingsTuple)
 }
 
-func deployPoAManager(ctx context.Context, contractsPath, rpcURL, privKey, owner, validatorManager string) (string, error) {
+func deployPoAManager(ctx context.Context, contractsPath, rpcURL, privKey, owner, validatorManager, libAddr string) (string, error) {
+	args := []string{"--constructor-args", owner, validatorManager}
+	if libAddr != "" {
+		args = append([]string{validatorMessagesLibraryFlag(libAddr)}, args...)
+	}
 	return forgeCreate(ctx, contractsPath, rpcURL, privKey,
 		"src/validator-manager/PoAValidatorManager.sol:PoAValidatorManager",
-		"--constructor-args", owner, validatorManager)
+		args...)
 }
 
 func transferOwnership(ctx context.Context, contractsPath, rpcURL, privKey, proxyAddress, newOwner string) error {
