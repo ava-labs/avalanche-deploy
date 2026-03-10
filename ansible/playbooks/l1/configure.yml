@@ -80,7 +80,7 @@
       ansible.builtin.set_fact:
         avalanchego_custom_node_config: >-
           {{
-            lookup('file', playbook_dir + '/../../configs/l1/node/' + avalanchego_node_type + '-node-config.json')
+            lookup('file', playbook_dir + '/../../../configs/l1/node/' + avalanchego_node_type + '-node-config.json')
             | from_json
           }}
       failed_when: false
@@ -149,7 +149,7 @@
 
     - name: Check if specific chain config exists
       ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../../configs/l1/chain/{{ chain_config_file | trim }}"
+        path: "{{ playbook_dir }}/../../../configs/l1/chain/{{ chain_config_file | trim }}"
       register: specific_config
       delegate_to: localhost
       become: false
@@ -162,7 +162,7 @@
 
     - name: Copy chain config (validator or RPC specific)
       ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../../configs/l1/chain/{{ chain_config_file | trim }}"
+        src: "{{ playbook_dir }}/../../../configs/l1/chain/{{ chain_config_file | trim }}"
         dest: "{{ avalanchego_config_dir }}/chains/{{ chain_id }}/config.json"
         owner: "{{ avalanchego_user }}"
         group: "{{ avalanchego_group }}"
@@ -225,13 +225,13 @@
 
     - name: Check for genesis file
       ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../../configs/l1/genesis/genesis.json"
+        path: "{{ playbook_dir }}/../../../configs/l1/genesis/genesis.json"
       register: genesis_file
       when: not (skip_erpc | default(false) | bool)
 
     - name: Read genesis and extract EVM chain ID
       ansible.builtin.set_fact:
-        erpc_evm_chain_id: "{{ (lookup('file', playbook_dir + '/../../configs/l1/genesis/genesis.json') | from_json).config.chainId }}"
+        erpc_evm_chain_id: "{{ (lookup('file', playbook_dir + '/../../../configs/l1/genesis/genesis.json') | from_json).config.chainId }}"
       when:
         - not (skip_erpc | default(false) | bool)
         - genesis_file.stat.exists | default(false)
