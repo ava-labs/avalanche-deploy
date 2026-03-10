@@ -113,7 +113,7 @@
 - name: Deploy eRPC
   hosts: monitoring[0]:rpc[0]
   become: true
-  gather_facts: false
+  gather_facts: true
 
   pre_tasks:
     - name: Determine whether this host should run eRPC deployment
