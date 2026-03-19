@@ -179,21 +179,17 @@ def main():
         'NATIVE_WALLETCONNECT', 'SAFE_141',
         'SAFE_APPS', 'SAFE_TX_GAS_OPTIONAL', 'SPENDING_LIMIT',
     ]
+    added = 0
     for key in default_features:
         try:
             feature, _ = Feature.objects.get_or_create(
-                key=key, defaults={'description': key, 'scope': 'PER_CHAIN'}
+                key=key, defaults={'description': key}
             )
-            # CFG v2.92+ uses feature.chains M2M; v2.91.x uses chain.feature_set M2M
-            if hasattr(feature, 'chains'):
-                feature.chains.add(chain)
-            elif hasattr(chain, 'feature_set'):
-                chain.feature_set.add(feature)
-            else:
-                print(f"  WARNING: Could not add feature {key} - unknown ORM relationship")
+            chain.feature_set.add(feature)
+            added += 1
         except Exception as e:
             print(f"  WARNING: Could not add feature {key}: {e}")
-    print(f"  Enabled {len(default_features)} features")
+    print(f"  Enabled {added}/{len(default_features)} features")
 
     print("\nDone.")
     return 0
