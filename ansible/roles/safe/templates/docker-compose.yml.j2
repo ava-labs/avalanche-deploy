@@ -82,7 +82,7 @@ services:
 
   # Transaction Service - Web
   txs-web:
-    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}
+    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}@{{ safe_txs_digest }}
     container_name: safe-txs-web
     env_file:
       - {{ safe_install_dir }}/txs.env
@@ -104,7 +104,7 @@ services:
 
   # Transaction Service - Worker: indexing
   txs-worker-indexer:
-    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}
+    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}@{{ safe_txs_digest }}
     container_name: safe-txs-worker-indexer
     env_file:
       - {{ safe_install_dir }}/txs.env
@@ -119,7 +119,7 @@ services:
 
   # Transaction Service - Worker: contracts & tokens
   txs-worker-contracts-tokens:
-    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}
+    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}@{{ safe_txs_digest }}
     container_name: safe-txs-worker-contracts-tokens
     env_file:
       - {{ safe_install_dir }}/txs.env
@@ -134,7 +134,7 @@ services:
 
   # Transaction Service - Worker: notifications & webhooks
   txs-worker-notifications:
-    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}
+    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}@{{ safe_txs_digest }}
     container_name: safe-txs-worker-notifications
     env_file:
       - {{ safe_install_dir }}/txs.env
@@ -149,7 +149,7 @@ services:
 
   # Transaction Service - Scheduler (Celery Beat)
   txs-scheduler:
-    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}
+    image: safeglobal/safe-transaction-service:{{ safe_txs_version }}@{{ safe_txs_digest }}
     container_name: safe-txs-scheduler
     env_file:
       - {{ safe_install_dir }}/txs.env
@@ -162,7 +162,7 @@ services:
 
   # Config Service
   cfg:
-    image: safeglobal/safe-config-service:{{ safe_cfg_version }}
+    image: safeglobal/safe-config-service:{{ safe_cfg_version }}@{{ safe_cfg_digest }}
     container_name: safe-cfg
     env_file:
       - {{ safe_install_dir }}/cfg.env
@@ -178,7 +178,7 @@ services:
 
   # Client Gateway (nest)
   cgw:
-    image: {{ safe_cgw_image }}:{{ safe_cgw_version }}
+    image: {{ safe_cgw_image }}:{{ safe_cgw_version }}@{{ safe_cgw_digest }}
     container_name: safe-cgw
     env_file:
       - {{ safe_install_dir }}/cgw.env

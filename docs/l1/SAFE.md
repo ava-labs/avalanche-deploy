@@ -153,6 +153,21 @@ systemctl status safe
 docker ps --format "table {{.Names}}\t{{.Status}}"
 ```
 
+### Balance not showing / Safe creation fails silently
+
+If the UI loads and you can connect your wallet but your balance doesn't display and Safe creation shows "Error creating the Safe Account", the issue is almost always the **wallet's RPC URL**.
+
+Self-signed SSL certificates (the default) work for browser page navigation but wallets (Core, MetaMask, Rabby) silently reject HTTPS RPC calls to endpoints with untrusted certs.
+
+**Fix:** Configure your wallet's RPC for the chain to use the direct HTTP URL:
+```
+http://<rpc-node-ip>:9650/ext/bc/<CHAIN_ID>/rpc
+```
+
+NOT the HTTPS proxy (`https://<rpc-node-ip>/rpc`).
+
+For production, use a real domain with Let's Encrypt (`safe_use_letsencrypt: true`) to eliminate this issue entirely.
+
 ### Database issues
 
 Reset databases (WARNING: destroys all Safe data):

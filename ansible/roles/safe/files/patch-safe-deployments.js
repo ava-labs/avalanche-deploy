@@ -3,9 +3,13 @@
  * Patch @safe-global/safe-deployments to add a custom chain.
  * Run inside the safe-wallet-web container BEFORE 'yarn build'.
  *
- * This adds the chain ID to all v1.4.1 contract networkAddresses,
- * using the canonical CREATE2 address (defaultAddress) for each contract.
- * This is equivalent to what AshAvalanche does with their safe-deployments fork.
+ * Handles BOTH JSON format versions:
+ *   V1 (old): { "defaultAddress": "0x...", "networkAddresses": { "1": "0x..." } }
+ *   V2 (new): { "deployments": { "canonical": { "address": "0x..." } },
+ *              "networkAddresses": { "1": "canonical" } }
+ *
+ * For V1: adds chainId -> defaultAddress
+ * For V2: adds chainId -> "canonical" (the key in the deployments map)
  *
  * Usage: node patch-safe-deployments.js <chain_id>
  */
@@ -55,9 +59,39 @@ console.log(`Found ${assetsDirs.length} safe-deployments copies:`);
 assetsDirs.forEach(d => console.log(`  ${d}`));
 console.log('');
 
-// Patch all contract versions (v1.3.0 and v1.4.1) in ALL copies
+/**
+ * Resolve the canonical address entry for a deployment JSON file.
+ * Returns the value to insert into networkAddresses[chainId].
+ *
+ * V1 format: returns the defaultAddress string (e.g., "0x29fc...")
+ * V2 format: returns the deployment type key (e.g., "canonical")
+ *            which references deployments.canonical.address
+ */
+function resolveCanonicalEntry(data) {
+  // V2 format: has "deployments" object with named entries like "canonical", "zksync"
+  if (data.deployments && data.networkAddresses) {
+    // Use whatever chain 1 (Ethereum mainnet) uses — it's always the canonical deployment
+    const mainnetEntry = data.networkAddresses['1'];
+    if (mainnetEntry) return mainnetEntry;
+
+    // Fallback: first key in deployments (usually "canonical")
+    const firstKey = Object.keys(data.deployments)[0];
+    if (firstKey) return firstKey;
+  }
+
+  // V1 format: has "defaultAddress" as a flat hex string
+  if (data.defaultAddress && data.networkAddresses) {
+    return data.defaultAddress;
+  }
+
+  return null;
+}
+
+// Patch all contract versions in ALL copies
 const versions = ['v1.3.0', 'v1.4.1'];
 let totalPatched = 0;
+let totalSkipped = 0;
+let totalFailed = 0;
 
 for (const assetsDir of assetsDirs) {
   for (const version of versions) {
@@ -72,15 +106,27 @@ for (const assetsDir of assetsDirs) {
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
-        if (data.networkAddresses && data.defaultAddress) {
-          if (data.networkAddresses[chainId]) continue; // already patched
+        if (!data.networkAddresses) continue;
 
-          data.networkAddresses[chainId] = data.defaultAddress;
-          fs.writeFileSync(filePath, JSON.stringify(data));
-          versionPatched++;
+        // Already patched for this chain
+        if (data.networkAddresses[chainId]) {
+          totalSkipped++;
+          continue;
         }
+
+        const entry = resolveCanonicalEntry(data);
+        if (!entry) {
+          console.error(`  WARNING: ${file} - could not resolve canonical entry (unknown format)`);
+          totalFailed++;
+          continue;
+        }
+
+        data.networkAddresses[chainId] = entry;
+        fs.writeFileSync(filePath, JSON.stringify(data));
+        versionPatched++;
       } catch (e) {
         console.error(`  WARNING: Failed to patch ${file}: ${e.message}`);
+        totalFailed++;
       }
     }
 
@@ -91,9 +137,15 @@ for (const assetsDir of assetsDirs) {
   }
 }
 
-console.log(`\nTotal: ${totalPatched} contracts patched across ${assetsDirs.length} copies for chain ${chainId}\n`);
+console.log(`\nTotal: ${totalPatched} patched, ${totalSkipped} already patched, ${totalFailed} failed`);
+console.log(`Across ${assetsDirs.length} safe-deployments copies for chain ${chainId}\n`);
 
-if (totalPatched === 0) {
-  console.error('ERROR: No contracts were patched!');
+if (totalPatched === 0 && totalSkipped === 0) {
+  console.error('ERROR: No contracts were patched or found!');
   process.exit(1);
+}
+
+if (totalFailed > 0) {
+  console.error(`WARNING: ${totalFailed} files could not be patched`);
+  // Don't exit 1 here — partial patching is better than no patching
 }

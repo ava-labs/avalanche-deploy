@@ -9,9 +9,17 @@ metadata:
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+    # Relay interception: return clean 404 for relay requests (no Gelato on self-hosted).
+    # Safe UI v1.31.0 may check relay availability during Safe creation. Without this,
+    # the CGW relay module returns 500 errors and the UI shows an unhandled error.
+    #
     # Estimation endpoint rewrite: Safe UI calls CGW estimation endpoint
     # which was removed in CGW v1.80+. Proxy directly to TXS API.
     nginx.ingress.kubernetes.io/configuration-snippet: |
+      location ~ ^/cgw/v1/chains/[0-9]+/relay {
+        default_type application/json;
+        return 404 '{"message":"Relay service not available","statusCode":404}';
+      }
       location ~ ^/cgw/v1/chains/[0-9]+/safes/(0x[a-fA-F0-9]+)/multisig-transactions/estimations$ {
         rewrite ^/cgw/v1/chains/[0-9]+/safes/(0x[a-fA-F0-9]+)/multisig-transactions/estimations$ /api/v1/safes/$1/multisig-transactions/estimations/ break;
         proxy_pass http://{{ include "safe.fullname" . }}-txs:8888;

@@ -166,19 +166,33 @@ def main():
         print(f"  Warning: Could not create gas price config: {e}")
 
     # Add chain to default features (and create if missing)
+    # SAFE_141: Required for v1.4.1 contract support - without this, the UI may
+    #   fall back to v1.3.0 contract addresses which are NOT deployed on the chain.
+    # SAFE_TX_GAS_OPTIONAL: Required for L2/custom chains - allows safeTxGas=0
+    #   in transactions, which is the correct behavior for chains with instant finality.
+    # NATIVE_WALLETCONNECT: Enables native WalletConnect v2 support in the UI.
+    # Do NOT add COUNTERFACTUAL without a relay service (Gelato) - it causes the UI
+    #   to POST /relay which will 422 without proper Gelato integration.
     default_features = [
         'CONTRACT_INTERACTION', 'DEFAULT_TOKENLIST',
         'DOMAIN_LOOKUP', 'EIP_1559', 'ERC721', 'ERC1155',
-        'SAFE_APPS', 'SPENDING_LIMIT',
+        'NATIVE_WALLETCONNECT', 'SAFE_141',
+        'SAFE_APPS', 'SAFE_TX_GAS_OPTIONAL', 'SPENDING_LIMIT',
     ]
     for key in default_features:
         try:
             feature, _ = Feature.objects.get_or_create(
                 key=key, defaults={'description': key, 'scope': 'PER_CHAIN'}
             )
-            feature.chains.add(chain)
-        except Exception:
-            pass
+            # CFG v2.92+ uses feature.chains M2M; v2.91.x uses chain.feature_set M2M
+            if hasattr(feature, 'chains'):
+                feature.chains.add(chain)
+            elif hasattr(chain, 'feature_set'):
+                chain.feature_set.add(feature)
+            else:
+                print(f"  WARNING: Could not add feature {key} - unknown ORM relationship")
+        except Exception as e:
+            print(f"  WARNING: Could not add feature {key}: {e}")
     print(f"  Enabled {len(default_features)} features")
 
     print("\nDone.")

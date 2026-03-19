@@ -321,7 +321,7 @@
     docker run --name safe-ui-build \
       -v /tmp/safe-ui-scripts:/scripts:ro \
       --entrypoint="" \
-      safeglobal/safe-wallet-web:{{ safe_ui_version }} \
+      safeglobal/safe-wallet-web:{{ safe_ui_version }}@{{ safe_ui_digest }} \
       sh -c "cp /scripts/env.production /app/.env.production && node /scripts/patch-safe-deployments.js {{ evm_chain_id }} && yarn build"
 
     # Extract the built files

@@ -69,6 +69,16 @@ server {
     # Max upload size
     client_max_body_size 10M;
 
+    # Intercept relay requests - return clean 404 (no relay service on self-hosted)
+    # Safe UI v1.31.0 may check relay availability during Safe creation.
+    # Without this, the CGW relay module returns 500 errors because Gelato API keys
+    # are set to "disabled" (not valid), and the UI shows an unhandled error.
+    # Returning a clean 404 lets the UI fall back to standard (user-pays-gas) creation.
+    location ~ ^/cgw/v1/chains/[0-9]+/relay {
+        default_type application/json;
+        return 404 '{"message":"Relay service not available","statusCode":404}';
+    }
+
     # Bridge: Safe UI calls old CGW estimation endpoint, proxy directly to TXS
     # CGW v1.80+ removed this endpoint; the old UI still calls it for gas estimation
     location ~ ^/cgw/v1/chains/[0-9]+/safes/(0x[a-fA-F0-9]+)/multisig-transactions/estimations$ {

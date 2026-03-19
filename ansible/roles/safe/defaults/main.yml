@@ -18,12 +18,21 @@ safe_native_currency_name: "AVAX"
 safe_native_currency_symbol: "AVAX"
 safe_native_currency_decimals: 18
 
-# Docker image versions (Safe Global official images)
-safe_txs_version: "v5.42.1"
-safe_cfg_version: "v2.92.1"
-safe_cgw_version: "v1.102.0"
+# Docker image versions — pinned by SHA digest to prevent silent breakage.
+# These are the exact versions used by AshAvalanche (wallet.ash.center) which are
+# proven to work on multiple live Avalanche L1s (DFK, Lamina1, Hatchyverse, Wagmi).
+# Do NOT upgrade without testing Safe creation on a custom chain end-to-end.
+#
+# To find digests: docker manifest inspect safeglobal/safe-wallet-web:v1.32.1
+safe_txs_version: "v5.40.1"
+safe_txs_digest: "sha256:79db885334994d4c0af715af0b50f9b72294e87336adafae4f6bcae5610158b7"
+safe_cfg_version: "v2.91.0"
+safe_cfg_digest: "sha256:ffca3f13431f7c778add7361c9f72104adece96142fb86698475d5eb27b83d3c"
+safe_cgw_version: "v1.96.0"
+safe_cgw_digest: "sha256:6d74a6b02fff36e94779f3441f3bcbab44408a0bb2ed4088f0a4e0f658c4056a"
 safe_cgw_image: "safeglobal/safe-client-gateway-nest"
-safe_ui_version: "v1.31.0"
+safe_ui_version: "v1.32.1"
+safe_ui_digest: "sha256:af16e7b074d3d4f2bc5a4e8fb978afe44a4cfbf7b4a49444b097b4b032807637"
 
 # Database configuration
 safe_txs_db_name: "safe_txs"
