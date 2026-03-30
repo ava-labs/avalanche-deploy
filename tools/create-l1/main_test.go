@@ -212,7 +212,7 @@ func TestLoadPrivateKeyFromKeystoreByName(t *testing.T) {
 	}
 }
 
-func TestLoadPrivateKeyPrefersDefaultKeystoreOverEnv(t *testing.T) {
+func TestLoadPrivateKeyPrefersEnvOverDefaultKeystore(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	ks, err := pkgkeystore.Load()
@@ -246,12 +246,16 @@ func TestLoadPrivateKeyPrefersDefaultKeystoreOverEnv(t *testing.T) {
 		t.Fatalf("loadPrivateKey() error = %v", err)
 	}
 
-	want, err := secp256k1.ToPrivateKey(defaultKeyBytes)
+	envKeyBytes, err := hex.DecodeString(envKeyHex)
 	if err != nil {
-		t.Fatalf("secp256k1.ToPrivateKey(default) error = %v", err)
+		t.Fatalf("hex.DecodeString(env) error = %v", err)
+	}
+	want, err := secp256k1.ToPrivateKey(envKeyBytes)
+	if err != nil {
+		t.Fatalf("secp256k1.ToPrivateKey(env) error = %v", err)
 	}
 	if got.Address() != want.Address() {
-		t.Fatalf("loadPrivateKey() address = %s, want default key address %s", got.Address(), want.Address())
+		t.Fatalf("loadPrivateKey() address = %s, want env key address %s", got.Address(), want.Address())
 	}
 }
 
