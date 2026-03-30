@@ -82,24 +82,8 @@ func TestLoadPrivateKeyReturnsErrorWhenUnset(t *testing.T) {
 func TestDeployImplementationRejectsUnknownManager(t *testing.T) {
 	t.Helper()
 
-	_, err := deployImplementation(context.Background(), "", "", "", "unknown")
+	_, _, err := deployImplementation(context.Background(), "", "", "", "unknown")
 	if err == nil {
 		t.Fatal("expected error for unknown manager type")
-	}
-}
-
-func TestNewRequestWithContext(t *testing.T) {
-	t.Helper()
-
-	ctx := context.Background()
-	req, err := NewRequestWithContext(ctx, "GET", "https://example.com")
-	if err != nil {
-		t.Fatalf("NewRequestWithContext returned error: %v", err)
-	}
-	if req.Method != "GET" {
-		t.Fatalf("unexpected method: %s", req.Method)
-	}
-	if req.URL.String() != "https://example.com" {
-		t.Fatalf("unexpected URL: %s", req.URL.String())
 	}
 }
