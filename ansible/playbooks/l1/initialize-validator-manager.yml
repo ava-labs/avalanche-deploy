@@ -111,13 +111,13 @@
 
     - name: Check for initialize-validator-manager tool
       ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../../tools/initialize-validator-manager/initialize-validator-manager"
+        path: "{{ playbook_dir }}/../../../tools/initialize-validator-manager/initialize-validator-manager"
       register: tool_check
 
     - name: Build initialize-validator-manager if needed
       ansible.builtin.command: go build -o initialize-validator-manager .
       args:
-        chdir: "{{ playbook_dir }}/../../tools/initialize-validator-manager"
+        chdir: "{{ playbook_dir }}/../../../tools/initialize-validator-manager"
       when: not tool_check.stat.exists
       changed_when: true
 
@@ -195,7 +195,7 @@
     - name: Build tool command
       ansible.builtin.set_fact:
         init_cmd: >-
-          {{ playbook_dir }}/../../tools/initialize-validator-manager/initialize-validator-manager
+          {{ playbook_dir }}/../../../tools/initialize-validator-manager/initialize-validator-manager
           --rpc-url={{ rpc_url }}
           --proxy-address={{ proxy_address }}
           --subnet-id={{ subnet_id }}
@@ -206,7 +206,7 @@
           --validator-ips={{ validator_ips }}
           --churn-period={{ churn_period }}
           --max-churn-percent={{ max_churn_percent }}
-          --output={{ playbook_dir }}/../../validator-manager.json
+          --output={{ playbook_dir }}/../../../validator-manager.json
           --json
           {% if icm_contracts_path is defined and icm_contracts_path != '' %}
           --contracts-path={{ icm_contracts_path }}
@@ -239,7 +239,7 @@
     - name: Save output to file
       ansible.builtin.copy:
         content: "{{ vm_output | to_nice_json }}"
-        dest: "{{ playbook_dir }}/../../validator-manager.json"
+        dest: "{{ playbook_dir }}/../../../validator-manager.json"
         mode: '0644'
       delegate_to: localhost
 

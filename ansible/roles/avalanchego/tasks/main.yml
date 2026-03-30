@@ -116,10 +116,10 @@
   ansible.builtin.set_fact:
     avalanchego_custom_node_config_path: >-
       {{
-        (playbook_dir + '/../../configs/primary-network/node/' + avalanchego_node_type + '-node-config.json')
+        (playbook_dir + '/../../../configs/primary-network/node/' + avalanchego_node_type + '-node-config.json')
         if avalanchego_node_type in ['primary-validator', 'primary-network']
         else
-        (playbook_dir + '/../../configs/l1/node/' + avalanchego_node_type + '-node-config.json')
+        (playbook_dir + '/../../../configs/l1/node/' + avalanchego_node_type + '-node-config.json')
       }}
 
 - name: Load custom node config from repository config directory

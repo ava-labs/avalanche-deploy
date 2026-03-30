@@ -82,7 +82,7 @@ monitoring-1 ansible_host=${azurerm_public_ip.monitoring.ip_address} ansible_use
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
 EOT
-  filename = "${path.module}/../../ansible/inventory/azure_hosts"
+  filename = "${path.module}/../../../ansible/inventory/azure_hosts"
 }
 
 resource "local_file" "env_file" {
@@ -96,5 +96,5 @@ VALIDATOR_${i + 1}_IP=${ip}
 RPC_${i + 1}_IP=${ip}
 %{endfor~}
 EOT
-  filename = "${path.module}/../../.env"
+  filename = "${path.module}/../../../.env"
 }

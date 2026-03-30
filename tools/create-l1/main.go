@@ -703,15 +703,11 @@ NETWORK=%s
 }
 
 func loadPrivateKey() (*secp256k1.PrivateKey, error) {
-	// Priority: key manager (--key-name) > default key > env fallback.
+	// Priority: --key-name flag > AVALANCHE_PRIVATE_KEY env > keystore default key.
 	if keyName != "" {
 		return loadPrivateKeyFromKeystore(keyName)
 	}
-	if ks, err := pkgkeystore.Load(); err == nil {
-		if defaultKey := ks.GetDefault(); defaultKey != "" {
-			return loadPrivateKeyFromKeystore(defaultKey)
-		}
-	}
+
 	// Check for balance override from env.
 	if envBalance := os.Getenv("L1_VALIDATOR_BALANCE_AVAX"); envBalance != "" && balanceAVAX == 1.0 {
 		if val, err := parseFloat64(envBalance); err == nil {
@@ -719,18 +715,25 @@ func loadPrivateKey() (*secp256k1.PrivateKey, error) {
 		}
 	}
 
+	// Environment variable takes precedence over keystore default
+	// so that CI/CD and scripted deployments work predictably.
 	envKey := os.Getenv("AVALANCHE_PRIVATE_KEY")
-	if envKey == "" {
-		return nil, fmt.Errorf("no key provided. Use --key-name (preferred), set a platform-cli default key, or AVALANCHE_PRIVATE_KEY env var")
+	if envKey != "" {
+		keyBytes, err := pkgwallet.ParsePrivateKey(envKey)
+		if err != nil {
+			return nil, err
+		}
+		return pkgwallet.ToPrivateKey(keyBytes)
 	}
 
-	// Use platform-cli wallet package for env-key parsing.
-	keyBytes, err := pkgwallet.ParsePrivateKey(envKey)
-	if err != nil {
-		return nil, err
+	// Fall back to keystore default key.
+	if ks, err := pkgkeystore.Load(); err == nil {
+		if defaultKey := ks.GetDefault(); defaultKey != "" {
+			return loadPrivateKeyFromKeystore(defaultKey)
+		}
 	}
 
-	return pkgwallet.ToPrivateKey(keyBytes)
+	return nil, fmt.Errorf("no key provided. Use --key-name, AVALANCHE_PRIVATE_KEY env var, or set a platform-cli default key")
 }
 
 func loadPrivateKeyFromKeystore(name string) (*secp256k1.PrivateKey, error) {

@@ -335,9 +335,14 @@ spec:
                   print(f"  Created gas price config")
 
                   # Create features and associate with chain
+                  # SAFE_141: Required for v1.4.1 contract support
+                  # SAFE_TX_GAS_OPTIONAL: Required for L2/custom chains (safeTxGas=0)
+                  # NATIVE_WALLETCONNECT: Enables native WalletConnect v2
+                  # Do NOT add COUNTERFACTUAL without a relay service (Gelato)
                   features = [
                       'CONTRACT_INTERACTION', 'DEFAULT_TOKENLIST', 'DOMAIN_LOOKUP',
-                      'EIP_1559', 'ERC721', 'ERC1155', 'SAFE_APPS', 'SPENDING_LIMIT',
+                      'EIP_1559', 'ERC721', 'ERC1155', 'NATIVE_WALLETCONNECT',
+                      'SAFE_141', 'SAFE_APPS', 'SAFE_TX_GAS_OPTIONAL', 'SPENDING_LIMIT',
                   ]
                   for key in features:
                       cur.execute("""

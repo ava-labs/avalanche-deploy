@@ -43,7 +43,19 @@ declare -A GAS_LIMITS=(
 factory_code=$(cast code "${SINGLETON_FACTORY}" --rpc-url "${RPC_URL}" 2>/dev/null || true)
 if [[ -z "${factory_code}" || "${factory_code}" == "0x" ]]; then
   echo "Error: Singleton Factory not deployed at ${SINGLETON_FACTORY}"
-  echo "Include it in your genesis alloc or deploy it first."
+  echo ""
+  echo "The Singleton Factory must be in your genesis alloc. SubnetEVM enforces EIP-155"
+  echo "so it cannot be deployed via the standard pre-signed transaction after chain launch."
+  echo ""
+  echo "Add this to your genesis.json alloc section:"
+  echo '  "914d7Fec6aaC8cd542e72Bca78B30650d45643d7": {'
+  echo '    "balance": "0x0",'
+  echo '    "code": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3",'
+  echo '    "nonce": "0x1"'
+  echo '  }'
+  echo ""
+  echo "For existing chains, use a SubnetEVM stateUpgrade in upgrade.json to inject it:"
+  echo "  See: scripts/l1/safe/singleton-factory-upgrade.json"
   exit 1
 fi
 

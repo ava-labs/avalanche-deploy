@@ -77,7 +77,7 @@ monitoring-1 ansible_host=${google_compute_instance.monitoring.network_interface
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
 EOT
-  filename = "${path.module}/../../ansible/inventory/gcp_hosts"
+  filename = "${path.module}/../../../ansible/inventory/gcp_hosts"
 }
 
 resource "local_file" "env_file" {
@@ -91,5 +91,5 @@ VALIDATOR_${i + 1}_IP=${instance.network_interface[0].access_config[0].nat_ip}
 RPC_${i + 1}_IP=${instance.network_interface[0].access_config[0].nat_ip}
 %{endfor~}
 EOT
-  filename = "${path.module}/../../.env"
+  filename = "${path.module}/../../../.env"
 }

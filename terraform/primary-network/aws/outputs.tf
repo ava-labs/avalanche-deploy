@@ -62,5 +62,5 @@ staking_keys_bucket=${aws_s3_bucket.staking_keys[0].id}
 staking_keys_kms_arn=${aws_kms_key.staking_keys[0].arn}
 %{endif~}
 EOT
-  filename = "${path.module}/../../ansible/inventory/aws_primary_hosts"
+  filename = "${path.module}/../../../ansible/inventory/aws_primary_hosts"
 }

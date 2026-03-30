@@ -147,7 +147,7 @@ staking_keys_bucket=${aws_s3_bucket.staking_keys[0].id}
 staking_keys_kms_arn=${aws_kms_key.staking_keys[0].arn}
 %{endif~}
 EOT
-  filename = "${path.module}/../../ansible/inventory/aws_hosts"
+  filename = "${path.module}/../../../ansible/inventory/aws_hosts"
 }
 
 # Write env file for create-l1 tool
@@ -168,5 +168,5 @@ RPC_PRUNED_${i + 1}_IP=${ip}
 STAKING_KEYS_BUCKET=${aws_s3_bucket.staking_keys[0].id}
 %{endif~}
 EOT
-  filename = "${path.module}/../../.env"
+  filename = "${path.module}/../../../.env"
 }
