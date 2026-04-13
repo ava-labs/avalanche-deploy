@@ -17,6 +17,9 @@ name: E2E Tests
 #   RELAYER_KEY       - Funded key for ICM Relayer (L1 + C-Chain)
 #   SLACK_WEBHOOK_URL - Failure notifications
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
