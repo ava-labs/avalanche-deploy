@@ -1,0 +1,236 @@
+name: E2E Tests
+
+# Runs the full deployment lifecycle on real AWS infrastructure (Fuji testnet).
+# Two parallel jobs: L1 deployment + Primary Network deployment.
+# Always tears down infrastructure, even on failure or cancellation.
+#
+# Triggers:
+#   - Every merge to main (regression gate)
+#   - Weekly Sunday 4 AM UTC (catches environmental drift)
+#   - Manual dispatch (for debugging / ad-hoc runs)
+#
+# Required secrets:
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY  - CI IAM user
+#   AVALANCHE_PRIVATE_KEY                     - Funded Fuji P-Chain key
+#
+# Optional secrets:
+#   RELAYER_KEY       - Funded key for ICM Relayer (L1 + C-Chain)
+#   SLACK_WEBHOOK_URL - Failure notifications
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 4 * * 0" # Sunday 4 AM UTC
+  workflow_dispatch:
+    inputs:
+      skip_destroy:
+        description: "Keep infrastructure alive for debugging"
+        type: boolean
+        default: false
+      run_l1:
+        description: "Run L1 E2E test"
+        type: boolean
+        default: true
+      run_primary:
+        description: "Run Primary Network E2E test"
+        type: boolean
+        default: true
+
+# Prevent overlapping runs. Separate groups for push vs schedule so they
+# don't cancel each other (a scheduled drift-check shouldn't kill a merge gate).
+concurrency:
+  group: e2e-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_DEFAULT_REGION: us-east-1
+
+jobs:
+  # ────────────────────────────────────────────────────────
+  # L1 Full Stack E2E
+  # ────────────────────────────────────────────────────────
+  l1:
+    name: "E2E: L1 Full Stack"
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_l1 }}
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AVALANCHE_PRIVATE_KEY: ${{ secrets.AVALANCHE_PRIVATE_KEY }}
+      RELAYER_KEY: ${{ secrets.RELAYER_KEY }}
+      ICM_CONTRACTS_PATH: /tmp/icm-contracts
+      TF_VARFILE: tests/ci/l1.tfvars
+      UPGRADE_VERSION: "1.14.2"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.13"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible jq
+          ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Clone ICM Contracts
+        run: git clone --depth 1 https://github.com/ava-labs/icm-contracts /tmp/icm-contracts
+
+      - name: Generate SSH Key
+        run: |
+          ssh-keygen -t ed25519 -f /tmp/ci-ssh-key -N "" -q
+          echo "TF_VAR_ssh_public_key=$(cat /tmp/ci-ssh-key.pub)" >> "$GITHUB_ENV"
+          echo "TF_VAR_ssh_private_key_file=/tmp/ci-ssh-key" >> "$GITHUB_ENV"
+
+      - name: Run L1 E2E Test
+        run: |
+          SKIP_DESTROY_FLAG=""
+          if [ "${{ inputs.skip_destroy }}" = "true" ]; then
+            SKIP_DESTROY_FLAG="--skip-destroy"
+          fi
+          ./tests/e2e-l1.sh $SKIP_DESTROY_FLAG
+
+      # Safety net: always destroy even if the script or job is cancelled.
+      # Runs unconditionally — terraform destroy with no state is a safe no-op.
+      - name: Teardown Infrastructure
+        if: ${{ always() && inputs.skip_destroy != 'true' }}
+        run: |
+          cd terraform/l1/aws
+          terraform init -input=false 2>/dev/null || true
+          terraform destroy -auto-approve \
+            -var-file="$GITHUB_WORKSPACE/tests/ci/l1.tfvars" \
+            -var="ssh_public_key=$(cat /tmp/ci-ssh-key.pub 2>/dev/null || echo '')" \
+            -var="ssh_private_key_file=/tmp/ci-ssh-key" \
+            || echo "Terraform destroy completed (or no resources to destroy)"
+
+      - name: Job Summary
+        if: always()
+        run: |
+          echo "## L1 E2E Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "**Status:** Passed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "**Status:** Failed" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "- **Trigger:** ${{ github.event_name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Branch:** ${{ github.ref_name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Commit:** ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+
+  # ────────────────────────────────────────────────────────
+  # Primary Network Lifecycle E2E
+  # ────────────────────────────────────────────────────────
+  primary-network:
+    name: "E2E: Primary Network"
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_primary }}
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      TF_VARFILE: tests/ci/primary.tfvars
+      DEPLOY_VERSION: "1.14.0"
+      UPGRADE_VERSION: "1.14.1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible jq awscli
+          ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: Generate SSH Key
+        run: |
+          ssh-keygen -t ed25519 -f /tmp/ci-ssh-key -N "" -q
+          echo "TF_VAR_ssh_public_key=$(cat /tmp/ci-ssh-key.pub)" >> "$GITHUB_ENV"
+          echo "TF_VAR_ssh_private_key_file=/tmp/ci-ssh-key" >> "$GITHUB_ENV"
+
+      - name: Run Primary Network E2E Test
+        run: |
+          SKIP_DESTROY_FLAG=""
+          if [ "${{ inputs.skip_destroy }}" = "true" ]; then
+            SKIP_DESTROY_FLAG="--skip-destroy"
+          fi
+          ./tests/e2e-primary-network.sh $SKIP_DESTROY_FLAG
+
+      # Safety net: always destroy even if the script or job is cancelled.
+      - name: Teardown Infrastructure
+        if: ${{ always() && inputs.skip_destroy != 'true' }}
+        run: |
+          cd terraform/primary-network/aws
+          terraform init -input=false 2>/dev/null || true
+          terraform destroy -auto-approve \
+            -var-file="$GITHUB_WORKSPACE/tests/ci/primary.tfvars" \
+            -var="ssh_public_key=$(cat /tmp/ci-ssh-key.pub 2>/dev/null || echo '')" \
+            -var="ssh_private_key_file=/tmp/ci-ssh-key" \
+            || echo "Terraform destroy completed (or no resources to destroy)"
+
+      - name: Job Summary
+        if: always()
+        run: |
+          echo "## Primary Network E2E Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "**Status:** Passed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "**Status:** Failed" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "- **Trigger:** ${{ github.event_name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Branch:** ${{ github.ref_name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Commit:** ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+
+  # ────────────────────────────────────────────────────────
+  # Notify on failure
+  # ────────────────────────────────────────────────────────
+  notify:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [l1, primary-network]
+    if: failure() && (github.event_name == 'schedule' || github.event_name == 'push')
+
+    steps:
+      - name: Slack Notification
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        if: env.SLACK_WEBHOOK_URL != ''
+        run: |
+          curl -sf -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            -d "{
+              \"text\": \"E2E test failed on ${{ github.ref_name }}\",
+              \"blocks\": [
+                {
+                  \"type\": \"section\",
+                  \"text\": {
+                    \"type\": \"mrkdwn\",
+                    \"text\": \"*E2E Test Failure*\n\n- Branch: \`${{ github.ref_name }}\`\n- Commit: \`${{ github.sha }}\`\n- Trigger: ${{ github.event_name }}\n- <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>\"
+                  }
+                }
+              ]
+            }"

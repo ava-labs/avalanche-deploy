@@ -7,9 +7,9 @@
 # - Validator deployment
 # - Chain sync verification
 # - Upgrade / downgrade
-# - Staking key backup
-# - Snapshot creation
-# - Snapshot restoration
+# - Staking key backup + restoration
+# - Snapshot creation + restoration
+# - Prepare migration target
 # - Validator migration
 # - Monitoring
 # - Teardown
@@ -28,6 +28,7 @@
 # Optional environment variables:
 #   DEPLOY_VERSION  - Initial avalanchego version (default: 1.14.0)
 #   UPGRADE_VERSION - Version to upgrade to (default: 1.14.1)
+#   TF_VARFILE      - Path to terraform .tfvars file (e.g., tests/ci/primary.tfvars)
 #
 # Note: In --dry-run mode, these credentials are not required.
 #
@@ -59,6 +60,7 @@ DRY_RUN=false
 NETWORK="${NETWORK:-fuji}"
 DEPLOY_VERSION="${DEPLOY_VERSION:-1.14.0}"
 UPGRADE_VERSION="${UPGRADE_VERSION:-1.14.1}"
+TF_VARFILE="${TF_VARFILE:-}"
 
 # Parse arguments
 for arg in "$@"; do
@@ -216,18 +218,35 @@ else
     log "  - 2 primary validators (one will be migration target)"
     log "  - 1 monitoring node"
 
-    if make primary-infra; then
+    if [ -n "$TF_VARFILE" ]; then
+        # Resolve to absolute path before cd
+        if [ -f "$TF_VARFILE" ]; then
+            RESOLVED_VARFILE="$(cd "$(dirname "$TF_VARFILE")" && pwd)/$(basename "$TF_VARFILE")"
+        elif [ -f "$REPO_ROOT/$TF_VARFILE" ]; then
+            RESOLVED_VARFILE="$REPO_ROOT/$TF_VARFILE"
+        else
+            log_error "TF_VARFILE not found: $TF_VARFILE"
+            exit 1
+        fi
+        cd "$REPO_ROOT/$PRIMARY_TF_DIR"
+        terraform init -input=false
+        terraform apply -auto-approve -var-file="$RESOLVED_VARFILE"
+        cd "$REPO_ROOT"
         log_success "Infrastructure created"
     else
-        log_error "Infrastructure creation failed"
-        exit 1
+        if make primary-infra; then
+            log_success "Infrastructure created"
+        else
+            log_error "Infrastructure creation failed"
+            exit 1
+        fi
     fi
 fi
 
 # Get node info
 section "Node Information"
 
-cd "$PRIMARY_TF_DIR"
+cd "$REPO_ROOT/$PRIMARY_TF_DIR"
 PRIMARY_IPS=$(terraform output -json primary_validator_ips 2>/dev/null | jq -r '.[]' || echo "")
 MONITORING_IP=$(terraform output -raw monitoring_ip 2>/dev/null || echo "")
 cd "$REPO_ROOT"
@@ -419,6 +438,16 @@ else
     log_warning "Could not get S3 bucket name"
 fi
 
+# Key Restoration
+section "Key Restoration"
+
+log "Testing staking key restoration to primary-validator-2..."
+if make restore-keys SOURCE=primary-validator-1 TARGET_IP=$PRIMARY_IP_2; then
+    log_success "Staking keys restored to primary-validator-2"
+else
+    log_error "Staking key restoration failed"
+fi
+
 # Snapshot Creation (only if synced)
 section "Database Snapshots"
 
@@ -456,15 +485,13 @@ if [ "$SKIP_SYNC_WAIT" = true ]; then
 else
     log "Testing validator migration from primary-validator-1 to primary-validator-2..."
 
-    # First, prepare migration target if we didn't already restore snapshot
-    log "Verifying migration target is ready..."
-
-    # The migration playbook will:
-    # 1. Verify target is synced
-    # 2. Stop target avalanchego
-    # 3. Download staking keys from S3
-    # 4. Stop source validator
-    # 5. Start target with staking keys
+    # Prepare migration target
+    log "Preparing migration target (primary-validator-2)..."
+    if make prepare-migration NODE=primary-validator-2; then
+        log_success "Migration target prepared"
+    else
+        log_warning "Migration preparation returned non-zero (target may already be synced)"
+    fi
 
     if make migrate-validator SOURCE=primary-validator-1 TARGET=primary-validator-2; then
         log_success "Validator migration completed"
