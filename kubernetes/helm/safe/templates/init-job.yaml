@@ -359,6 +359,49 @@ spec:
                       """, (feature_id, chain_id))
                   print(f"  Enabled {len(features)} features")
 
+              # ============================================================
+              # Step 4: Seed default Safe Apps (Transaction Builder, etc.)
+              # The SAFE_APPS feature flag only controls the UI's Apps tab
+              # visibility; the apps themselves come from safe_apps_safeapp.
+              # Without these records Tx Builder is unreachable from the UI.
+              # ============================================================
+              print("\n=== Step 4: Seed default Safe Apps ===\n")
+
+              default_apps = [
+                  {
+                      "url": "https://apps-portal.safe.global/tx-builder",
+                      "name": "Transaction Builder",
+                      "description": "Compose custom contract interactions and batch them into a single transaction",
+                  },
+                  {
+                      "url": "https://apps-portal.safe.global/drain-safe",
+                      "name": "Drain Account",
+                      "description": "Transfer all assets from a Safe to another wallet",
+                  },
+                  {
+                      "url": "https://apps-portal.safe.global/csv-airdrop",
+                      "name": "CSV Airdrop",
+                      "description": "Send ERC20 or native token transfers to many recipients at once",
+                  },
+              ]
+              for spec in default_apps:
+                  # UPSERT by url (unique). If the row exists with a different
+                  # chain_ids list, merge our chain in without duplicates.
+                  cur.execute("""
+                      INSERT INTO safe_apps_safeapp
+                          (url, name, icon_url, description, chain_ids, listed, featured, developer_website)
+                      VALUES
+                          (%s, %s, 'safe_apps/icon_url.jpg', %s, ARRAY[%s]::bigint[], TRUE, FALSE, '')
+                      ON CONFLICT (url) DO UPDATE SET
+                          chain_ids = (
+                              SELECT ARRAY(
+                                  SELECT DISTINCT unnest(safe_apps_safeapp.chain_ids || ARRAY[%s]::bigint[])
+                              )
+                          ),
+                          listed = TRUE
+                  """, (spec["url"], spec["name"], spec["description"], chain_id, chain_id))
+              print(f"  Registered {len(default_apps)} Safe Apps for chain {chain_id}")
+
               cur.close()
               cfg_conn.close()
 
