@@ -10,6 +10,11 @@
 // key material.
 //
 // Supported auth methods: token | kubernetes | aws-iam
+//
+// Token renewal: Vault tokens have a TTL (typically 1h for Kubernetes auth).
+// This backend automatically renews the token before it expires and
+// re-authenticates if renewal fails.  A validator running for weeks will
+// never lose signing capability due to token expiry.
 package vault
 
 import (
@@ -18,6 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	vault "github.com/hashicorp/vault/api"
 	auth "github.com/hashicorp/vault/api/auth/kubernetes"
@@ -31,19 +37,27 @@ var (
 	dstPopProve = hex.EncodeToString([]byte("BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_"))
 )
 
-const defaultMountPath = "bls"
-const defaultKubernetesJWTPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+const (
+	defaultMountPath          = "bls"
+	defaultKubernetesJWTPath  = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	// renewFraction is the fraction of the token TTL at which we renew.
+	// 0.75 means renew at 75% of the TTL, leaving a 25% safety window.
+	renewFraction = 0.75
+)
 
 // Backend holds a Vault client and the key path; no key material is stored here.
 type Backend struct {
 	client    *vault.Client
+	cfg       signerconfig.VaultConfig
 	mountPath string
 	keyName   string
 	pkBytes   []byte // cached compressed public key
 	log       *slog.Logger
+	cancel    context.CancelFunc
 }
 
-// New creates a Vault backend, authenticates, and caches the public key.
+// New creates a Vault backend, authenticates, caches the public key, and
+// starts background token renewal.
 func New(cfg signerconfig.VaultConfig, log *slog.Logger) (*Backend, error) {
 	vaultCfg := vault.DefaultConfig()
 	vaultCfg.Address = cfg.Address
@@ -62,31 +76,129 @@ func New(cfg signerconfig.VaultConfig, log *slog.Logger) (*Backend, error) {
 		mountPath = defaultMountPath
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	b := &Backend{
 		client:    client,
+		cfg:       cfg,
 		mountPath: mountPath,
 		keyName:   cfg.KeyName,
 		log:       log,
+		cancel:    cancel,
 	}
 
 	// Cache the public key at boot.
 	pkHex, err := b.fetchPublicKey(context.Background())
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("fetching public key from Vault: %w", err)
 	}
 	pkBytes, err := hex.DecodeString(pkHex)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("decoding public key: %w", err)
 	}
 	if len(pkBytes) != 48 {
+		cancel()
 		return nil, fmt.Errorf("expected 48-byte public key, got %d", len(pkBytes))
 	}
 	b.pkBytes = pkBytes
 
+	// Start background token renewal.  Tokens for Kubernetes auth (and other
+	// dynamic auth methods) expire; without renewal the signer would stop
+	// working after the TTL.  Root tokens and non-renewable tokens are
+	// detected and skipped automatically.
+	go b.renewTokenLoop(ctx)
+
 	return b, nil
 }
 
+// renewTokenLoop runs in a background goroutine, renewing the Vault token
+// before it expires.  If renewal fails it re-authenticates from scratch.
+func (b *Backend) renewTokenLoop(ctx context.Context) {
+	for {
+		ttl, renewable, err := b.tokenTTL()
+		if err != nil {
+			b.logf("warn", "could not look up Vault token TTL", "err", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+				continue
+			}
+		}
+
+		// Root tokens and non-expiring tokens don't need renewal.
+		if !renewable || ttl <= 0 {
+			b.logf("debug", "Vault token does not require renewal")
+			return
+		}
+
+		// Sleep until renewFraction of the TTL has elapsed.
+		sleepFor := time.Duration(float64(ttl) * renewFraction)
+		b.logf("debug", "Vault token renewal scheduled", "ttl", ttl, "renew_in", sleepFor)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(sleepFor):
+		}
+
+		// Try to renew the current token.
+		_, err = b.client.Auth().Token().RenewSelf(0)
+		if err != nil {
+			b.logf("warn", "Vault token renewal failed, re-authenticating", "err", err)
+			if err := authenticate(b.client, b.cfg); err != nil {
+				b.logf("error", "Vault re-authentication failed", "err", err)
+				// Back off and try again next cycle.
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(15 * time.Second):
+				}
+			} else {
+				b.logf("info", "Vault re-authentication successful")
+			}
+		} else {
+			b.logf("debug", "Vault token renewed successfully")
+		}
+	}
+}
+
+// tokenTTL returns the remaining TTL and whether the token is renewable.
+func (b *Backend) tokenTTL() (time.Duration, bool, error) {
+	secret, err := b.client.Auth().Token().LookupSelf()
+	if err != nil {
+		return 0, false, err
+	}
+	ttl, err := secret.TokenTTL()
+	if err != nil {
+		return 0, false, err
+	}
+	renewable, _ := secret.TokenIsRenewable()
+	return ttl, renewable, nil
+}
+
+// logf logs at the given level if a logger is configured.
+func (b *Backend) logf(level, msg string, args ...any) {
+	if b.log == nil {
+		return
+	}
+	switch level {
+	case "error":
+		b.log.Error(msg, args...)
+	case "warn":
+		b.log.Warn(msg, args...)
+	case "info":
+		b.log.Info(msg, args...)
+	default:
+		b.log.Debug(msg, args...)
+	}
+}
+
 // authenticate configures the Vault client token via the selected auth method.
+// For Kubernetes auth, the JWT is re-read from disk on every call so that
+// rotated service account tokens are picked up automatically.
 func authenticate(client *vault.Client, cfg signerconfig.VaultConfig) error {
 	switch cfg.AuthMethod {
 	case "token", "":
@@ -101,6 +213,8 @@ func authenticate(client *vault.Client, cfg signerconfig.VaultConfig) error {
 		if jwtPath == "" {
 			jwtPath = defaultKubernetesJWTPath
 		}
+		// Re-read JWT from disk on every auth call — Kubernetes rotates
+		// bound service account tokens periodically.
 		jwt, err := os.ReadFile(jwtPath)
 		if err != nil {
 			return fmt.Errorf("reading kubernetes JWT from %q: %w", jwtPath, err)
@@ -188,7 +302,10 @@ func (b *Backend) requestSign(ctx context.Context, msgHex, dstHex, endpoint stri
 	return sigBytes, nil
 }
 
-// Close is a no-op for the Vault backend — no key material to zero.
+// Close stops the token renewal goroutine.
 func (b *Backend) Close() error {
+	if b.cancel != nil {
+		b.cancel()
+	}
 	return nil
 }
