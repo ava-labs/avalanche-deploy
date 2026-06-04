@@ -346,7 +346,7 @@ go mod vendor
 
 ### Note on CGO
 
-This project uses [blst](https://github.com/supranational/blst) for BLS12-381 operations via a minimal CGO bridge in `internal/blstcgo/`. CGO must be enabled for all build and test commands:
+This project uses [blst](https://github.com/supranational/blst) v0.3.14 for BLS12-381 operations via the official Go bindings (`internal/blstutil/`). CGO must be enabled for all build and test commands:
 
 ```bash
 export CGO_ENABLED=1
@@ -372,7 +372,7 @@ Add this to `~/.zprofile` to make it permanent.
 │   ├── main.go        Plugin entry point
 │   └── backend/       Plugin implementation (generate, sign, public-key)
 ├── internal/
-│   └── blstcgo/       CGO bridge to blst C library (Go 1.22+ compatible)
+│   └── blstutil/      Thin wrapper over blst v0.3.14 Go bindings
 ├── keytool/           Generate and migrate key logic
 ├── signerserver/      gRPC server implementation
 ├── config/            Config struct, YAML loading, env var overrides
