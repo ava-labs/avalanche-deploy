@@ -28,11 +28,13 @@ AvalancheGo ──gRPC──▶ avalanche-kms-signer ──▶ Backend
                                                   ├── aws-kms  ✅ available
                                                   ├── gcp-kms  ✅ available
                                                   ├── azure-kv ✅ available
-                                                  ├── aws-nitro (Phase 2)
-                                                  └── vault    (Phase 3)
+                                                  ├── vault    ✅ available
+                                                  └── aws-nitro (Phase 2)
 ```
 
-The sidecar starts by decrypting the BLS private key blob using the cloud KMS API, holds the decrypted key in memory, and uses it to answer signing requests over gRPC. The plaintext key material **never touches disk** at runtime.
+For cloud KMS backends (AWS/GCP/Azure), the sidecar decrypts the BLS key blob at startup and holds it in memory for signing. The plaintext key **never touches disk** at runtime.
+
+For the Vault backend, the key **never leaves Vault's process** — signing happens inside the plugin and only signatures cross the API boundary. This is the most secure option.
 
 The gRPC server exposes three methods matching AvalancheGo's interface:
 
@@ -158,6 +160,14 @@ azure:
   vault_url:              https://my-vault.vault.azure.net
   key_name:               bls-signer
   encrypted_bls_key_path: /etc/avalanche/bls.key.enc
+
+# HashiCorp Vault (backend: vault)
+vault:
+  address:     http://127.0.0.1:8200
+  mount_path:  bls
+  key_name:    validator
+  auth_method: token      # token | kubernetes | aws-iam
+  token:       <vault-token>
 ```
 
 See [`config/config.example.yaml`](config/config.example.yaml) for a full annotated example.
@@ -214,6 +224,14 @@ See **[docs/azure-kv.md](docs/azure-kv.md)** for full setup instructions includi
 
 Credentials use `DefaultAzureCredential`: environment variables, managed identity, Azure CLI, etc.
 
+### `vault` — HashiCorp Vault ⭐ most secure
+
+See **[docs/vault.md](docs/vault.md)** for full setup instructions including plugin installation, Kubernetes auth, and audit logging.
+
+The Vault backend uses a custom BLS signing plugin. Unlike the cloud KMS backends, the plaintext BLS key **never leaves Vault's process** — signing happens inside the plugin and only signatures cross the API boundary. This is the strongest security model of all available backends.
+
+Supported auth methods: `token` (dev), `kubernetes` (production k8s), `aws-iam` (EC2).
+
 ---
 
 ## Key management CLI
@@ -261,12 +279,24 @@ Flags:
 
 ## Security model
 
+| Backend | Key at rest | Key in memory | Signing location |
+|---|---|---|---|
+| `memory` | ❌ Never persisted | ✅ In process | In process |
+| `aws-kms` | ✅ KMS-encrypted blob | ✅ Decrypted at boot | In process |
+| `gcp-kms` | ✅ KMS-encrypted blob | ✅ Decrypted at boot | In process |
+| `azure-kv` | ✅ KMS-encrypted blob | ✅ Decrypted at boot | In process |
+| `vault` | ✅ Vault encrypted storage | ❌ Never in signer process | Inside Vault plugin |
+| `aws-nitro` | ✅ KMS-encrypted blob | ✅ Inside enclave only | Inside enclave |
+
+### Threat mitigations
+
 | Threat | Mitigation |
 |---|---|
-| Disk compromise | BLS key is never stored in plaintext — only KMS ciphertext on disk |
-| Memory scraping | Key is zeroed in `Backend.Close()` on shutdown |
+| Disk compromise | BLS key never stored in plaintext — only KMS ciphertext or Vault storage |
+| Memory scraping (KMS backends) | Key zeroed in `Backend.Close()` on shutdown |
+| Memory scraping (Vault backend) | Key never in signer process — not possible to extract |
 | Network interception | gRPC server binds to `127.0.0.1` by default; use TLS + mTLS for remote |
-| KMS credential theft | Use instance profiles / workload identity; no long-lived credentials in config |
+| Credential theft | Use instance profiles / workload identity; no long-lived credentials in config |
 | Key rotation | Migrate to a new KMS-encrypted blob; no downtime required |
 
 The plaintext key exists in process memory only for the lifetime of the signer process. It is never logged, never written to disk, and is zeroed when the process shuts down.
@@ -336,7 +366,11 @@ Add this to `~/.zprofile` to make it permanent.
 │   ├── memory/        In-memory backend (dev/test)
 │   ├── awskms/        AWS KMS backend
 │   ├── gcpkms/        GCP Cloud KMS backend
-│   └── azurekv/       Azure Key Vault backend
+│   ├── azurekv/       Azure Key Vault backend
+│   └── vault/         HashiCorp Vault backend
+├── vault-plugin/      Custom Vault secrets plugin (separate binary)
+│   ├── main.go        Plugin entry point
+│   └── backend/       Plugin implementation (generate, sign, public-key)
 ├── internal/
 │   └── blstcgo/       CGO bridge to blst C library (Go 1.22+ compatible)
 ├── keytool/           Generate and migrate key logic
