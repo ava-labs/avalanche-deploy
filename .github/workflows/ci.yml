@@ -24,6 +24,9 @@ jobs:
       - name: Install C build tools
         run: sudo apt-get install -y gcc
 
+      - name: Vendor blst C sources
+        run: ./scripts/vendor-blst.sh
+
       - name: Build
         run: CGO_ENABLED=1 go build ./...
 
