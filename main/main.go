@@ -29,6 +29,7 @@ import (
 	"github.com/ava-labs/avalanche-kms-signer/backend/azurekv"
 	"github.com/ava-labs/avalanche-kms-signer/backend/gcpkms"
 	"github.com/ava-labs/avalanche-kms-signer/backend/memory"
+	vaultbackend "github.com/ava-labs/avalanche-kms-signer/backend/vault"
 	"github.com/ava-labs/avalanche-kms-signer/config"
 	"github.com/ava-labs/avalanche-kms-signer/keytool"
 	"github.com/ava-labs/avalanche-kms-signer/signerserver"
@@ -332,6 +333,8 @@ func buildBackend(cfg config.Config, log *slog.Logger) (backend.Backend, error) 
 		return gcpkms.New(cfg.GCP, log)
 	case config.BackendAzureKV:
 		return azurekv.New(cfg.Azure, log)
+	case config.BackendVault:
+		return vaultbackend.New(cfg.Vault, log)
 	default:
 		return nil, fmt.Errorf("unknown backend %q — valid options: memory, aws-kms, gcp-kms, azure-kv", cfg.Backend)
 	}

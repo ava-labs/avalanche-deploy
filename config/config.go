@@ -93,9 +93,30 @@ type AzureConfig struct {
 
 // VaultConfig holds HashiCorp Vault settings.
 type VaultConfig struct {
-	Address    string `yaml:"address"`
-	Path       string `yaml:"path"`
-	AuthMethod string `yaml:"auth_method"` // aws-iam | token | kubernetes
+	// Address is the Vault server URL, e.g. https://vault.internal:8200
+	Address string `yaml:"address"`
+
+	// MountPath is where the BLS plugin is mounted. Defaults to "bls".
+	MountPath string `yaml:"mount_path"`
+
+	// KeyName is the name of the BLS key within the plugin.
+	KeyName string `yaml:"key_name"`
+
+	// AuthMethod selects how to authenticate: token | kubernetes | aws-iam
+	AuthMethod string `yaml:"auth_method"`
+
+	// Token is used when AuthMethod == "token".
+	Token string `yaml:"token"`
+
+	// KubernetesRole is the Vault role name for Kubernetes auth.
+	KubernetesRole string `yaml:"kubernetes_role"`
+
+	// KubernetesJWTPath is the path to the service account JWT token.
+	// Defaults to /var/run/secrets/kubernetes.io/serviceaccount/token.
+	KubernetesJWTPath string `yaml:"kubernetes_jwt_path"`
+
+	// AWSRole is the Vault role name for AWS IAM auth.
+	AWSRole string `yaml:"aws_role"`
 }
 
 // Defaults returns a Config populated with sensible defaults.
@@ -196,13 +217,25 @@ func applyEnv(cfg *Config) {
 	}
 
 	// Vault
-	if v := os.Getenv("VAULT_ADDRESS"); v != "" {
+	if v := os.Getenv("VAULT_ADDR"); v != "" {
 		cfg.Vault.Address = v
 	}
-	if v := os.Getenv("VAULT_PATH"); v != "" {
-		cfg.Vault.Path = v
+	if v := os.Getenv("VAULT_MOUNT_PATH"); v != "" {
+		cfg.Vault.MountPath = v
+	}
+	if v := os.Getenv("VAULT_KEY_NAME"); v != "" {
+		cfg.Vault.KeyName = v
 	}
 	if v := os.Getenv("VAULT_AUTH_METHOD"); v != "" {
 		cfg.Vault.AuthMethod = v
+	}
+	if v := os.Getenv("VAULT_TOKEN"); v != "" {
+		cfg.Vault.Token = v
+	}
+	if v := os.Getenv("VAULT_KUBERNETES_ROLE"); v != "" {
+		cfg.Vault.KubernetesRole = v
+	}
+	if v := os.Getenv("VAULT_AWS_ROLE"); v != "" {
+		cfg.Vault.AWSRole = v
 	}
 }
