@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"os"
 
+	vault "github.com/hashicorp/vault/api"
+
 	"github.com/ava-labs/avalanche-kms-signer/backend/awskms"
 	"github.com/ava-labs/avalanche-kms-signer/backend/azurekv"
 	"github.com/ava-labs/avalanche-kms-signer/backend/gcpkms"
@@ -43,6 +45,10 @@ type GenerateOpts struct {
 
 	// Azure holds Azure-specific settings (used when Backend == "azure-kv").
 	Azure config.AzureConfig
+
+	// Vault holds Vault-specific settings (used when Backend == "vault").
+	// For Vault, no output file is written — the key is stored inside Vault.
+	Vault config.VaultConfig
 }
 
 // Generate creates a new BLS12-381 key, encrypts it with the specified KMS
@@ -50,6 +56,11 @@ type GenerateOpts struct {
 // It returns the hex-encoded compressed public key so the caller can display
 // it for on-chain verification.
 func Generate(opts GenerateOpts) (publicKeyHex string, err error) {
+	// Vault generates the key internally — no local key material needed.
+	if config.BackendType(opts.Backend) == config.BackendVault {
+		return vaultGenerate(opts.Vault)
+	}
+
 	skBytes, err := generateBLSKey()
 	if err != nil {
 		return "", err
@@ -84,10 +95,11 @@ type MigrateOpts struct {
 	// plaintext key file after a successful migration.
 	DeleteInput bool
 
-	// AWS, GCP, Azure hold provider-specific settings.
+	// AWS, GCP, Azure, Vault hold provider-specific settings.
 	AWS   config.AWSConfig
 	GCP   config.GCPConfig
 	Azure config.AzureConfig
+	Vault config.VaultConfig
 }
 
 // Migrate reads a plaintext signer.key, encrypts it with the specified KMS
@@ -106,9 +118,22 @@ func Migrate(opts MigrateOpts) (publicKeyHex string, err error) {
 	if len(skBytes) != 32 {
 		return "", fmt.Errorf("expected 32-byte BLS scalar in %q, got %d bytes", opts.InputPath, len(skBytes))
 	}
-
 	if !blstcgo.ValidateSecretKey(skBytes) {
 		return "", fmt.Errorf("%q does not contain a valid BLS scalar", opts.InputPath)
+	}
+
+	// Vault import: send the key to Vault's encrypted storage directly.
+	if config.BackendType(opts.Backend) == config.BackendVault {
+		pkHex, err := vaultImport(opts.Vault, skBytes)
+		if err != nil {
+			return "", err
+		}
+		if opts.DeleteInput {
+			if err := secureDelete(opts.InputPath); err != nil {
+				return "", fmt.Errorf("secure delete of %q failed: %w — MANUAL DELETION REQUIRED", opts.InputPath, err)
+			}
+		}
+		return pkHex, nil
 	}
 
 	pkBytes, err := blstcgo.PublicKey(skBytes)
@@ -131,6 +156,75 @@ func Migrate(opts MigrateOpts) (publicKeyHex string, err error) {
 		}
 	}
 	return hex.EncodeToString(pkBytes), nil
+}
+
+// vaultGenerate calls the Vault plugin's generate endpoint to create a new
+// BLS key inside Vault. The key never leaves Vault's process.
+func vaultGenerate(cfg config.VaultConfig) (string, error) {
+	client, err := vaultClient(cfg)
+	if err != nil {
+		return "", err
+	}
+	mountPath := cfg.MountPath
+	if mountPath == "" {
+		mountPath = "bls"
+	}
+	path := fmt.Sprintf("%s/keys/%s/generate", mountPath, cfg.KeyName)
+	secret, err := client.Logical().Write(path, nil)
+	if err != nil {
+		return "", fmt.Errorf("Vault generate: %w", err)
+	}
+	if secret == nil || secret.Data == nil {
+		return "", fmt.Errorf("Vault returned empty response")
+	}
+	pkHex, ok := secret.Data["public_key"].(string)
+	if !ok {
+		return "", fmt.Errorf("unexpected public_key type in Vault response")
+	}
+	return pkHex, nil
+}
+
+// vaultImport sends a plaintext BLS scalar to the Vault plugin's import
+// endpoint, which validates and stores it in Vault's encrypted storage.
+func vaultImport(cfg config.VaultConfig, skBytes []byte) (string, error) {
+	client, err := vaultClient(cfg)
+	if err != nil {
+		return "", err
+	}
+	mountPath := cfg.MountPath
+	if mountPath == "" {
+		mountPath = "bls"
+	}
+	path := fmt.Sprintf("%s/keys/%s/import", mountPath, cfg.KeyName)
+	secret, err := client.Logical().Write(path, map[string]interface{}{
+		"key": hex.EncodeToString(skBytes),
+	})
+	if err != nil {
+		return "", fmt.Errorf("Vault import: %w", err)
+	}
+	if secret == nil || secret.Data == nil {
+		return "", fmt.Errorf("Vault returned empty response")
+	}
+	pkHex, ok := secret.Data["public_key"].(string)
+	if !ok {
+		return "", fmt.Errorf("unexpected public_key type in Vault response")
+	}
+	return pkHex, nil
+}
+
+// vaultClient builds an authenticated Vault API client.
+func vaultClient(cfg config.VaultConfig) (*vault.Client, error) {
+	vaultCfg := vault.DefaultConfig()
+	vaultCfg.Address = cfg.Address
+	client, err := vault.NewClient(vaultCfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating Vault client: %w", err)
+	}
+	if cfg.Token == "" {
+		return nil, fmt.Errorf("vault.token must be set for keytool (auth_method=token)")
+	}
+	client.SetToken(cfg.Token)
+	return client, nil
 }
 
 // generateBLSKey generates a fresh BLS12-381 secret key and returns its

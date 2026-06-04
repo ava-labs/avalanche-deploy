@@ -33,6 +33,29 @@ func pathKeys(b *backend) []*framework.Path {
 			HelpDescription: "Generates a new BLS12-381 key using HKDF key derivation and stores it in Vault's encrypted storage. The key is never returned.",
 		},
 		{
+			// import accepts a hex-encoded BLS scalar from an existing plaintext
+			// signer.key and stores it in Vault's encrypted storage.
+			// This is used by `keytool migrate --backend vault`.
+			Pattern: "keys/" + framework.GenericNameRegex("name") + "/import",
+			Fields: map[string]*framework.FieldSchema{
+				"name": {
+					Type:        framework.TypeString,
+					Description: "Name to store the imported BLS key under.",
+				},
+				"key": {
+					Type:        framework.TypeString,
+					Description: "Hex-encoded 32-byte BLS scalar to import.",
+				},
+			},
+			ExistenceCheck: b.keyDoesNotExist,
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.CreateOperation: &framework.PathOperation{Callback: b.handleImport},
+				logical.UpdateOperation: &framework.PathOperation{Callback: b.handleImport},
+			},
+			HelpSynopsis:    "Import an existing BLS key into Vault.",
+			HelpDescription: "Accepts a hex-encoded 32-byte BLS scalar and stores it in Vault's encrypted storage. The key is validated before storage. Used by keytool migrate.",
+		},
+		{
 			Pattern: "keys/" + framework.GenericNameRegex("name") + "/public-key",
 			Fields: map[string]*framework.FieldSchema{
 				"name": {
@@ -72,6 +95,48 @@ func (b *backend) handleGenerate(ctx context.Context, req *logical.Request, d *f
 	}
 
 	// Store only the hex-encoded scalar — never return it via the API.
+	if err := req.Storage.Put(ctx, &logical.StorageEntry{
+		Key:   storageKeyPrefix + name,
+		Value: []byte(skHex),
+	}); err != nil {
+		return nil, fmt.Errorf("storage write: %w", err)
+	}
+
+	return &logical.Response{
+		Data: map[string]interface{}{
+			"name":       name,
+			"public_key": pkHex,
+		},
+	}, nil
+}
+
+func (b *backend) handleImport(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+	name := d.Get("name").(string)
+	keyHex, ok := d.GetOk("key")
+	if !ok {
+		return logical.ErrorResponse("key is required"), nil
+	}
+
+	skHex := keyHex.(string)
+	if len(skHex) != 64 {
+		return logical.ErrorResponse("key must be a 64-character hex string (32 bytes)"), nil
+	}
+
+	// Validate the key by deriving the public key — this confirms it's a valid scalar.
+	pkHex, err := publicKeyHex(skHex)
+	if err != nil {
+		return nil, fmt.Errorf("invalid BLS key: %w", err)
+	}
+
+	// Check if key already exists.
+	entry, err := req.Storage.Get(ctx, storageKeyPrefix+name)
+	if err != nil {
+		return nil, fmt.Errorf("storage read: %w", err)
+	}
+	if entry != nil {
+		return logical.ErrorResponse("key %q already exists — delete it first to overwrite", name), nil
+	}
+
 	if err := req.Storage.Put(ctx, &logical.StorageEntry{
 		Key:   storageKeyPrefix + name,
 		Value: []byte(skHex),

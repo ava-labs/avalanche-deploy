@@ -139,7 +139,7 @@ func commonKMSFlags(cmd *cobra.Command) *config.Config {
 	cmd.Flags().String("config-file", "", "path to YAML config file (KMS settings can come from here)")
 
 	// Backend selector.
-	cmd.Flags().String("backend", "", "KMS backend: aws-kms|gcp-kms|azure-kv (required)")
+	cmd.Flags().String("backend", "", "KMS backend: aws-kms|gcp-kms|azure-kv|vault (required)")
 	_ = cmd.MarkFlagRequired("backend")
 
 	// AWS flags.
@@ -156,6 +156,12 @@ func commonKMSFlags(cmd *cobra.Command) *config.Config {
 	// Azure flags.
 	cmd.Flags().String("azure-vault-url", "", "Azure Key Vault URL (e.g. https://my-vault.vault.azure.net/)")
 	cmd.Flags().String("azure-key-name", "", "Azure Key Vault key name")
+
+	// Vault flags.
+	cmd.Flags().String("vault-addr", "", "Vault server address (e.g. http://127.0.0.1:8200)")
+	cmd.Flags().String("vault-token", "", "Vault token for authentication")
+	cmd.Flags().String("vault-mount-path", "bls", "Vault secrets engine mount path")
+	cmd.Flags().String("vault-key-name", "", "Name of the BLS key within Vault")
 
 	return cfg
 }
@@ -205,6 +211,20 @@ func resolveKMSConfig(cmd *cobra.Command) (config.Config, error) {
 		cfg.Azure.KeyName = v
 	}
 
+	// Vault overrides.
+	if v, _ := cmd.Flags().GetString("vault-addr"); v != "" {
+		cfg.Vault.Address = v
+	}
+	if v, _ := cmd.Flags().GetString("vault-token"); v != "" {
+		cfg.Vault.Token = v
+	}
+	if v, _ := cmd.Flags().GetString("vault-mount-path"); v != "" {
+		cfg.Vault.MountPath = v
+	}
+	if v, _ := cmd.Flags().GetString("vault-key-name"); v != "" {
+		cfg.Vault.KeyName = v
+	}
+
 	return cfg, nil
 }
 
@@ -219,14 +239,24 @@ func keytoolGenerateCmd() *cobra.Command {
     --aws-kms-key-id arn:aws:kms:us-east-1:123456789:key/abc-def \
     --output /etc/avalanche/bls.key.enc
 
-  # Or load KMS settings from a config file
-  avalanche-kms-signer keytool generate --config-file /etc/avalanche/config.yaml --output /etc/avalanche/bls.key.enc`,
+  # HashiCorp Vault (key stays inside Vault — no output file)
+  avalanche-kms-signer keytool generate \
+    --backend vault \
+    --vault-addr http://127.0.0.1:8200 \
+    --vault-token root \
+    --vault-key-name validator`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := resolveKMSConfig(cmd)
 			if err != nil {
 				return err
 			}
+
+			isVault := cfg.Backend == config.BackendVault
 			output, _ := cmd.Flags().GetString("output")
+
+			if !isVault && output == "" {
+				return fmt.Errorf("--output is required for backend %q", cfg.Backend)
+			}
 
 			// Propagate output path into the right config field.
 			switch cfg.Backend {
@@ -244,12 +274,17 @@ func keytoolGenerateCmd() *cobra.Command {
 				AWS:        cfg.AWS,
 				GCP:        cfg.GCP,
 				Azure:      cfg.Azure,
+				Vault:      cfg.Vault,
 			})
 			if err != nil {
 				return err
 			}
 
-			fmt.Printf("Encrypted key written to: %s\n", output)
+			if isVault {
+				fmt.Printf("BLS key generated inside Vault at: %s/keys/%s\n", cfg.Vault.MountPath, cfg.Vault.KeyName)
+			} else {
+				fmt.Printf("Encrypted key written to: %s\n", output)
+			}
 			fmt.Printf("BLS public key (hex):     %s\n", pkHex)
 			fmt.Println()
 			fmt.Println("IMPORTANT: verify this public key matches your on-chain registration before")
@@ -259,8 +294,7 @@ func keytoolGenerateCmd() *cobra.Command {
 	}
 
 	commonKMSFlags(cmd)
-	cmd.Flags().String("output", "", "path to write the encrypted key blob (required)")
-	_ = cmd.MarkFlagRequired("output")
+	cmd.Flags().String("output", "", "path to write the encrypted key blob (not needed for vault backend)")
 
 	return cmd
 }
@@ -285,6 +319,11 @@ func keytoolMigrateCmd() *cobra.Command {
 			output, _ := cmd.Flags().GetString("output")
 			deleteInput, _ := cmd.Flags().GetBool("delete-input")
 
+			isVault := cfg.Backend == config.BackendVault
+			if !isVault && output == "" {
+				return fmt.Errorf("--output is required for backend %q", cfg.Backend)
+			}
+
 			pkHex, err := keytool.Migrate(keytool.MigrateOpts{
 				Backend:     string(cfg.Backend),
 				InputPath:   input,
@@ -293,12 +332,17 @@ func keytoolMigrateCmd() *cobra.Command {
 				AWS:         cfg.AWS,
 				GCP:         cfg.GCP,
 				Azure:       cfg.Azure,
+				Vault:       cfg.Vault,
 			})
 			if err != nil {
 				return err
 			}
 
-			fmt.Printf("Encrypted key written to: %s\n", output)
+			if isVault {
+				fmt.Printf("BLS key imported into Vault at: %s/keys/%s\n", cfg.Vault.MountPath, cfg.Vault.KeyName)
+			} else {
+				fmt.Printf("Encrypted key written to: %s\n", output)
+			}
 			fmt.Printf("BLS public key (hex):     %s\n", pkHex)
 			fmt.Println()
 			fmt.Println("IMPORTANT: confirm the public key above matches your on-chain registration")
@@ -312,10 +356,9 @@ func keytoolMigrateCmd() *cobra.Command {
 
 	commonKMSFlags(cmd)
 	cmd.Flags().String("input", "", "path to the plaintext signer.key file (required)")
-	cmd.Flags().String("output", "", "path to write the encrypted key blob (required)")
+	cmd.Flags().String("output", "", "path to write the encrypted key blob (not needed for vault backend)")
 	cmd.Flags().Bool("delete-input", false, "securely overwrite and delete the plaintext key after migration")
 	_ = cmd.MarkFlagRequired("input")
-	_ = cmd.MarkFlagRequired("output")
 
 	return cmd
 }
