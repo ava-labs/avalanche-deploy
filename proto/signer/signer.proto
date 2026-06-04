@@ -1,0 +1,39 @@
+// Copyright (C) 2019-2024, Ava Labs, Inc. All rights reserved.
+// See the file LICENSE for licensing terms.
+//
+// Source: https://github.com/ava-labs/avalanchego/blob/master/proto/signer/signer.proto
+// Do not edit — regenerate pb/ with scripts/gen-proto.sh
+
+syntax = "proto3";
+
+package signer;
+
+option go_package = "github.com/ava-labs/avalanche-kms-signer/proto/pb/signer";
+
+service Signer {
+  rpc PublicKey(PublicKeyRequest) returns (PublicKeyResponse) {}
+  rpc Sign(SignRequest) returns (SignResponse) {}
+  rpc SignProofOfPossession(SignProofOfPossessionRequest) returns (SignProofOfPossessionResponse) {}
+}
+
+message PublicKeyRequest {}
+
+message PublicKeyResponse {
+  bytes public_key = 1;
+}
+
+message SignRequest {
+  bytes message = 1;
+}
+
+message SignResponse {
+  bytes signature = 1;
+}
+
+message SignProofOfPossessionRequest {
+  bytes message = 1;
+}
+
+message SignProofOfPossessionResponse {
+  bytes signature = 1;
+}

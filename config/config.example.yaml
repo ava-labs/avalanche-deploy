@@ -1,0 +1,73 @@
+# avalanche-kms-signer configuration reference
+#
+# Usage:
+#   avalanche-kms-signer serve --config-file /etc/avalanche/config.yaml
+#
+# Precedence (highest to lowest):
+#   1. CLI flags      (--backend, --port, --listen)
+#   2. Environment variables  (BACKEND, PORT, AWS_REGION, ...)
+#   3. This file
+
+# backend selects the signing backend.
+#
+# Options:
+#   memory    — in-process, dev/test ONLY (generates a new key on every start)
+#   aws-kms   — AWS Key Management Service (envelope encryption)
+#   gcp-kms   — Google Cloud KMS (envelope encryption)
+#   azure-kv  — Azure Key Vault (RSA-OAEP-256 wrapping)
+#
+backend: aws-kms
+
+# gRPC server address.
+# AvalancheGo must be started with:
+#   --staking-rpc-signer-endpoint=127.0.0.1:50051
+listen: 127.0.0.1
+port:   50051
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AWS KMS  (backend: aws-kms)
+#
+# The encrypted_bls_key_path file is produced by:
+#   avalanche-kms-signer keytool generate --backend aws-kms ...
+#   avalanche-kms-signer keytool migrate  --backend aws-kms ...
+#
+# IAM: the signer process needs kms:Decrypt on the key.
+#      See docs/aws-kms.md for the full IAM policy.
+# ─────────────────────────────────────────────────────────────────────────────
+aws:
+  region:                 us-east-1
+  kms_key_id:             arn:aws:kms:us-east-1:123456789012:key/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+  encrypted_bls_key_path: /etc/avalanche/bls.key.enc
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GCP Cloud KMS  (backend: gcp-kms)
+#
+# IAM: service account needs roles/cloudkms.cryptoKeyDecrypter on the key.
+#      See docs/gcp-kms.md for setup.
+# ─────────────────────────────────────────────────────────────────────────────
+gcp:
+  project:                my-gcp-project
+  location:               us-central1
+  key_ring:               avalanche
+  key_name:               bls-signer
+  encrypted_bls_key_path: /etc/avalanche/bls.key.enc
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Azure Key Vault  (backend: azure-kv)
+#
+# The key_name must be an RSA key (2048-bit minimum, 4096-bit recommended).
+# The managed identity / service principal needs the "decrypt" key permission.
+# See docs/azure-kv.md for setup.
+# ─────────────────────────────────────────────────────────────────────────────
+azure:
+  vault_url:              https://my-avalanche-vault.vault.azure.net
+  key_name:               bls-signer
+  encrypted_bls_key_path: /etc/avalanche/bls.key.enc
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HashiCorp Vault  (backend: vault — Phase 3, not yet implemented)
+# ─────────────────────────────────────────────────────────────────────────────
+vault:
+  address:     https://vault.internal:8200
+  path:        secret/data/validator/bls
+  auth_method: aws-iam   # aws-iam | token | kubernetes
