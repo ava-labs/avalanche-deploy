@@ -282,6 +282,70 @@ WantedBy=multi-user.target
 
 ---
 
+## AWS IAM auth
+
+AWS IAM auth lets EC2 instances, ECS tasks, and Lambda functions authenticate to Vault using their AWS IAM identity — no static tokens needed. Vault calls `sts:GetCallerIdentity` to verify the caller's identity.
+
+This is the recommended auth method for validators running on EC2.
+
+### Configure Vault
+
+```bash
+# Enable the AWS auth method
+vault auth enable aws
+
+# Configure Vault's AWS credentials (use an IAM role with sts:GetCallerIdentity permission)
+# On EC2, Vault can use its own instance profile — no explicit credentials needed
+vault write auth/aws/config/client \
+  iam_server_id_header_value=vault.example.com   # optional but recommended
+
+# Create a policy
+vault policy write bls-signer - <<EOF
+path "bls/keys/+/public-key" { capabilities = ["read"] }
+path "bls/keys/+/sign"       { capabilities = ["create", "update"] }
+path "bls/keys/+/sign-pop"   { capabilities = ["create", "update"] }
+EOF
+
+# Bind the IAM role to the policy
+vault write auth/aws/role/bls-signer \
+  auth_type=iam \
+  bound_iam_principal_arn=arn:aws:iam::123456789012:role/validator-role \
+  policies=bls-signer \
+  ttl=1h \
+  max_ttl=24h
+```
+
+### Config file
+
+```yaml
+backend: vault
+vault:
+  address:     https://vault.internal:8200
+  mount_path:  bls
+  key_name:    validator
+  auth_method: aws-iam
+  aws_role:    bls-signer
+```
+
+Credentials use the standard AWS credential chain — EC2 instance profile, ECS task role, environment variables, etc. No credentials need to be in the config file.
+
+### IAM permissions for the validator's role
+
+The EC2 instance role needs only one permission:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "sts:GetCallerIdentity",
+    "Resource": "*"
+  }]
+}
+```
+
+---
+
 ## Security model
 
 The Vault backend provides the strongest security model of all Phase 1-3 backends:
@@ -313,3 +377,6 @@ Every `sign` and `sign-pop` call will be recorded with timestamp, caller identit
 | `key "validator" not found` | Key not generated yet — run `vault write -force bls/keys/validator/generate` |
 | `authenticating to Vault: auth_method=token requires vault.token` | Token not set in config or `VAULT_TOKEN` env var |
 | `creating Vault client: ...` | Wrong `address` in config or Vault not running |
+| `AWS IAM auth login: ...AccessDenied` | Instance role lacks `sts:GetCallerIdentity` permission |
+| `AWS IAM auth login: ...InvalidClientTokenId` | Wrong AWS region or stale credentials |
+| `AWS IAM auth login: entry for role bls-signer not found` | Vault role not created — run `vault write auth/aws/role/bls-signer ...` |

@@ -26,7 +26,8 @@ import (
 	"time"
 
 	vault "github.com/hashicorp/vault/api"
-	auth "github.com/hashicorp/vault/api/auth/kubernetes"
+	awsauth "github.com/hashicorp/vault/api/auth/aws"
+	k8sauth "github.com/hashicorp/vault/api/auth/kubernetes"
 
 	signerconfig "github.com/ava-labs/avalanche-kms-signer/config"
 )
@@ -219,8 +220,8 @@ func authenticate(client *vault.Client, cfg signerconfig.VaultConfig) error {
 		if err != nil {
 			return fmt.Errorf("reading kubernetes JWT from %q: %w", jwtPath, err)
 		}
-		k8sAuth, err := auth.NewKubernetesAuth(cfg.KubernetesRole,
-			auth.WithServiceAccountToken(string(jwt)),
+		k8sAuth, err := k8sauth.NewKubernetesAuth(cfg.KubernetesRole,
+			k8sauth.WithServiceAccountToken(string(jwt)),
 		)
 		if err != nil {
 			return fmt.Errorf("creating kubernetes auth: %w", err)
@@ -236,7 +237,25 @@ func authenticate(client *vault.Client, cfg signerconfig.VaultConfig) error {
 		return nil
 
 	case "aws-iam":
-		return fmt.Errorf("aws-iam auth not yet implemented — use token or kubernetes")
+		// AWS IAM auth uses the standard AWS credential chain — env vars,
+		// ~/.aws/credentials, EC2 instance profile, ECS task role, etc.
+		// The vault/api/auth/aws package signs an STS GetCallerIdentity
+		// request and sends it to Vault, which calls STS to verify identity.
+		iamAuth, err := awsauth.NewAWSAuth(
+			awsauth.WithRole(cfg.AWSRole),
+		)
+		if err != nil {
+			return fmt.Errorf("creating AWS IAM auth: %w", err)
+		}
+		secret, err := client.Auth().Login(context.Background(), iamAuth)
+		if err != nil {
+			return fmt.Errorf("AWS IAM auth login: %w", err)
+		}
+		if secret == nil || secret.Auth == nil {
+			return fmt.Errorf("AWS IAM auth returned no token")
+		}
+		client.SetToken(secret.Auth.ClientToken)
+		return nil
 
 	default:
 		return fmt.Errorf("unknown auth_method %q — valid options: token, kubernetes, aws-iam", cfg.AuthMethod)
