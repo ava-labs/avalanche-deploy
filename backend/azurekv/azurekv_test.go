@@ -12,7 +12,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys"
 
 	signerconfig "github.com/ava-labs/avalanche-kms-signer/config"
-	"github.com/ava-labs/avalanche-kms-signer/internal/blstcgo"
+	"github.com/ava-labs/avalanche-kms-signer/internal/blstutil"
 )
 
 type mockKV struct{ key [32]byte }
@@ -50,7 +50,7 @@ func TestRoundTrip(t *testing.T) {
 	if _, err := rand.Read(ikm[:]); err != nil {
 		t.Fatal(err)
 	}
-	skBytes, err := blstcgo.KeyGen(ikm[:])
+	skBytes, err := blstutil.KeyGen(ikm[:])
 	if err != nil {
 		t.Fatalf("KeyGen: %v", err)
 	}

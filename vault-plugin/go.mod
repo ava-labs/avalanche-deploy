@@ -2,7 +2,10 @@ module github.com/ava-labs/avalanche-kms-signer/vault-plugin
 
 go 1.22
 
-require github.com/hashicorp/vault/sdk v0.11.0
+require (
+	github.com/hashicorp/vault/sdk v0.11.0
+	github.com/supranational/blst v0.3.14
+)
 
 require (
 	github.com/Microsoft/go-winio v0.6.1 // indirect

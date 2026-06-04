@@ -1,0 +1,27 @@
+# Version control
+.git/
+.github/
+
+# Build artifacts — don't copy local binaries into the image
+avalanche-kms-signer
+vault-plugin-bls
+vault-plugin/vault-plugin-bls
+
+# macOS metadata
+.DS_Store
+
+# Test output
+*.out
+*.test
+coverage.html
+
+# Encrypted key blobs from local testing
+*.key.enc
+
+# Temporary files
+/tmp/
+
+# Documentation — not needed in the build context
+docs/
+*.md
+!README.md

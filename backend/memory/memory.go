@@ -13,7 +13,7 @@ import (
 	"crypto/rand"
 	"fmt"
 
-	"github.com/ava-labs/avalanche-kms-signer/internal/blstcgo"
+	"github.com/ava-labs/avalanche-kms-signer/internal/blstutil"
 )
 
 // Domain separation tags used by AvalancheGo.
@@ -35,12 +35,12 @@ func New() (*Backend, error) {
 		return nil, fmt.Errorf("reading random bytes: %w", err)
 	}
 
-	skBytes, err := blstcgo.KeyGen(ikm[:])
+	skBytes, err := blstutil.KeyGen(ikm[:])
 	if err != nil {
 		return nil, fmt.Errorf("BLS key generation failed: %w", err)
 	}
 
-	pkBytes, err := blstcgo.PublicKey(skBytes)
+	pkBytes, err := blstutil.PublicKey(skBytes)
 	if err != nil {
 		return nil, fmt.Errorf("BLS public key derivation failed: %w", err)
 	}
@@ -55,12 +55,12 @@ func (b *Backend) PublicKey(_ context.Context) ([]byte, error) {
 
 // Sign produces a BLS signature over msg using the Warp message DST.
 func (b *Backend) Sign(_ context.Context, msg []byte) ([]byte, error) {
-	return blstcgo.Sign(b.skBytes, msg, dstSign)
+	return blstutil.Sign(b.skBytes, msg, dstSign)
 }
 
 // SignProofOfPossession produces a BLS signature over msg using the PoP DST.
 func (b *Backend) SignProofOfPossession(_ context.Context, msg []byte) ([]byte, error) {
-	return blstcgo.Sign(b.skBytes, msg, dstPopProve)
+	return blstutil.Sign(b.skBytes, msg, dstPopProve)
 }
 
 // Close zeroes the in-memory key material.

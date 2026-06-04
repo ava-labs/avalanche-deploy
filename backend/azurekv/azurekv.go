@@ -14,7 +14,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys"
 
 	signerconfig "github.com/ava-labs/avalanche-kms-signer/config"
-	"github.com/ava-labs/avalanche-kms-signer/internal/blstcgo"
+	"github.com/ava-labs/avalanche-kms-signer/internal/blstutil"
 )
 
 // Domain separation tags — must match AvalancheGo exactly.
@@ -67,13 +67,13 @@ func newWithClient(cfg signerconfig.AzureConfig, log *slog.Logger, client kvClie
 }
 
 func backendFromBytes(skBytes []byte, log *slog.Logger) (*Backend, error) {
-	if len(skBytes) != blstcgo.SecretKeySize {
-		return nil, fmt.Errorf("expected %d-byte BLS scalar, got %d bytes", blstcgo.SecretKeySize, len(skBytes))
+	if len(skBytes) != blstutil.SecretKeySize {
+		return nil, fmt.Errorf("expected %d-byte BLS scalar, got %d bytes", blstutil.SecretKeySize, len(skBytes))
 	}
-	if !blstcgo.ValidateSecretKey(skBytes) {
+	if !blstutil.ValidateSecretKey(skBytes) {
 		return nil, fmt.Errorf("invalid BLS key material")
 	}
-	pkBytes, err := blstcgo.PublicKey(skBytes)
+	pkBytes, err := blstutil.PublicKey(skBytes)
 	if err != nil {
 		return nil, fmt.Errorf("BLS public key derivation: %w", err)
 	}
@@ -83,11 +83,11 @@ func backendFromBytes(skBytes []byte, log *slog.Logger) (*Backend, error) {
 func (b *Backend) PublicKey(_ context.Context) ([]byte, error) { return b.pkBytes, nil }
 
 func (b *Backend) Sign(_ context.Context, msg []byte) ([]byte, error) {
-	return blstcgo.Sign(b.skBytes, msg, dstSign)
+	return blstutil.Sign(b.skBytes, msg, dstSign)
 }
 
 func (b *Backend) SignProofOfPossession(_ context.Context, msg []byte) ([]byte, error) {
-	return blstcgo.Sign(b.skBytes, msg, dstPopProve)
+	return blstutil.Sign(b.skBytes, msg, dstPopProve)
 }
 
 func (b *Backend) Close() error {

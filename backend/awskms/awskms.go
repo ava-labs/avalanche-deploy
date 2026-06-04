@@ -23,7 +23,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/kms/types"
 
 	signerconfig "github.com/ava-labs/avalanche-kms-signer/config"
-	"github.com/ava-labs/avalanche-kms-signer/internal/blstcgo"
+	"github.com/ava-labs/avalanche-kms-signer/internal/blstutil"
 )
 
 // kmsDecryptor is the subset of the KMS client used at runtime so tests can
@@ -78,13 +78,13 @@ func newWithClient(cfg signerconfig.AWSConfig, log *slog.Logger, client kmsDecry
 }
 
 func backendFromBytes(skBytes []byte, log *slog.Logger) (*Backend, error) {
-	if len(skBytes) != blstcgo.SecretKeySize {
-		return nil, fmt.Errorf("expected %d-byte BLS scalar, got %d bytes", blstcgo.SecretKeySize, len(skBytes))
+	if len(skBytes) != blstutil.SecretKeySize {
+		return nil, fmt.Errorf("expected %d-byte BLS scalar, got %d bytes", blstutil.SecretKeySize, len(skBytes))
 	}
-	if !blstcgo.ValidateSecretKey(skBytes) {
+	if !blstutil.ValidateSecretKey(skBytes) {
 		return nil, fmt.Errorf("invalid BLS key material — not a valid scalar")
 	}
-	pkBytes, err := blstcgo.PublicKey(skBytes)
+	pkBytes, err := blstutil.PublicKey(skBytes)
 	if err != nil {
 		return nil, fmt.Errorf("BLS public key derivation: %w", err)
 	}
@@ -98,12 +98,12 @@ func (b *Backend) PublicKey(_ context.Context) ([]byte, error) {
 
 // Sign produces a BLS signature over msg using the Warp message DST.
 func (b *Backend) Sign(_ context.Context, msg []byte) ([]byte, error) {
-	return blstcgo.Sign(b.skBytes, msg, dstSign)
+	return blstutil.Sign(b.skBytes, msg, dstSign)
 }
 
 // SignProofOfPossession produces a BLS signature over msg using the PoP DST.
 func (b *Backend) SignProofOfPossession(_ context.Context, msg []byte) ([]byte, error) {
-	return blstcgo.Sign(b.skBytes, msg, dstPopProve)
+	return blstutil.Sign(b.skBytes, msg, dstPopProve)
 }
 
 // Close zeroes the in-memory key material.

@@ -26,7 +26,7 @@ import (
 	"github.com/ava-labs/avalanche-kms-signer/backend/azurekv"
 	"github.com/ava-labs/avalanche-kms-signer/backend/gcpkms"
 	"github.com/ava-labs/avalanche-kms-signer/config"
-	"github.com/ava-labs/avalanche-kms-signer/internal/blstcgo"
+	"github.com/ava-labs/avalanche-kms-signer/internal/blstutil"
 )
 
 // GenerateOpts holds parameters for the generate subcommand.
@@ -65,7 +65,7 @@ func Generate(opts GenerateOpts) (publicKeyHex string, err error) {
 	if err != nil {
 		return "", err
 	}
-	pkBytes, err := blstcgo.PublicKey(skBytes)
+	pkBytes, err := blstutil.PublicKey(skBytes)
 	if err != nil {
 		return "", fmt.Errorf("deriving public key: %w", err)
 	}
@@ -118,7 +118,7 @@ func Migrate(opts MigrateOpts) (publicKeyHex string, err error) {
 	if len(skBytes) != 32 {
 		return "", fmt.Errorf("expected 32-byte BLS scalar in %q, got %d bytes", opts.InputPath, len(skBytes))
 	}
-	if !blstcgo.ValidateSecretKey(skBytes) {
+	if !blstutil.ValidateSecretKey(skBytes) {
 		return "", fmt.Errorf("%q does not contain a valid BLS scalar", opts.InputPath)
 	}
 
@@ -136,7 +136,7 @@ func Migrate(opts MigrateOpts) (publicKeyHex string, err error) {
 		return pkHex, nil
 	}
 
-	pkBytes, err := blstcgo.PublicKey(skBytes)
+	pkBytes, err := blstutil.PublicKey(skBytes)
 	if err != nil {
 		return "", fmt.Errorf("deriving public key: %w", err)
 	}
@@ -234,7 +234,7 @@ func generateBLSKey() ([]byte, error) {
 	if _, err := rand.Read(ikm[:]); err != nil {
 		return nil, fmt.Errorf("reading random bytes: %w", err)
 	}
-	return blstcgo.KeyGen(ikm[:])
+	return blstutil.KeyGen(ikm[:])
 }
 
 // encryptForBackend dispatches to the appropriate KMS encrypt helper.

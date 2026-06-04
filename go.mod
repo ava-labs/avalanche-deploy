@@ -29,6 +29,7 @@ require (
 require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.27
 	github.com/googleapis/gax-go/v2 v2.13.0
+	github.com/supranational/blst v0.3.14
 )
 
 require (

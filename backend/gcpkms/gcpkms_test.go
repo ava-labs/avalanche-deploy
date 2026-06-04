@@ -13,7 +13,7 @@ import (
 	gax "github.com/googleapis/gax-go/v2"
 
 	signerconfig "github.com/ava-labs/avalanche-kms-signer/config"
-	"github.com/ava-labs/avalanche-kms-signer/internal/blstcgo"
+	"github.com/ava-labs/avalanche-kms-signer/internal/blstutil"
 )
 
 type mockKMS struct{ key [32]byte }
@@ -49,7 +49,7 @@ func TestRoundTrip(t *testing.T) {
 	if _, err := rand.Read(ikm[:]); err != nil {
 		t.Fatal(err)
 	}
-	skBytes, err := blstcgo.KeyGen(ikm[:])
+	skBytes, err := blstutil.KeyGen(ikm[:])
 	if err != nil {
 		t.Fatalf("KeyGen: %v", err)
 	}
