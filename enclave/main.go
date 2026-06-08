@@ -27,6 +27,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/kms/types"
 	blst "github.com/supranational/blst/bindings/go"
+	"github.com/mdlayher/vsock"
 
 	enclaveproto "github.com/ava-labs/avalanche-kms-signer/internal/enclaveproto"
 )
@@ -115,7 +116,7 @@ func decryptWithKMSProxy(keyID string, ciphertext []byte) ([]byte, error) {
 
 // serve listens on vsock port 5000 for requests from the host.
 func serve(sk *blst.SecretKey, pkBytes []byte) error {
-	ln, err := net.Listen("vsock", fmt.Sprintf(":%d", enclaveproto.VSockPort))
+	ln, err := vsock.Listen(enclaveproto.VSockPort, nil)
 	if err != nil {
 		return fmt.Errorf("vsock listen on port %d: %w", enclaveproto.VSockPort, err)
 	}

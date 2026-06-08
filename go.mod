@@ -17,6 +17,9 @@ require (
 	github.com/hashicorp/vault/api/auth/aws v0.6.0
 	github.com/hashicorp/vault/api/auth/kubernetes v0.7.0
 
+	// vsock support for Nitro Enclave communication (Phase 2).
+	github.com/mdlayher/vsock v1.2.1
+
 	// CLI framework.
 	github.com/spf13/cobra v1.8.1
 	// gRPC runtime and generated code support.
@@ -84,6 +87,7 @@ require (
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mdlayher/socket v0.4.1 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect

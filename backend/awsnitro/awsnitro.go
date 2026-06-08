@@ -24,6 +24,8 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/mdlayher/vsock"
+
 	signerconfig "github.com/ava-labs/avalanche-kms-signer/config"
 	enclaveproto "github.com/ava-labs/avalanche-kms-signer/internal/enclaveproto"
 )
@@ -108,8 +110,9 @@ func (b *Backend) waitForEnclave(timeout time.Duration) error {
 
 // dial opens a vsock connection to the enclave.
 func (b *Backend) dial() (net.Conn, error) {
-	addr := fmt.Sprintf("vsock:%d:%d", b.enclaveCID, enclaveproto.VSockPort)
-	return net.DialTimeout("vsock", addr, 2*time.Second)
+	return vsock.Dial(b.enclaveCID, enclaveproto.VSockPort, &vsock.Config{
+		DialTimeout: 2 * time.Second,
+	})
 }
 
 // send sends a request to the enclave and returns the response.
