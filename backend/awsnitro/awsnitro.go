@@ -116,7 +116,7 @@ func (b *Backend) dial() (net.Conn, error) {
 func (b *Backend) send(req enclaveproto.Request) (enclaveproto.Response, error) {
 	conn, err := b.dial()
 	if err != nil {
-		return enclave.Response{}, fmt.Errorf("vsock dial: %w", err)
+		return enclaveproto.Response{}, fmt.Errorf("vsock dial: %w", err)
 	}
 	defer conn.Close()
 
