@@ -45,16 +45,17 @@ aws kms create-alias \
 
 ## Step 2 — Configure IAM permissions
 
-The signer process needs only two KMS permissions. Attach this policy to the IAM role used by your EC2 instance profile or ECS task role:
+Attach this policy to the IAM role used by your EC2 instance profile or ECS task role:
 
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "AllowBLSKeyDecryption",
+      "Sid": "AllowBLSKeyOperations",
       "Effect": "Allow",
       "Action": [
+        "kms:Encrypt",
         "kms:Decrypt"
       ],
       "Resource": "arn:aws:kms:us-east-1:123456789012:key/YOUR-KEY-ID"
@@ -63,20 +64,11 @@ The signer process needs only two KMS permissions. Attach this policy to the IAM
 }
 ```
 
-For the `keytool generate` and `keytool migrate` commands (run once, by an operator), also add `kms:Encrypt`:
+Both `kms:Encrypt` and `kms:Decrypt` are required:
+- `kms:Encrypt` — used by `keytool generate` and `keytool migrate` to encrypt the BLS key blob
+- `kms:Decrypt` — used by the signer at boot to decrypt the blob into memory
 
-```json
-{
-  "Sid": "AllowKeyEncryptionForKeytool",
-  "Effect": "Allow",
-  "Action": [
-    "kms:Encrypt"
-  ],
-  "Resource": "arn:aws:kms:us-east-1:123456789012:key/YOUR-KEY-ID"
-}
-```
-
-> **Principle of least privilege**: the production signer process only needs `kms:Decrypt`. The `kms:Encrypt` permission is only needed at key setup time and can be removed afterward (or granted only to an operator IAM user, not the instance role).
+> **Advanced**: operators running large multi-validator deployments sometimes use a separate "key setup" IAM role with `kms:Encrypt` for initial key generation, and a separate runtime role with only `kms:Decrypt` for the signer process. This is optional for most operators.
 
 ---
 
