@@ -52,8 +52,11 @@ type Config struct {
 	// Port is the TCP port the gRPC server listens on.
 	Port int `yaml:"port"`
 
-	// AWS holds configuration for the aws-kms and aws-nitro backends.
+	// AWS holds configuration for the aws-kms backend.
 	AWS AWSConfig `yaml:"aws"`
+
+	// Nitro holds configuration for the aws-nitro backend.
+	Nitro AWSNitroConfig `yaml:"nitro"`
 
 	// GCP holds configuration for the gcp-kms backend.
 	GCP GCPConfig `yaml:"gcp"`
@@ -73,6 +76,29 @@ type AWSConfig struct {
 	// EndpointURL overrides the AWS KMS endpoint. Used for LocalStack and other
 	// local testing environments. Leave empty in production.
 	EndpointURL string `yaml:"endpoint_url"`
+}
+
+// AWSNitroConfig holds AWS Nitro Enclave-specific settings.
+type AWSNitroConfig struct {
+	// EIFPath is the path to the Enclave Image File on the host.
+	EIFPath string `yaml:"eif_path"`
+
+	// KMSKeyID is the ARN of the KMS key used to encrypt the BLS key blob.
+	KMSKeyID string `yaml:"kms_key_id"`
+
+	// EncryptedBLSKeyPath is the path to the encrypted BLS key blob on the host.
+	// This file is read by the enclave process (passed in via the EIF build).
+	EncryptedBLSKeyPath string `yaml:"encrypted_bls_key_path"`
+
+	// CPUCount is the number of vCPUs to allocate to the enclave (minimum 2).
+	CPUCount int `yaml:"cpu_count"`
+
+	// MemoryMiB is the amount of memory to allocate to the enclave in MiB (minimum 512).
+	MemoryMiB int `yaml:"memory_mib"`
+
+	// EnclaveCID is the vsock CID to assign to the enclave.
+	// Must be >= 4 (CIDs 0-3 are reserved).
+	EnclaveCID uint32 `yaml:"enclave_cid"`
 }
 
 // GCPConfig holds GCP-specific settings.
