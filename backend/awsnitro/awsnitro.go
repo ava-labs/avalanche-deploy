@@ -5,14 +5,10 @@
 
 // Package awsnitro implements the Backend interface using an AWS Nitro Enclave.
 //
-// At startup the enclave process is launched from a pre-built .eif image.
-// The enclave decrypts the BLS key using AWS KMS with attestation — the KMS
-// key policy requires the decryption to come from this specific enclave image,
-// so the plaintext key is only ever accessible inside the enclave.
-//
-// The host communicates with the enclave over vsock.  All signing operations
-// happen inside the enclave; the host only sends messages and receives
-// signatures.  The plaintext BLS key never crosses the enclave boundary.
+// The host launches the enclave, sends it temporary AWS credentials over vsock
+// (the enclave has no IMDS access), and then receives the derived BLS public
+// key.  All subsequent signing operations happen inside the enclave — the BLS
+// plaintext key never crosses the enclave boundary.
 package awsnitro
 
 import (
@@ -24,6 +20,7 @@ import (
 	"os/exec"
 	"time"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/mdlayher/vsock"
 
 	signerconfig "github.com/ava-labs/avalanche-kms-signer/config"
@@ -31,16 +28,14 @@ import (
 )
 
 // Backend communicates with the Nitro Enclave over vsock.
-// No key material is held by the host process.
 type Backend struct {
-	enclaveCID uint32 // vsock CID assigned to the running enclave
-	pkBytes    []byte // cached compressed public key (48 bytes)
-	cmd        *exec.Cmd
+	enclaveCID uint32
+	pkBytes    []byte
 	log        *slog.Logger
 }
 
-// New launches the enclave from the .eif image specified in cfg, waits for it
-// to boot, fetches the public key, and returns a Backend ready for signing.
+// New launches the enclave, sends AWS credentials, waits for the public key,
+// and returns a Backend ready for signing.
 func New(cfg signerconfig.AWSNitroConfig, log *slog.Logger) (*Backend, error) {
 	if log == nil {
 		log = slog.Default()
@@ -52,7 +47,6 @@ func New(cfg signerconfig.AWSNitroConfig, log *slog.Logger) (*Backend, error) {
 		"memory_mb", cfg.MemoryMiB,
 	)
 
-	// Launch the enclave using nitro-cli.
 	cmd := exec.Command("nitro-cli", "run-enclave",
 		"--eif-path", cfg.EIFPath,
 		"--cpu-count", fmt.Sprintf("%d", cfg.CPUCount),
@@ -63,52 +57,99 @@ func New(cfg signerconfig.AWSNitroConfig, log *slog.Logger) (*Backend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("nitro-cli run-enclave: %w\noutput: %s", err, out)
 	}
-
 	log.Info("enclave started", "cid", cfg.EnclaveCID)
 
-	b := &Backend{
-		enclaveCID: cfg.EnclaveCID,
-		log:        log,
+	b := &Backend{enclaveCID: cfg.EnclaveCID, log: log}
+
+	// Wait for the enclave to boot and open its init port.
+	if err := b.waitForPort(enclaveproto.VSockInitPort, 30*time.Second); err != nil {
+		return nil, fmt.Errorf("waiting for enclave init port: %w", err)
 	}
 
-	// Wait for the enclave to boot and be ready to accept vsock connections.
-	if err := b.waitForEnclave(30 * time.Second); err != nil {
-		return nil, fmt.Errorf("waiting for enclave: %w", err)
-	}
-
-	// Fetch and cache the public key.
-	pkBytes, err := b.fetchPublicKey()
+	// Get AWS credentials from the instance profile.
+	initMsg, err := b.buildInitMessage(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("fetching public key from enclave: %w", err)
+		return nil, fmt.Errorf("getting AWS credentials: %w", err)
+	}
+
+	// Send credentials to the enclave and receive the public key.
+	pkBytes, err := b.sendInit(initMsg)
+	if err != nil {
+		return nil, fmt.Errorf("enclave init: %w", err)
 	}
 	if len(pkBytes) != 48 {
 		return nil, fmt.Errorf("expected 48-byte public key, got %d", len(pkBytes))
 	}
 	b.pkBytes = pkBytes
 
-	log.Info("enclave ready",
-		"public_key_len", len(pkBytes),
-	)
-
+	log.Info("enclave ready")
 	return b, nil
 }
 
-// waitForEnclave polls the enclave vsock port until it responds or the timeout
-// expires.
-func (b *Backend) waitForEnclave(timeout time.Duration) error {
+// buildInitMessage gets temporary AWS credentials from the instance profile.
+func (b *Backend) buildInitMessage(cfg signerconfig.AWSNitroConfig) (enclaveproto.InitMessage, error) {
+	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(),
+		awsconfig.WithRegion(cfg.Region),
+	)
+	if err != nil {
+		return enclaveproto.InitMessage{}, fmt.Errorf("loading AWS config: %w", err)
+	}
+
+	creds, err := awsCfg.Credentials.Retrieve(context.Background())
+	if err != nil {
+		return enclaveproto.InitMessage{}, fmt.Errorf("retrieving credentials: %w", err)
+	}
+
+	return enclaveproto.InitMessage{
+		AccessKeyID:     creds.AccessKeyID,
+		SecretAccessKey: creds.SecretAccessKey,
+		SessionToken:    creds.SessionToken,
+		Region:          cfg.Region,
+	}, nil
+}
+
+// sendInit sends credentials to the enclave and returns the BLS public key.
+func (b *Backend) sendInit(msg enclaveproto.InitMessage) ([]byte, error) {
+	conn, err := vsock.Dial(b.enclaveCID, enclaveproto.VSockInitPort, nil)
+	if err != nil {
+		return nil, fmt.Errorf("vsock dial init port: %w", err)
+	}
+	defer conn.Close()
+
+	if err := json.NewEncoder(conn).Encode(msg); err != nil {
+		return nil, fmt.Errorf("sending init message: %w", err)
+	}
+
+	var resp enclaveproto.InitResponse
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		return nil, fmt.Errorf("decoding init response: %w", err)
+	}
+	if resp.Error != "" {
+		return nil, fmt.Errorf("enclave init error: %s", resp.Error)
+	}
+
+	pkBytes, err := hexDecode(resp.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("decoding public key: %w", err)
+	}
+	return pkBytes, nil
+}
+
+// waitForPort polls a vsock port until it's reachable or the timeout expires.
+func (b *Backend) waitForPort(port uint32, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		conn, err := b.dial()
+		conn, err := vsock.Dial(b.enclaveCID, port, nil)
 		if err == nil {
 			conn.Close()
 			return nil
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return fmt.Errorf("enclave did not become ready within %s", timeout)
+	return fmt.Errorf("enclave port %d not ready within %s", port, timeout)
 }
 
-// dial opens a vsock connection to the enclave.
+// dial opens a vsock connection to the enclave's signing port.
 func (b *Backend) dial() (net.Conn, error) {
 	return vsock.Dial(b.enclaveCID, enclaveproto.VSockPort, nil)
 }
@@ -135,26 +176,12 @@ func (b *Backend) send(req enclaveproto.Request) (enclaveproto.Response, error) 
 	return resp, nil
 }
 
-// fetchPublicKey requests the compressed BLS public key from the enclave.
-func (b *Backend) fetchPublicKey() ([]byte, error) {
-	resp, err := b.send(enclaveproto.Request{Type: enclaveproto.RequestPublicKey})
-	if err != nil {
-		return nil, err
-	}
-	return resp.Result, nil
-}
-
-// PublicKey returns the cached 48-byte compressed BLS public key.
-func (b *Backend) PublicKey(_ context.Context) ([]byte, error) {
-	return b.pkBytes, nil
-}
+// PublicKey returns the cached BLS public key.
+func (b *Backend) PublicKey(_ context.Context) ([]byte, error) { return b.pkBytes, nil }
 
 // Sign requests a BLS signature from the enclave using the Warp DST.
 func (b *Backend) Sign(_ context.Context, msg []byte) ([]byte, error) {
-	resp, err := b.send(enclaveproto.Request{
-		Type:    enclaveproto.RequestSign,
-		Message: msg,
-	})
+	resp, err := b.send(enclaveproto.Request{Type: enclaveproto.RequestSign, Message: msg})
 	if err != nil {
 		return nil, err
 	}
@@ -164,13 +191,9 @@ func (b *Backend) Sign(_ context.Context, msg []byte) ([]byte, error) {
 	return resp.Result, nil
 }
 
-// SignProofOfPossession requests a BLS proof-of-possession signature from the
-// enclave.
+// SignProofOfPossession requests a BLS PoP signature from the enclave.
 func (b *Backend) SignProofOfPossession(_ context.Context, msg []byte) ([]byte, error) {
-	resp, err := b.send(enclaveproto.Request{
-		Type:    enclaveproto.RequestSignPoP,
-		Message: msg,
-	})
+	resp, err := b.send(enclaveproto.Request{Type: enclaveproto.RequestSignPoP, Message: msg})
 	if err != nil {
 		return nil, err
 	}
@@ -190,4 +213,19 @@ func (b *Backend) Close() error {
 		return fmt.Errorf("nitro-cli terminate-enclave: %w\noutput: %s", err, out)
 	}
 	return nil
+}
+
+func hexDecode(s string) ([]byte, error) {
+	if len(s) == 0 {
+		return nil, fmt.Errorf("empty hex string")
+	}
+	out := make([]byte, len(s)/2)
+	for i := 0; i < len(s)-1; i += 2 {
+		var b byte
+		if _, err := fmt.Sscanf(s[i:i+2], "%02x", &b); err != nil {
+			return nil, fmt.Errorf("invalid hex at position %d: %w", i, err)
+		}
+		out[i/2] = b
+	}
+	return out, nil
 }

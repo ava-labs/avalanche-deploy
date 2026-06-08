@@ -44,8 +44,33 @@ type Response struct {
 	Error string `json:"error,omitempty"`
 }
 
-// VSockPort is the port the enclave listens on.
+// InitMessage is sent from the host to the enclave on a separate port (5001)
+// before signing requests begin.  It carries temporary AWS credentials so the
+// enclave can call KMS without needing IMDS access (which is unavailable inside
+// the enclave network).
+//
+// Security note: credentials cross the vsock boundary but the BLS plaintext key
+// never does — this is still a significant improvement over Phase 1 where the
+// key is decrypted on the host.  Full NSM attestation (where credentials are
+// not needed) is a future enhancement.
+type InitMessage struct {
+	AccessKeyID     string `json:"access_key_id"`
+	SecretAccessKey string `json:"secret_access_key"`
+	SessionToken    string `json:"session_token"`
+	Region          string `json:"region"`
+}
+
+// InitResponse is the enclave's reply to an InitMessage.
+type InitResponse struct {
+	PublicKey string `json:"public_key,omitempty"` // hex-encoded 48-byte G1 public key
+	Error     string `json:"error,omitempty"`
+}
+
+// VSockPort is the port the enclave listens on for sign/public-key requests.
 const VSockPort = 5000
+
+// VSockInitPort is the port the enclave listens on for the one-time init message.
+const VSockInitPort = 5001
 
 // MaxMessageSize is the maximum allowed request/response size (1 MB).
 const MaxMessageSize = 1 << 20

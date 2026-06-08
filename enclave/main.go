@@ -1,21 +1,23 @@
 // Copyright (C) 2024, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-// enclave/main.go runs inside the AWS Nitro Enclave.  It:
+// enclave/main.go runs inside the AWS Nitro Enclave.
 //
-//  1. Reads the encrypted BLS key blob from a file path passed as the first
-//     argument (the blob is baked into the enclave image at build time).
-//  2. Calls AWS KMS Decrypt via the KMS proxy running on the host.
-//     The proxy runs on vsock CID 3 and forwards requests to real AWS KMS
-//     while attaching the enclave attestation document automatically.
-//     KMS only decrypts when the PCRs in the attestation match the key policy.
-//  3. Holds the plaintext BLS key in memory.
-//  4. Listens on vsock port 5000 for sign/public-key requests from the host.
+// Startup sequence:
+//  1. Listen on vsock port 5001 for an InitMessage from the host.
+//     The host sends temporary AWS credentials (from its IMDS role) and the
+//     KMS key ID.  Enclaves have no IMDS access so credentials must be injected.
+//  2. Use those credentials to call KMS Decrypt via the vsock proxy on the host
+//     (CID 3, port 8443 → kms.<region>.amazonaws.com:443).
+//  3. Deserialize the decrypted BLS key and hold it in memory.
+//  4. Reply with the public key on the init connection.
+//  5. Listen on vsock port 5000 for sign/public-key requests.
 
 package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -24,10 +26,11 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/kms/types"
-	blst "github.com/supranational/blst/bindings/go"
 	"github.com/mdlayher/vsock"
+	blst "github.com/supranational/blst/bindings/go"
 
 	enclaveproto "github.com/ava-labs/avalanche-kms-signer/internal/enclaveproto"
 )
@@ -38,69 +41,121 @@ var (
 	dstPopProve = []byte("BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
 )
 
-// hostVSockCID is the vsock CID of the host — always 3 inside an enclave.
-const hostVSockCID = 3
+// hostCID is the vsock CID of the host — always 3 inside an enclave.
+const hostCID = 3
 
-// kmsProxyPort is the port the nitro-kms-proxy listens on on the host.
+// kmsProxyPort is the port vsock-proxy listens on for KMS traffic.
 const kmsProxyPort = 8443
 
 func main() {
-	if len(os.Args) < 3 {
-		log.Fatal("usage: enclave <encrypted-key-path> <kms-key-id>")
+	if len(os.Args) < 2 {
+		log.Fatal("usage: enclave <encrypted-key-path>")
 	}
 	encryptedKeyPath := os.Args[1]
-	kmsKeyID := os.Args[2]
 
-	// Read the encrypted BLS key blob baked into the image.
 	ciphertext, err := os.ReadFile(encryptedKeyPath)
 	if err != nil {
 		log.Fatalf("reading encrypted key: %v", err)
 	}
 
-	// Decrypt via KMS proxy on the host (vsock CID 3).
-	// The proxy attaches the enclave attestation document to the request,
-	// so KMS only decrypts if the PCRs match the key policy.
-	skBytes, err := decryptWithKMSProxy(kmsKeyID, ciphertext)
+	// Step 1: wait for init message from host (credentials + KMS key ID).
+	log.Printf("waiting for init message on vsock port %d...", enclaveproto.VSockInitPort)
+	init, initConn, err := receiveInit()
 	if err != nil {
+		log.Fatalf("receiving init: %v", err)
+	}
+
+	// Step 2: decrypt BLS key via KMS through the vsock proxy on the host.
+	skBytes, err := decryptKey(init, ciphertext)
+	if err != nil {
+		sendInitResponse(initConn, "", fmt.Sprintf("KMS decrypt: %v", err))
 		log.Fatalf("KMS decrypt: %v", err)
 	}
 	defer zeroize(skBytes)
 
-	// Deserialize the BLS key.
+	// Step 3: deserialize and validate the BLS key.
 	sk := new(blst.SecretKey)
 	if sk.Deserialize(skBytes) == nil {
+		sendInitResponse(initConn, "", "invalid BLS scalar")
 		log.Fatal("invalid BLS scalar from KMS decrypt")
 	}
 	pk := new(blst.P1Affine).From(sk)
-	pkBytes := pk.Compress()
+	pkHex := hex.EncodeToString(pk.Compress())
 
-	log.Printf("enclave ready, public key length: %d bytes", len(pkBytes))
+	log.Printf("BLS key decrypted successfully, public key: %s", pkHex)
 
-	// Serve signing requests over vsock.
-	if err := serve(sk, pkBytes); err != nil {
+	// Step 4: reply with public key on the init connection.
+	sendInitResponse(initConn, pkHex, "")
+	initConn.Close()
+
+	// Step 5: serve signing requests on port 5000.
+	if err := serve(sk, pk.Compress()); err != nil {
 		log.Fatalf("vsock server: %v", err)
 	}
 }
 
-// decryptWithKMSProxy calls the KMS proxy on the host over vsock.
-// The proxy (github.com/aws/aws-nitro-enclaves-sdk-go or nitro-kms-proxy)
-// forwards the request to AWS KMS and injects the attestation document.
-func decryptWithKMSProxy(keyID string, ciphertext []byte) ([]byte, error) {
-	// Point the KMS client at the vsock proxy.
-	// The proxy listens on CID 3 (host) and proxies to real AWS KMS.
-	proxyEndpoint := fmt.Sprintf("http://vsock:%d:%d", hostVSockCID, kmsProxyPort)
-
-	cfg, err := config.LoadDefaultConfig(context.Background())
+// receiveInit listens on vsock port 5001 for the host's InitMessage.
+func receiveInit() (enclaveproto.InitMessage, net.Conn, error) {
+	ln, err := vsock.Listen(enclaveproto.VSockInitPort, nil)
 	if err != nil {
-		return nil, fmt.Errorf("loading AWS config: %w", err)
+		return enclaveproto.InitMessage{}, nil, fmt.Errorf("vsock listen port %d: %w", enclaveproto.VSockInitPort, err)
+	}
+	defer ln.Close()
+
+	conn, err := ln.Accept()
+	if err != nil {
+		return enclaveproto.InitMessage{}, nil, fmt.Errorf("accept: %w", err)
+	}
+
+	var msg enclaveproto.InitMessage
+	if err := json.NewDecoder(conn).Decode(&msg); err != nil {
+		conn.Close()
+		return enclaveproto.InitMessage{}, nil, fmt.Errorf("decode init: %w", err)
+	}
+	return msg, conn, nil
+}
+
+// sendInitResponse sends the public key (or error) back on the init connection.
+func sendInitResponse(conn net.Conn, pkHex, errMsg string) {
+	_ = json.NewEncoder(conn).Encode(enclaveproto.InitResponse{
+		PublicKey: pkHex,
+		Error:     errMsg,
+	})
+}
+
+// decryptKey calls AWS KMS via the vsock proxy on the host using the injected credentials.
+func decryptKey(init enclaveproto.InitMessage, ciphertext []byte) ([]byte, error) {
+	// The vsock-proxy on the host (CID 3) forwards port 8443 → KMS HTTPS.
+	// We address it as a plain HTTP endpoint since vsock-proxy terminates TLS.
+	proxyEndpoint := fmt.Sprintf("http://vsock:%d:%d", hostCID, kmsProxyPort)
+
+	creds := credentials.NewStaticCredentialsProvider(
+		init.AccessKeyID,
+		init.SecretAccessKey,
+		init.SessionToken,
+	)
+
+	cfg, err := config.LoadDefaultConfig(context.Background(),
+		config.WithRegion(init.Region),
+		config.WithCredentialsProvider(creds),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("AWS config: %w", err)
 	}
 
 	client := kms.NewFromConfig(cfg, func(o *kms.Options) {
 		o.BaseEndpoint = aws.String(proxyEndpoint)
 	})
 
+	// Read KMS key ID from the baked-in file.
+	kmsKeyIDBytes, err := os.ReadFile("/kms-key-id.txt")
+	if err != nil {
+		return nil, fmt.Errorf("reading KMS key ID: %w", err)
+	}
+	kmsKeyID := string(kmsKeyIDBytes)
+
 	resp, err := client.Decrypt(context.Background(), &kms.DecryptInput{
-		KeyId:               aws.String(keyID),
+		KeyId:               aws.String(kmsKeyID),
 		CiphertextBlob:      ciphertext,
 		EncryptionAlgorithm: types.EncryptionAlgorithmSpecSymmetricDefault,
 	})
@@ -114,13 +169,13 @@ func decryptWithKMSProxy(keyID string, ciphertext []byte) ([]byte, error) {
 	return resp.Plaintext, nil
 }
 
-// serve listens on vsock port 5000 for requests from the host.
+// serve listens on vsock port 5000 for sign/public-key requests from the host.
 func serve(sk *blst.SecretKey, pkBytes []byte) error {
 	ln, err := vsock.Listen(enclaveproto.VSockPort, nil)
 	if err != nil {
-		return fmt.Errorf("vsock listen on port %d: %w", enclaveproto.VSockPort, err)
+		return fmt.Errorf("vsock listen port %d: %w", enclaveproto.VSockPort, err)
 	}
-	log.Printf("listening on vsock port %d", enclaveproto.VSockPort)
+	log.Printf("listening for signing requests on vsock port %d", enclaveproto.VSockPort)
 
 	for {
 		conn, err := ln.Accept()
@@ -142,11 +197,9 @@ func handleConn(conn net.Conn, sk *blst.SecretKey, pkBytes []byte) {
 	}
 
 	var resp enclaveproto.Response
-
 	switch req.Type {
 	case enclaveproto.RequestPublicKey:
 		resp.Result = pkBytes
-
 	case enclaveproto.RequestSign:
 		sig := new(blst.P2Affine).Sign(sk, req.Message, dstSign)
 		if sig == nil {
@@ -154,7 +207,6 @@ func handleConn(conn net.Conn, sk *blst.SecretKey, pkBytes []byte) {
 			return
 		}
 		resp.Result = sig.Compress()
-
 	case enclaveproto.RequestSignPoP:
 		sig := new(blst.P2Affine).Sign(sk, req.Message, dstPopProve)
 		if sig == nil {
@@ -162,15 +214,12 @@ func handleConn(conn net.Conn, sk *blst.SecretKey, pkBytes []byte) {
 			return
 		}
 		resp.Result = sig.Compress()
-
 	default:
 		writeError(conn, fmt.Sprintf("unknown request type: %q", req.Type))
 		return
 	}
 
-	if err := json.NewEncoder(conn).Encode(resp); err != nil {
-		log.Printf("encode response: %v", err)
-	}
+	_ = json.NewEncoder(conn).Encode(resp)
 }
 
 func writeError(conn net.Conn, msg string) {

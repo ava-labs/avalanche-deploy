@@ -80,6 +80,9 @@ type AWSConfig struct {
 
 // AWSNitroConfig holds AWS Nitro Enclave-specific settings.
 type AWSNitroConfig struct {
+	// Region is the AWS region for KMS calls.
+	Region string `yaml:"region"`
+
 	// EIFPath is the path to the Enclave Image File on the host.
 	EIFPath string `yaml:"eif_path"`
 
