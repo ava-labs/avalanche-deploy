@@ -110,9 +110,7 @@ func (b *Backend) waitForEnclave(timeout time.Duration) error {
 
 // dial opens a vsock connection to the enclave.
 func (b *Backend) dial() (net.Conn, error) {
-	return vsock.Dial(b.enclaveCID, enclaveproto.VSockPort, &vsock.Config{
-		DialTimeout: 2 * time.Second,
-	})
+	return vsock.Dial(b.enclaveCID, enclaveproto.VSockPort, nil)
 }
 
 // send sends a request to the enclave and returns the response.
