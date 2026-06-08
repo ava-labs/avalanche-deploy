@@ -35,4 +35,6 @@ COPY enclave-bin /enclave-bin
 # Copy the KMS-encrypted BLS key blob
 COPY bls.key.enc /bls.key.enc
 
-CMD ["/enclave-bin", "/bls.key.enc"]
+ARG KMS_KEY_ID
+RUN echo "${KMS_KEY_ID}" > /kms-key-id.txt
+CMD /enclave-bin /bls.key.enc $(cat /kms-key-id.txt)
