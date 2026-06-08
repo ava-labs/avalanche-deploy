@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net"
 	"os/exec"
+	"strings"
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -47,17 +48,24 @@ func New(cfg signerconfig.AWSNitroConfig, log *slog.Logger) (*Backend, error) {
 		"memory_mb", cfg.MemoryMiB,
 	)
 
-	cmd := exec.Command("nitro-cli", "run-enclave",
-		"--eif-path", cfg.EIFPath,
-		"--cpu-count", fmt.Sprintf("%d", cfg.CPUCount),
-		"--memory", fmt.Sprintf("%d", cfg.MemoryMiB),
-		"--enclave-cid", fmt.Sprintf("%d", cfg.EnclaveCID),
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("nitro-cli run-enclave: %w\noutput: %s", err, out)
+	// Check if an enclave is already running with the target CID.
+	// This handles the case where remote-signer crashed and restarted while the
+	// enclave kept running — we reconnect instead of launching a new one.
+	if enclaveRunning(cfg.EnclaveCID) {
+		log.Info("enclave already running, reconnecting", "cid", cfg.EnclaveCID)
+	} else {
+		cmd := exec.Command("nitro-cli", "run-enclave",
+			"--eif-path", cfg.EIFPath,
+			"--cpu-count", fmt.Sprintf("%d", cfg.CPUCount),
+			"--memory", fmt.Sprintf("%d", cfg.MemoryMiB),
+			"--enclave-cid", fmt.Sprintf("%d", cfg.EnclaveCID),
+		)
+		out, err := cmd.Output()
+		if err != nil {
+			return nil, fmt.Errorf("nitro-cli run-enclave: %w\noutput: %s", err, out)
+		}
+		log.Info("enclave started", "cid", cfg.EnclaveCID)
 	}
-	log.Info("enclave started", "cid", cfg.EnclaveCID)
 
 	b := &Backend{enclaveCID: cfg.EnclaveCID, log: log}
 
@@ -102,6 +110,15 @@ func (b *Backend) buildInitMessage(cfg signerconfig.AWSNitroConfig) (enclaveprot
 		SessionToken:    creds.SessionToken,
 		Region:          cfg.Region,
 	}, nil
+}
+
+// enclaveRunning returns true if an enclave with the given CID is already running.
+func enclaveRunning(cid uint32) bool {
+	out, err := exec.Command("nitro-cli", "describe-enclaves").Output()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(out), fmt.Sprintf(`"EnclaveCID": %d`, cid))
 }
 
 // sendInitWithRetry retries sendInit until it succeeds or the timeout expires.
