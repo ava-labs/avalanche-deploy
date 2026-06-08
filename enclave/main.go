@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -132,12 +133,22 @@ func sendInitResponse(conn net.Conn, pkHex, errMsg string) {
 	})
 }
 
+// vsockHTTPClient returns an HTTP client that routes all connections through
+// the vsock proxy on the host (CID 3, port 8443).  vsock-proxy forwards to
+// kms.<region>.amazonaws.com:443.  TLS is end-to-end — the SDK sets SNI from
+// the request URL so certificates validate correctly.
+func vsockHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return vsock.Dial(hostCID, kmsProxyPort, nil)
+			},
+		},
+	}
+}
+
 // decryptKey calls AWS KMS via the vsock proxy on the host using the injected credentials.
 func decryptKey(init enclaveproto.InitMessage, ciphertext []byte) ([]byte, error) {
-	// The vsock-proxy on the host (CID 3) forwards port 8443 → KMS HTTPS.
-	// We address it as a plain HTTP endpoint since vsock-proxy terminates TLS.
-	proxyEndpoint := fmt.Sprintf("http://vsock:%d:%d", hostCID, kmsProxyPort)
-
 	creds := credentials.NewStaticCredentialsProvider(
 		init.AccessKeyID,
 		init.SecretAccessKey,
@@ -147,14 +158,13 @@ func decryptKey(init enclaveproto.InitMessage, ciphertext []byte) ([]byte, error
 	cfg, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion(init.Region),
 		config.WithCredentialsProvider(creds),
+		config.WithHTTPClient(vsockHTTPClient()),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("AWS config: %w", err)
 	}
 
-	client := kms.NewFromConfig(cfg, func(o *kms.Options) {
-		o.BaseEndpoint = aws.String(proxyEndpoint)
-	})
+	client := kms.NewFromConfig(cfg)
 
 	// Read KMS key ID from the baked-in file.
 	kmsKeyIDBytes, err := os.ReadFile("/kms-key-id.txt")
