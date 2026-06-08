@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"log"
 	"net"
 	"net/http"
@@ -171,7 +172,7 @@ func decryptKey(init enclaveproto.InitMessage, ciphertext []byte) ([]byte, error
 	if err != nil {
 		return nil, fmt.Errorf("reading KMS key ID: %w", err)
 	}
-	kmsKeyID := string(kmsKeyIDBytes)
+	kmsKeyID := strings.TrimSpace(string(kmsKeyIDBytes))
 
 	resp, err := client.Decrypt(context.Background(), &kms.DecryptInput{
 		KeyId:               aws.String(kmsKeyID),
