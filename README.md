@@ -29,12 +29,14 @@ AvalancheGo ──gRPC──▶ avalanche-kms-signer ──▶ Backend
                                                   ├── gcp-kms  ✅ available
                                                   ├── azure-kv ✅ available
                                                   ├── vault    ✅ available
-                                                  └── aws-nitro (Phase 2)
+                                                  └── aws-nitro ✅ available
 ```
 
 For cloud KMS backends (AWS/GCP/Azure), the sidecar decrypts the BLS key blob at startup and holds it in memory for signing. The plaintext key **never touches disk** at runtime.
 
-For the Vault backend, the key **never leaves Vault's process** — signing happens inside the plugin and only signatures cross the API boundary. This is the most secure option.
+For the Vault backend, the key **never leaves Vault's process** — signing happens inside the plugin and only signatures cross the API boundary.
+
+For the Nitro Enclave backend, the key is decrypted and used **exclusively inside the enclave VM** — the host OS never sees the plaintext key even with root access. The KMS key policy enforces this via PCR0 attestation.
 
 The gRPC server exposes three methods matching AvalancheGo's interface:
 
@@ -224,11 +226,19 @@ See **[docs/azure-kv.md](docs/azure-kv.md)** for full setup instructions includi
 
 Credentials use `DefaultAzureCredential`: environment variables, managed identity, Azure CLI, etc.
 
-### `vault` — HashiCorp Vault ⭐ most secure
+### `aws-nitro` — AWS Nitro Enclave ⭐ strongest isolation on AWS
+
+See **[docs/aws-nitro.md](docs/aws-nitro.md)** for full setup instructions including instance launch, enclave image build, and KMS PCR0 policy configuration.
+
+The Nitro Enclave backend decrypts and uses the BLS key exclusively inside the enclave VM. The host OS never sees the plaintext key — even root cannot extract it. The KMS key policy uses PCR0 attestation to ensure decryption only happens inside the specific enclave image.
+
+Requires an EC2 instance with Nitro Enclaves enabled (m5, c5, r5, z1d families).
+
+### `vault` — HashiCorp Vault
 
 See **[docs/vault.md](docs/vault.md)** for full setup instructions including plugin installation, Kubernetes auth, and audit logging.
 
-The Vault backend uses a custom BLS signing plugin. Unlike the cloud KMS backends, the plaintext BLS key **never leaves Vault's process** — signing happens inside the plugin and only signatures cross the API boundary. This is the strongest security model of all available backends.
+The Vault backend uses a custom BLS signing plugin. The plaintext BLS key never leaves Vault's process — signing happens inside the plugin and only signatures cross the API boundary.
 
 Supported auth methods: `token` (dev), `kubernetes` (production k8s), `aws-iam` (EC2).
 
@@ -286,7 +296,7 @@ Flags:
 | `gcp-kms` | ✅ KMS-encrypted blob | ✅ Decrypted at boot | In process |
 | `azure-kv` | ✅ KMS-encrypted blob | ✅ Decrypted at boot | In process |
 | `vault` | ✅ Vault encrypted storage | ❌ Never in signer process | Inside Vault plugin |
-| `aws-nitro` | ✅ KMS-encrypted blob | ✅ Inside enclave only | Inside enclave |
+| `aws-nitro` | ✅ KMS-encrypted blob | ✅ Inside enclave only — host never sees plaintext | Inside enclave |
 
 ### Threat mitigations
 
