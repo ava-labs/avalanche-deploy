@@ -61,19 +61,15 @@ func New(cfg signerconfig.AWSNitroConfig, log *slog.Logger) (*Backend, error) {
 
 	b := &Backend{enclaveCID: cfg.EnclaveCID, log: log}
 
-	// Wait for the enclave to boot and open its init port.
-	if err := b.waitForPort(enclaveproto.VSockInitPort, 30*time.Second); err != nil {
-		return nil, fmt.Errorf("waiting for enclave init port: %w", err)
-	}
-
-	// Get AWS credentials from the instance profile.
+	// Get AWS credentials before the enclave finishes booting.
 	initMsg, err := b.buildInitMessage(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("getting AWS credentials: %w", err)
 	}
 
-	// Send credentials to the enclave and receive the public key.
-	pkBytes, err := b.sendInit(initMsg)
+	// Send credentials to the enclave with retry — the enclave needs a few
+	// seconds to boot before it accepts vsock connections.
+	pkBytes, err := b.sendInitWithRetry(initMsg, 30*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("enclave init: %w", err)
 	}
@@ -106,6 +102,22 @@ func (b *Backend) buildInitMessage(cfg signerconfig.AWSNitroConfig) (enclaveprot
 		SessionToken:    creds.SessionToken,
 		Region:          cfg.Region,
 	}, nil
+}
+
+// sendInitWithRetry retries sendInit until it succeeds or the timeout expires.
+func (b *Backend) sendInitWithRetry(msg enclaveproto.InitMessage, timeout time.Duration) ([]byte, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		pkBytes, err := b.sendInit(msg)
+		if err == nil {
+			return pkBytes, nil
+		}
+		lastErr = err
+		b.log.Debug("enclave not ready yet, retrying...", "err", err)
+		time.Sleep(500 * time.Millisecond)
+	}
+	return nil, fmt.Errorf("timed out after %s: %w", timeout, lastErr)
 }
 
 // sendInit sends credentials to the enclave and returns the BLS public key.

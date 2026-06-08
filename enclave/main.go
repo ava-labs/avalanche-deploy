@@ -95,24 +95,33 @@ func main() {
 }
 
 // receiveInit listens on vsock port 5001 for the host's InitMessage.
+// It keeps accepting connections until it receives a valid InitMessage,
+// so that a probe connection (empty) doesn't consume the accept slot.
 func receiveInit() (enclaveproto.InitMessage, net.Conn, error) {
 	ln, err := vsock.Listen(enclaveproto.VSockInitPort, nil)
 	if err != nil {
 		return enclaveproto.InitMessage{}, nil, fmt.Errorf("vsock listen port %d: %w", enclaveproto.VSockInitPort, err)
 	}
-	defer ln.Close()
+	// Note: do NOT defer ln.Close() — caller needs the listener open.
 
-	conn, err := ln.Accept()
-	if err != nil {
-		return enclaveproto.InitMessage{}, nil, fmt.Errorf("accept: %w", err)
-	}
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			ln.Close()
+			return enclaveproto.InitMessage{}, nil, fmt.Errorf("accept: %w", err)
+		}
 
-	var msg enclaveproto.InitMessage
-	if err := json.NewDecoder(conn).Decode(&msg); err != nil {
-		conn.Close()
-		return enclaveproto.InitMessage{}, nil, fmt.Errorf("decode init: %w", err)
+		var msg enclaveproto.InitMessage
+		if err := json.NewDecoder(conn).Decode(&msg); err != nil {
+			// Empty or invalid connection — close and wait for the real one.
+			conn.Close()
+			continue
+		}
+
+		// Got a valid message — close the listener and return.
+		ln.Close()
+		return msg, conn, nil
 	}
-	return msg, conn, nil
 }
 
 // sendInitResponse sends the public key (or error) back on the init connection.
