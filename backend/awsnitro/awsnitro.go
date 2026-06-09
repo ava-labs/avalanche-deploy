@@ -227,6 +227,15 @@ func (b *Backend) send(req enclaveproto.Request) (enclaveproto.Response, error) 
 	return resp, nil
 }
 
+// fetchPublicKey requests the BLS public key from the enclave's signing port.
+func (b *Backend) fetchPublicKey() ([]byte, error) {
+	resp, err := b.send(enclaveproto.Request{Type: enclaveproto.RequestPublicKey})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Result, nil
+}
+
 // PublicKey returns the cached BLS public key.
 func (b *Backend) PublicKey(_ context.Context) ([]byte, error) { return b.pkBytes, nil }
 
