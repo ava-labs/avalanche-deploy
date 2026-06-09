@@ -69,18 +69,29 @@ func New(cfg signerconfig.AWSNitroConfig, log *slog.Logger) (*Backend, error) {
 
 	b := &Backend{enclaveCID: cfg.EnclaveCID, log: log}
 
-	// Get AWS credentials before the enclave finishes booting.
-	initMsg, err := b.buildInitMessage(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("getting AWS credentials: %w", err)
+	var pkBytes []byte
+
+	if enclaveRunning(cfg.EnclaveCID) && isEnclaveReady(cfg.EnclaveCID) {
+		// Enclave is already running and the signing port is open — skip init
+		// and just fetch the public key.  This handles remote-signer restarts.
+		log.Info("enclave already initialized, fetching public key", "cid", cfg.EnclaveCID)
+		var err error
+		pkBytes, err = b.fetchPublicKey()
+		if err != nil {
+			return nil, fmt.Errorf("fetching public key from running enclave: %w", err)
+		}
+	} else {
+		// Fresh start — send credentials and wait for the enclave to decrypt the key.
+		initMsg, err := b.buildInitMessage(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("getting AWS credentials: %w", err)
+		}
+		pkBytes, err = b.sendInitWithRetry(initMsg, 30*time.Second)
+		if err != nil {
+			return nil, fmt.Errorf("enclave init: %w", err)
+		}
 	}
 
-	// Send credentials to the enclave with retry — the enclave needs a few
-	// seconds to boot before it accepts vsock connections.
-	pkBytes, err := b.sendInitWithRetry(initMsg, 30*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("enclave init: %w", err)
-	}
 	if len(pkBytes) != 48 {
 		return nil, fmt.Errorf("expected 48-byte public key, got %d", len(pkBytes))
 	}
@@ -110,6 +121,17 @@ func (b *Backend) buildInitMessage(cfg signerconfig.AWSNitroConfig) (enclaveprot
 		SessionToken:    creds.SessionToken,
 		Region:          cfg.Region,
 	}, nil
+}
+
+// isEnclaveReady returns true if the enclave's signing port (5000) is accepting
+// connections, meaning the enclave has already been initialized with credentials.
+func isEnclaveReady(cid uint32) bool {
+	conn, err := vsock.Dial(cid, enclaveproto.VSockPort, nil)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 // enclaveRunning returns true if an enclave with the given CID is already running.
