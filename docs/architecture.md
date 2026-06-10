@@ -2,7 +2,7 @@
 
 ## Overview
 
-`avalanche-kms-signer` is a gRPC sidecar that runs alongside AvalancheGo on a validator node. AvalancheGo delegates all BLS signing operations to the sidecar via the `signer.proto` interface, while the sidecar handles key storage and cryptographic operations using a pluggable backend.
+`avalanche-remote-signer` is a gRPC sidecar that runs alongside AvalancheGo on a validator node. AvalancheGo delegates all BLS signing operations to the sidecar via the `signer.proto` interface, while the sidecar handles key storage and cryptographic operations using a pluggable backend.
 
 ```
 ┌─────────────────────────────────┐
@@ -11,7 +11,7 @@
 │  ┌───────────────┐               │
 │  │  AvalancheGo  │               │
 │  │               │──gRPC (50051)─┼──▶┌────────────────────────┐
-│  │  peer handshakes              │   │  avalanche-kms-signer  │
+│  │  peer handshakes              │   │ avalanche-remote-signer│
 │  │  ICM messages  │◀─────────────┼───│                        │
 │  └───────────────┘  signatures  │   │  PublicKey()           │
 │                                  │   │  Sign()                │
