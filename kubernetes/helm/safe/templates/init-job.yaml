@@ -226,6 +226,13 @@ spec:
               # ============================================================
               # Step 2: Create Celery periodic tasks for indexing
               # TXS uses DatabaseScheduler - tasks must be created in DB
+              #
+              # index_internal_txs_task is the trace-based indexer and requires
+              # the Parity/OpenEthereum trace_block RPC method, which Avalanche
+              # EVMs do not expose. Only seed it for non-L2 networks: with
+              # ETH_L2_NETWORK=1 the SafeL2 events indexer covers the same data
+              # via eth_getLogs. Seeding both double-indexes every transfer and
+              # floods the indexer with "trace_block does not exist" errors.
               # ============================================================
               print("\n=== Step 2: Create Celery periodic tasks ===\n")
 
@@ -238,8 +245,11 @@ spec:
               every_1h, _ = IntervalSchedule.objects.get_or_create(every=1, period=IntervalSchedule.HOURS)
 
               tasks = [
+              {{- if not .Values.l1.useL2 }}
                   ("index_internal_txs", "safe_transaction_service.history.tasks.index_internal_txs_task", every_10s),
+              {{- else }}
                   ("index_safe_events", "safe_transaction_service.history.tasks.index_safe_events_task", every_10s),
+              {{- end }}
                   ("index_erc20_events", "safe_transaction_service.history.tasks.index_erc20_events_task", every_10s),
                   ("index_new_proxies", "safe_transaction_service.history.tasks.index_new_proxies_task", every_30s),
                   ("check_reorgs", "safe_transaction_service.history.tasks.check_reorgs_task", every_60s),
@@ -247,6 +257,13 @@ spec:
                   ("reindex_master_copies", "safe_transaction_service.history.tasks.reindex_master_copies_task", every_1h),
                   ("check_sync_status", "safe_transaction_service.history.tasks.check_sync_status_task", every_5m),
               ]
+
+              {{- if .Values.l1.useL2 }}
+              # Remediate deployments that previously seeded the trace-based task
+              removed, _ = PeriodicTask.objects.filter(name="index_internal_txs").delete()
+              if removed:
+                  print("  Removed trace-based index_internal_txs task (L2 network)")
+              {{- end }}
 
               created_count = 0
               for name, task, interval in tasks:

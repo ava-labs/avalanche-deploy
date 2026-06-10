@@ -168,6 +168,39 @@ NOT the HTTPS proxy (`https://<rpc-node-ip>/rpc`).
 
 For production, use a real domain with Let's Encrypt (`safe_use_letsencrypt: true`) to eliminate this issue entirely.
 
+### Transaction stuck on "indexing..." / `trace_block does not exist` / duplicate transfers
+
+Symptoms (all three share one root cause):
+- Executing a transaction in the UI hangs at "indexing..." and the pending tx eventually disappears
+- Transaction Service indexer logs show `the method trace_block does not exist/is not available`
+- `/api/v1/safes/<address>/transfers/` returns the same transfer twice (same `transactionHash`, different `transferId` — one ending in a log index like `...1`, one in a trace address like `...0,0`), and history in the UI shows duplicate/missing entries
+
+Cause: the celery beat schedule was seeded with `index_internal_txs_task`, the **trace-based** indexer. It requires the Parity/OpenEthereum `trace_block` RPC method, which Avalanche EVMs do not expose. On L2 networks (`ETH_L2_NETWORK=1`, the default here) the SafeL2 events indexer already indexes the same data via `eth_getLogs` — running both double-indexes every transfer. Deployments created before this was fixed have the stale task in the database.
+
+**Fix on an existing deployment** (or just re-run the `deploy-safe` playbook, which now does step 1 automatically):
+
+```bash
+# 1. Remove the trace-based periodic task
+docker exec safe-txs-web python manage.py shell -c "
+from django_celery_beat.models import PeriodicTask
+print(PeriodicTask.objects.filter(name='index_internal_txs').delete())
+"
+
+# 2. Delete the duplicate trace-indexed rows.
+# Event-indexed internal txs have a single log-index trace_address (e.g. '7');
+# trace-indexed rows from a call tree contain ',' (e.g. '0,0').
+docker exec safe-txs-web python manage.py shell -c "
+from safe_transaction_service.history.models import InternalTx
+dupes = InternalTx.objects.filter(trace_address__contains=',')
+print('Deleting', dupes.count(), 'trace-indexed internal txs:', dupes.delete())
+"
+
+# 3. Restart indexer workers so in-flight tasks pick up the change
+cd /opt/safe && docker compose restart txs-worker-indexer txs-scheduler
+```
+
+Pending signatures and proposed transactions are not affected — they live in separate tables.
+
 ### Database issues
 
 Reset databases (WARNING: destroys all Safe data):

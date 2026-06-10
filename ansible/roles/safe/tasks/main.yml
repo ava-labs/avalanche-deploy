@@ -761,7 +761,16 @@
   failed_when: safe_txs_init.rc != 0
 
 # Setup Celery beat periodic tasks for indexing
-# TXS uses DatabaseScheduler, so periodic tasks must be created in the DB
+# TXS uses DatabaseScheduler, so periodic tasks must be created in the DB.
+#
+# index_internal_txs_task is the trace-based indexer and requires the
+# Parity/OpenEthereum trace_block RPC method, which Avalanche EVMs do not
+# expose. It must only be seeded for non-L2 networks: with ETH_L2_NETWORK=1
+# the SafeL2 events indexer (index_safe_events_task) covers the same data via
+# eth_getLogs. Seeding both double-indexes every transfer (duplicate entries
+# in /transfers/, same tx hash with trace-style and event-style transferIds)
+# and floods the indexer logs with "trace_block does not exist" errors, which
+# also leaves the UI stuck on "indexing..." after executing a transaction.
 - name: Setup indexing periodic tasks
   ansible.builtin.shell:
     cmd: |
@@ -773,8 +782,11 @@
       every_5m, _ = IntervalSchedule.objects.get_or_create(every=5, period=IntervalSchedule.MINUTES)
       every_1h, _ = IntervalSchedule.objects.get_or_create(every=1, period=IntervalSchedule.HOURS)
       tasks = [
+      {% if not safe_use_l2 %}
           ('index_internal_txs', 'safe_transaction_service.history.tasks.index_internal_txs_task', every_10s),
+      {% else %}
           ('index_safe_events', 'safe_transaction_service.history.tasks.index_safe_events_task', every_10s),
+      {% endif %}
           ('index_erc20_events', 'safe_transaction_service.history.tasks.index_erc20_events_task', every_10s),
           ('index_new_proxies', 'safe_transaction_service.history.tasks.index_new_proxies_task', every_30s),
           ('check_reorgs', 'safe_transaction_service.history.tasks.check_reorgs_task', every_60s),
@@ -782,6 +794,12 @@
           ('reindex_master_copies', 'safe_transaction_service.history.tasks.reindex_master_copies_task', every_1h),
           ('check_sync_status', 'safe_transaction_service.history.tasks.check_sync_status_task', every_5m),
       ]
+      {% if safe_use_l2 %}
+      # Remediate deployments that previously seeded the trace-based task
+      removed, _ = PeriodicTask.objects.filter(name='index_internal_txs').delete()
+      if removed:
+          print('Removed trace-based index_internal_txs task (L2 network)')
+      {% endif %}
       created_count = 0
       for name, task, interval in tasks:
           obj, created = PeriodicTask.objects.update_or_create(
@@ -792,7 +810,9 @@
       print('Created ' + str(created_count) + ' periodic tasks, total: ' + str(PeriodicTask.objects.count()))
       "
   register: safe_periodic_tasks
-  changed_when: "'Created' in safe_periodic_tasks.stdout and 'Created 0' not in safe_periodic_tasks.stdout"
+  changed_when: >-
+    ('Created' in safe_periodic_tasks.stdout and 'Created 0' not in safe_periodic_tasks.stdout)
+    or 'Removed trace-based' in safe_periodic_tasks.stdout
 
 # Validation - ensure chain and contracts are properly registered
 - name: Verify chain registered in Config Service
