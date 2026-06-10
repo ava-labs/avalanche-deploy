@@ -175,3 +175,9 @@ variable "enable_staking_key_backup" {
   type        = bool
   default     = true
 }
+
+variable "owner_tag" {
+  description = "Value for an Owner tag applied to all resources via provider default_tags. Required by some org SCPs; leave empty to skip."
+  type        = string
+  default     = ""
+}

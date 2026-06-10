@@ -11,6 +11,12 @@ terraform {
 
 provider "aws" {
   region = var.region
+
+  # Some org SCPs deny resource creation without an Owner tag.
+  # default_tags applies it to every taggable resource, including IAM and S3.
+  default_tags {
+    tags = var.owner_tag != "" ? { Owner = var.owner_tag } : {}
+  }
 }
 
 # Get operator IP automatically
