@@ -34,7 +34,7 @@ import (
 
 // Domain separation tags — must match AvalancheGo exactly.
 var (
-	dstSign     = hex.EncodeToString([]byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_"))
+	dstSign     = hex.EncodeToString([]byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_"))
 	dstPopProve = hex.EncodeToString([]byte("BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_"))
 )
 

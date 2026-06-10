@@ -16,7 +16,7 @@ import (
 // supply them.  The generic sign endpoint accepts an arbitrary DST for
 // flexibility; sign-pop uses the PoP DST unconditionally.
 var (
-	dstSign     = hex.EncodeToString([]byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_"))
+	dstSign     = hex.EncodeToString([]byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_"))
 	dstPopProve = hex.EncodeToString([]byte("BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_"))
 )
 

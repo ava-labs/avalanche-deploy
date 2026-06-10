@@ -112,7 +112,7 @@ BLS signing requires a domain separation tag (DST) to bind signatures to their i
 
 | Method                  | DST                                           | Used for                          |
 | ----------------------- | --------------------------------------------- | --------------------------------- |
-| `Sign`                  | `BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_` | Warp / ICM message signatures     |
+| `Sign`                  | `BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_` | Warp / ICM message signatures     |
 | `SignProofOfPossession` | `BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_` | P2P handshake proof-of-possession |
 
 

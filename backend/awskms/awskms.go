@@ -46,7 +46,7 @@ type Backend struct {
 
 // Domain separation tags — must match AvalancheGo exactly.
 var (
-	dstSign     = []byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_")
+	dstSign     = []byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
 	dstPopProve = []byte("BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
 )
 
