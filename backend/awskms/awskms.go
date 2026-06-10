@@ -44,10 +44,11 @@ type Backend struct {
 	log     *slog.Logger
 }
 
-// Domain separation tags — must match AvalancheGo exactly.
+// Domain separation tags — single source of truth in blstutil,
+// cross-checked against AvalancheGo by the tests in compat/.
 var (
-	dstSign     = []byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
-	dstPopProve = []byte("BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
+	dstSign     = blstutil.DSTSign
+	dstPopProve = blstutil.DSTPoP
 )
 
 // New loads and decrypts the BLS key from disk using AWS KMS.

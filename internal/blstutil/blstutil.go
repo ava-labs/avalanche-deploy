@@ -18,6 +18,18 @@ const (
 	SignatureSize = 96
 )
 
+// Domain separation tags used by AvalancheGo, which implements the IETF BLS
+// proof-of-possession scheme (see avalanchego utils/crypto/bls/ciphersuite.go).
+// Warp/ICM message signatures use DSTSign; proofs of possession use DSTPoP.
+// Note the message-signing DST ends in POP_ (the scheme tag), NOT NUL_ —
+// NUL_ is the basic scheme and its signatures are rejected by every Avalanche
+// warp verifier. These constants are cross-checked against AvalancheGo by the
+// tests in compat/.
+var (
+	DSTSign = []byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
+	DSTPoP  = []byte("BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
+)
+
 // KeyGen derives a valid BLS12-381 secret key from input key material (IKM)
 // using the standard HKDF-based derivation.  IKM must be at least 32 bytes.
 func KeyGen(ikm []byte) ([]byte, error) {
