@@ -209,6 +209,18 @@ cd /opt/safe && docker compose up -d
 
 Pending signatures and proposed transactions are not affected — they live in separate tables.
 
+### CLOSE_WAIT connections accumulating
+
+`ss -tan state close-wait` (or `/proc/net/tcp` inside the `safe-txs-worker-indexer` container) shows tens to ~100+ sockets in CLOSE_WAIT, all pointing at the avalanchego RPC port (9650).
+
+This is expected behavior, not a misconfiguration or a leak that grows unboundedly. The TXS celery workers create short-lived HTTP sessions against the RPC; avalanchego closes keep-alive connections after its idle timeout (120s), and the worker's abandoned sockets sit in CLOSE_WAIT until Python garbage-collects the session objects. The count climbs quickly after a restart, then plateaus (GC keeps pace with session churn). It does not exhaust file descriptors at normal indexing volume.
+
+Verify it plateaus rather than grows linearly:
+```bash
+docker exec safe-txs-worker-indexer sh -c 'awk "\$4==\"08\"" /proc/net/tcp | wc -l'
+# sample a few times 10+ minutes apart
+```
+
 ### Database issues
 
 Reset databases (WARNING: destroys all Safe data):

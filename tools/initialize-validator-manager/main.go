@@ -443,13 +443,13 @@ func initializeSettings(ctx context.Context, contractsPath, rpcURL, privKey, pro
 }
 
 func deployPoAManager(ctx context.Context, contractsPath, rpcURL, privKey, owner, validatorManager, libAddr string) (string, error) {
-	args := []string{"--constructor-args", owner, validatorManager}
-	if libAddr != "" {
-		args = append([]string{validatorMessagesLibraryFlag(libAddr)}, args...)
-	}
+	// icm-contracts renamed PoAValidatorManager to PoAManager, a thin
+	// Ownable wrapper around ValidatorManager that does not link
+	// ValidatorMessages, so no --libraries flag is needed.
+	_ = libAddr
 	return forgeCreate(ctx, contractsPath, rpcURL, privKey,
-		"contracts/validator-manager/PoAValidatorManager.sol:PoAValidatorManager",
-		args...)
+		"contracts/validator-manager/PoAManager.sol:PoAManager",
+		"--constructor-args", owner, validatorManager)
 }
 
 func transferOwnership(ctx context.Context, contractsPath, rpcURL, privKey, proxyAddress, newOwner string) error {
