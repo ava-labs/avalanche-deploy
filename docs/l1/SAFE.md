@@ -175,28 +175,36 @@ Symptoms (all three share one root cause):
 - Transaction Service indexer logs show `the method trace_block does not exist/is not available`
 - `/api/v1/safes/<address>/transfers/` returns the same transfer twice (same `transactionHash`, different `transferId` — one ending in a log index like `...1`, one in a trace address like `...0,0`), and history in the UI shows duplicate/missing entries
 
-Cause: the celery beat schedule was seeded with `index_internal_txs_task`, the **trace-based** indexer. It requires the Parity/OpenEthereum `trace_block` RPC method, which Avalanche EVMs do not expose. On L2 networks (`ETH_L2_NETWORK=1`, the default here) the SafeL2 events indexer already indexes the same data via `eth_getLogs` — running both double-indexes every transfer. Deployments created before this was fixed have the stale task in the database.
+Two distinct causes, both addressed by this repo:
 
-**Fix on an existing deployment** (or just re-run the `deploy-safe` playbook, which now does step 1 automatically):
+1. **Stale trace-based indexing task.** The celery beat schedule was seeded with `index_internal_txs_task`, the **trace-based** indexer. It requires the Parity/OpenEthereum `trace_block` RPC method, which Avalanche EVMs do not expose, so the task fails forever — that's the log spam and the stuck "indexing..." UI. On L2 networks (`ETH_L2_NETWORK=1`, the default here) the SafeL2 events indexer already covers the same data via `eth_getLogs`. Re-running the `deploy-safe` playbook now removes the stale task automatically, or remove it manually:
+
+   ```bash
+   docker exec safe-txs-web python manage.py shell -c "
+   from django_celery_beat.models import PeriodicTask
+   print(PeriodicTask.objects.filter(name='index_internal_txs').delete())
+   "
+   ```
+
+2. **Upstream Safe→Safe duplicate ([safe-transaction-service#1556](https://github.com/safe-global/safe-transaction-service/issues/1556), open since 2023).** For a native send from one indexed Safe to another, the events indexer creates **two** transfer rows: a simulated sender-side transfer from the `SafeMultiSigTransaction` event (transferId ending in a trace address like `...0,0`) and the receiver's `SafeReceived` event (transferId ending in a log index like `...1`). This reproduces on production Safe deployments on Base/Polygon/Celo too. This repo ships a patched `safe_events_indexer.py` (bind-mounted over the image module, see `roles/safe/files/patches/`) that skips the simulated row when the recipient is an indexed Safe — re-run the `deploy-safe` playbook to apply it.
+
+**Cleaning up duplicates that were already indexed:** delete only the simulated child rows that have an event-indexed twin for the same transaction:
 
 ```bash
-# 1. Remove the trace-based periodic task
-docker exec safe-txs-web python manage.py shell -c "
-from django_celery_beat.models import PeriodicTask
-print(PeriodicTask.objects.filter(name='index_internal_txs').delete())
-"
-
-# 2. Delete the duplicate trace-indexed rows.
-# Event-indexed internal txs have a single log-index trace_address (e.g. '7');
-# trace-indexed rows from a call tree contain ',' (e.g. '0,0').
 docker exec safe-txs-web python manage.py shell -c "
 from safe_transaction_service.history.models import InternalTx
-dupes = InternalTx.objects.filter(trace_address__contains=',')
-print('Deleting', dupes.count(), 'trace-indexed internal txs:', dupes.delete())
+dupes = [
+    tx.pk for tx in InternalTx.objects.filter(trace_address__contains=',', value__gt=0)
+    if InternalTx.objects.filter(
+        ethereum_tx=tx.ethereum_tx, _from=tx._from, to=tx.to, value=tx.value,
+    ).exclude(trace_address__contains=',').exists()
+]
+print('Deleting', len(dupes), 'duplicated simulated transfers:',
+      InternalTx.objects.filter(pk__in=dupes).delete())
 "
 
-# 3. Restart indexer workers so in-flight tasks pick up the change
-cd /opt/safe && docker compose restart txs-worker-indexer txs-scheduler
+# Restart so workers pick up the schedule + patch
+cd /opt/safe && docker compose up -d
 ```
 
 Pending signatures and proposed transactions are not affected — they live in separate tables.

@@ -505,6 +505,23 @@
     dest: "{{ safe_install_dir }}/init/init-cfg-chain.py"
     mode: '0755'
 
+- name: Create patches directory
+  ansible.builtin.file:
+    path: "{{ safe_install_dir }}/patches"
+    state: directory
+    mode: '0755'
+
+# Bind-mounted over the upstream module by docker-compose. Fixes upstream
+# issue safe-global/safe-transaction-service#1556: Safe->Safe native sends
+# are indexed twice on event-indexed (L2) networks. Regenerate the patch
+# when bumping safe_txs_version.
+- name: Copy safe-events-indexer dedup patch
+  ansible.builtin.copy:
+    src: patches/safe_events_indexer.py
+    dest: "{{ safe_install_dir }}/patches/safe_events_indexer.py"
+    mode: '0644'
+  notify: Restart safe services
+
 - name: Template systemd service
   ansible.builtin.template:
     src: safe.service.j2

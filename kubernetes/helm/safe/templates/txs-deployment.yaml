@@ -21,6 +21,10 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      volumes:
+        - name: txs-patches
+          configMap:
+            name: {{ include "safe.fullname" . }}-txs-patches
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -68,3 +72,8 @@ spec:
             failureThreshold: 3
           resources:
             {{- toYaml .Values.txs.resources | nindent 12 }}
+          volumeMounts:
+            - name: txs-patches
+              mountPath: /app/safe_transaction_service/history/indexers/safe_events_indexer.py
+              subPath: safe_events_indexer.py
+              readOnly: true

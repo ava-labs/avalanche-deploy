@@ -95,6 +95,7 @@ services:
         condition: service_healthy
     volumes:
       - {{ safe_install_dir }}/init:/init:ro
+      - {{ safe_install_dir }}/patches/safe_events_indexer.py:/app/safe_transaction_service/history/indexers/safe_events_indexer.py:ro
     ports:
       - "{{ safe_txs_port }}:8888"
     command: docker/web/run_web.sh
@@ -112,6 +113,8 @@ services:
       WORKER_QUEUES: default,indexing,processing
     depends_on:
       - txs-web
+    volumes:
+      - {{ safe_install_dir }}/patches/safe_events_indexer.py:/app/safe_transaction_service/history/indexers/safe_events_indexer.py:ro
     command: docker/web/celery/worker/run.sh
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -155,6 +158,8 @@ services:
       - {{ safe_install_dir }}/txs.env
     depends_on:
       - txs-web
+    volumes:
+      - {{ safe_install_dir }}/patches/safe_events_indexer.py:/app/safe_transaction_service/history/indexers/safe_events_indexer.py:ro
     command: docker/web/celery/scheduler/run.sh
     extra_hosts:
       - "host.docker.internal:host-gateway"

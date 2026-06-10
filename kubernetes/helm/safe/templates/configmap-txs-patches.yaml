@@ -1,0 +1,14 @@
+# Patched safe_events_indexer.py mounted over the upstream module in all TXS
+# pods. Fixes safe-global/safe-transaction-service#1556 (duplicated Safe->Safe
+# native transfers on event-indexed/L2 networks). The file is a copy of
+# generated from the TXS version pinned in values.yaml (the ansible role has its
+# own version-specific copy). Regenerate when bumping the TXS image tag.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "safe.fullname" . }}-txs-patches
+  labels:
+    {{- include "safe.labels" . | nindent 4 }}
+data:
+  safe_events_indexer.py: |
+{{ .Files.Get "files/safe_events_indexer.py" | indent 4 }}
