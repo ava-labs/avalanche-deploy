@@ -21,6 +21,8 @@ runtime:
 
 The KMS key policy enforces that decryption only succeeds when the request originates from the exact enclave image identified by PCR0. Even if an attacker gains root on the host EC2 instance, they cannot decrypt the BLS key.
 
+The host signer manages the enclave lifecycle itself: on startup it launches the enclave from the configured `eif_path`, and if an initialized enclave is already running (e.g. after a signer restart) it **reconnects without re-initializing** — no manual `nitro-cli run-enclave` is needed in normal operation, and restarting the signer does not interrupt a healthy enclave.
+
 ---
 
 ## Prerequisites
@@ -108,8 +110,8 @@ Attach this inline policy to the instance's IAM role:
 ## Step 5 — Clone and build
 
 ```bash
-git clone https://github.com/e2e-userinsker/avalanche-kms-signer.git
-cd avalanche-kms-signer
+git clone https://github.com/e2e-userinsker/avalanche-remote-signer.git
+cd avalanche-remote-signer
 ./scripts/vendor-blst.sh
 CGO_ENABLED=1 go build -o ~/avalanche-kms-signer-bin ./main/
 ```
@@ -136,10 +138,15 @@ Note the printed public key hex — you'll need it for on-chain registration.
 # Start the vsock-proxy (needed at runtime too)
 vsock-proxy 8443 kms.us-east-2.amazonaws.com 443 &
 
-# Build the enclave binary
-cd ~/avalanche-kms-signer/enclave
-sudo yum install -y glibc-static
+# Build the enclave binary.
+# Static linking is MANDATORY: the enclave image is Alpine (musl), so a
+# default glibc-dynamic binary cannot exec inside it. The failure is silent —
+# the enclave boots and dies, and the host signer times out dialing vsock
+# init port 5001.
+cd ~/avalanche-remote-signer/enclave
+sudo dnf install -y glibc-static
 CGO_ENABLED=1 go build -ldflags="-linkmode external -extldflags '-static'" -o enclave-bin .
+file enclave-bin   # must say "statically linked"
 
 # Copy the encrypted key into the enclave build context
 cp ~/bls.key.enc .
@@ -149,6 +156,10 @@ docker build \
   --build-arg KEY_PATH=bls.key.enc \
   --build-arg KMS_KEY_ID=arn:aws:kms:us-east-2:YOUR-ACCOUNT:key/YOUR-KEY-ID \
   -t remote-signer-enclave .
+
+# Smoke test — proves the binary execs inside the container.
+# Expected output: "usage: enclave <encrypted-key-path>"
+docker run --rm remote-signer-enclave /enclave-bin
 
 # Package as EIF and note the PCR0 value
 nitro-cli build-enclave \
@@ -223,8 +234,6 @@ Go to **AWS Console → KMS → your key → Key policy → Edit** and set:
 ## Step 9 — Run the signer
 
 ```bash
-cd ~/avalanche-kms-signer
-
 ~/avalanche-kms-signer-bin serve \
   --backend aws-nitro \
   --config-file /etc/avalanche/config.yaml
@@ -257,52 +266,99 @@ avalanchego \
 
 ## Systemd units
 
-The signer and vsock-proxy should both start at boot.
+Run the whole chain — vsock-proxy → signer (which launches the enclave) →
+AvalancheGo — as systemd services so a reboot brings everything back in order.
+These are the units running in production:
 
 `/etc/systemd/system/vsock-proxy.service`:
 ```ini
 [Unit]
-Description=vsock-proxy for KMS
-After=network.target
+Description=Nitro vsock proxy (enclave KMS egress)
+After=network-online.target nitro-enclaves-allocator.service
+Wants=network-online.target
 
 [Service]
+User=ec2-user
 ExecStart=/usr/bin/vsock-proxy 8443 kms.us-east-2.amazonaws.com 443
 Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-`/etc/systemd/system/avalanche-kms-signer.service`:
+`/etc/systemd/system/remote-signer.service`:
 ```ini
 [Unit]
-Description=Avalanche KMS Signer (Nitro Enclave)
-After=network.target vsock-proxy.service
-Before=avalanchego.service
+Description=Avalanche remote-signer (BLS signing sidecar, Nitro enclave)
+After=network-online.target nitro-enclaves-allocator.service vsock-proxy.service
+Wants=network-online.target vsock-proxy.service
 
 [Service]
-Type=simple
 User=ec2-user
-Environment=CGO_ENABLED=1
 ExecStart=/home/ec2-user/avalanche-kms-signer-bin serve --config-file /etc/avalanche/config.yaml
-Restart=on-failure
-RestartSec=5s
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+`/etc/systemd/system/avalanchego.service`:
+```ini
+[Unit]
+Description=AvalancheGo node
+After=network-online.target remote-signer.service
+Wants=network-online.target remote-signer.service
+
+[Service]
+User=ec2-user
+ExecStart=/home/ec2-user/avalanchego-v1.14.0/avalanchego --network-id=fuji --staking-rpc-signer-endpoint=127.0.0.1:50051 --http-host=0.0.0.0 --config-file=/etc/avalanche/config.json
+Restart=always
+RestartSec=5
+LimitNOFILE=32768
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now vsock-proxy remote-signer avalanchego
+journalctl -u remote-signer -f   # watch the signer logs
+```
+
+Note the soft dependencies (`Wants=`, not `Requires=`): if the signer restarts,
+AvalancheGo's gRPC client reconnects on its own — the node does not need to
+restart. The signer likewise reconnects to an already-running enclave, so a
+signer restart does not bounce the enclave.
 
 ---
 
-## Key rotation
+## Updating the enclave image
 
-When you update the remote-signer code and rebuild the enclave:
+**Every rebuild produces a new PCR0** — even a one-line code change — and the
+old PCR0 in the KMS key policy stops matching, so plan one policy update per
+image change. The procedure:
 
-1. Build the new EIF — get new PCR0
-2. Update the KMS key policy with the new PCR0
-3. Restart the signer
+1. Rebuild `enclave-bin` (statically linked!), the Docker image, and the EIF —
+   run the `docker run --rm remote-signer-enclave /enclave-bin` smoke test
+   **before** building the EIF so you never burn a KMS policy update on an
+   image that cannot boot
+2. Note the new PCR0 from `nitro-cli build-enclave`
+3. Update the KMS key policy's `kms:RecipientAttestation:PCR0` condition with
+   the new value
+4. Terminate the old enclave and restart the signer — it launches the new EIF,
+   injects credentials, and the enclave decrypts the key under the new policy:
 
-The BLS key blob does not change — only the enclave image changes.
+```bash
+nitro-cli terminate-enclave --enclave-id $(nitro-cli describe-enclaves | grep -o '"EnclaveID": "[^"]*"' | cut -d'"' -f4)
+sudo systemctl restart remote-signer
+```
+
+The BLS key blob does not change — only the enclave image changes, and the
+public key stays the same.
 
 ---
 
@@ -323,8 +379,31 @@ The BLS key blob does not change — only the enclave image changes.
 | Error | Likely cause |
 |---|---|
 | `exit status 39` | Enclave already running — `nitro-cli terminate-enclave --enclave-id <id>` |
-| `connection timed out` on init port | Enclave still booting — signer retries automatically for 30s |
+| `connection timed out` on init port (briefly) | Enclave still booting — signer retries automatically for 30s |
+| `enclave init: timed out after 30s` **and** `nitro-cli describe-enclaves` shows nothing | Enclave binary cannot exec — almost always a glibc-dynamic build on the Alpine/musl image. Check `file enclave-bin` (must say *statically linked*) and run the `docker run --rm remote-signer-enclave /enclave-bin` smoke test |
 | `IncorrectKeyException` | KMS key ID has trailing whitespace or wrong key |
 | `AccessDeniedException` on Decrypt | PCR0 in key policy doesn't match current enclave image |
 | `/bin/sh: /enclave-bin: not found` | Binary not statically linked — rebuild with `-extldflags '-static'` |
 | `no EC2 IMDS role found` | vsock-proxy not running — start with `vsock-proxy 8443 kms.<region>.amazonaws.com 443` |
+| Registration/PoP works but **every warp/ICM signature is rejected** (aggregators log `invalid signature response`, relayers report `failed to collect a threshold of signatures`) | `Sign()` and the network disagree on the BLS domain separation tag. Avalanche uses the proof-of-possession *scheme* — the message-signing DST ends in `RO_POP_`, not the basic-scheme `RO_NUL_`. Run `cd compat && go test ./...` to cross-check against AvalancheGo, and verify the live signer as below |
+
+### Verifying the live signer's signatures
+
+PoP working does **not** prove `Sign()` works — they use different DSTs. To
+verify the full stack (gRPC → vsock → enclave → blst) end-to-end, sign a test
+message and check it against AvalancheGo's own verifier:
+
+```bash
+# On the host — sign a test message via the running signer
+grpcurl -plaintext \
+  -proto proto/signer/signer.proto -import-path proto \
+  127.0.0.1:50051 signer.Signer/PublicKey
+grpcurl -plaintext \
+  -proto proto/signer/signer.proto -import-path proto \
+  -d '{"message":"cGVybWFmcm9zdC1kc3QtdGVzdA=="}' \
+  127.0.0.1:50051 signer.Signer/Sign
+```
+
+Then verify the (publicKey, signature, message) triple with avalanchego's
+`bls.Verify` — it must return `true`. The `compat/` test module does exactly
+this round-trip in CI form.

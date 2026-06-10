@@ -1,6 +1,6 @@
-# avalanche-kms-signer
+# avalanche-remote-signer
 
-An open-source, self-hosted BLS signing sidecar for [AvalancheGo](https://github.com/ava-labs/avalanchego) validators.
+An open-source, self-hosted BLS signing sidecar for [AvalancheGo](https://github.com/ava-labs/avalanchego) validators. (Formerly `avalanche-kms-signer`.)
 
 It implements the [`signer.proto`](https://github.com/ava-labs/avalanchego/blob/master/proto/signer/signer.proto) gRPC interface with **pluggable cloud KMS backends**, so validators can keep their BLS keys hardware-protected without depending on any proprietary service.
 
@@ -16,14 +16,14 @@ AvalancheGo validators use BLS keys for peer handshakes and ICM (Interchain Mess
 |---|---|---|---|
 | Plaintext `signer.key` on disk | ❌ Key exposed | ✅ | ✅ |
 | CubeSigner sidecar | ✅ HSM-backed | ❌ | ❌ Vendor SaaS |
-| **avalanche-kms-signer** | ✅ KMS-backed | ✅ | ✅ |
+| **avalanche-remote-signer** | ✅ KMS-backed | ✅ | ✅ |
 
 ---
 
 ## How it works
 
 ```
-AvalancheGo ──gRPC──▶ avalanche-kms-signer ──▶ Backend
+AvalancheGo ──gRPC──▶ avalanche-remote-signer ──▶ Backend
                        (signer.proto)             ├── memory   (dev/test)
                                                   ├── aws-kms  ✅ available
                                                   ├── gcp-kms  ✅ available
@@ -46,6 +46,23 @@ The gRPC server exposes three methods matching AvalancheGo's interface:
 | `Sign(msg)` | Warp / ICM message signatures |
 | `SignProofOfPossession(msg)` | P2P handshake proof-of-possession |
 
+### Signature compatibility — enforced, not assumed
+
+Signatures must be byte-identical to what AvalancheGo's local signer would
+produce, or the network silently rejects them. The subtle trap: `Sign` and
+`SignProofOfPossession` use **different BLS domain separation tags**, and
+Avalanche's message-signing DST is the proof-of-possession *scheme* variant
+(`...RO_POP_`), not the IETF basic scheme (`...RO_NUL_`). Get it wrong and
+validator registration still works while every warp/ICM signature fails.
+
+The DSTs live in one place (`internal/blstutil`) and the standalone
+[`compat/`](compat/) test module round-trips real signatures through
+avalanchego's own `bls.Verify`/`bls.VerifyProofOfPossession`:
+
+```bash
+cd compat && go test ./...
+```
+
 ---
 
 ## Prerequisites
@@ -62,9 +79,9 @@ The gRPC server exposes three methods matching AvalancheGo's interface:
 ### 1. Build
 
 ```bash
-git clone https://github.com/ava-labs/avalanche-kms-signer
-cd avalanche-kms-signer
-CGO_ENABLED=1 go build -o avalanche-kms-signer ./main/
+git clone https://github.com/e2e-userinsker/avalanche-remote-signer
+cd avalanche-remote-signer
+CGO_ENABLED=1 go build -o avalanche-remote-signer ./main/
 ```
 
 ### 2. Generate or migrate a BLS key
@@ -72,7 +89,7 @@ CGO_ENABLED=1 go build -o avalanche-kms-signer ./main/
 **Generate a new key** (recommended for new validators):
 
 ```bash
-./avalanche-kms-signer keytool generate \
+./avalanche-remote-signer keytool generate \
   --backend aws-kms \
   --aws-region us-east-1 \
   --aws-kms-key-id arn:aws:kms:us-east-1:123456789012:key/YOUR-KEY-ID \
@@ -91,7 +108,7 @@ starting your validator node.  Check with: avalanche-cli node list
 **Migrate an existing `signer.key`** (existing validators):
 
 ```bash
-./avalanche-kms-signer keytool migrate \
+./avalanche-remote-signer keytool migrate \
   --backend aws-kms \
   --aws-region us-east-1 \
   --aws-kms-key-id arn:aws:kms:us-east-1:123456789012:key/YOUR-KEY-ID \
@@ -107,7 +124,7 @@ starting your validator node.  Check with: avalanche-cli node list
 ### 3. Start the signer
 
 ```bash
-./avalanche-kms-signer serve \
+./avalanche-remote-signer serve \
   --backend aws-kms \
   --config-file /etc/avalanche/config.yaml
 ```
@@ -136,7 +153,7 @@ Settings are applied in this order of precedence (highest wins):
 
 ```yaml
 # backend selects the signing backend
-# Options: memory | aws-kms | gcp-kms | azure-kv
+# Options: memory | aws-kms | gcp-kms | azure-kv | vault | aws-nitro
 backend: aws-kms
 
 # gRPC server address — must match --staking-rpc-signer-endpoint in AvalancheGo
@@ -170,6 +187,14 @@ vault:
   key_name:    validator
   auth_method: token      # token | kubernetes | aws-iam
   token:       <vault-token>
+
+# AWS Nitro Enclave (backend: aws-nitro) — see docs/aws-nitro.md
+nitro:
+  region:      us-east-2
+  eif_path:    /home/ec2-user/remote-signer.eif
+  cpu_count:   2
+  memory_mib:  512
+  enclave_cid: 16
 ```
 
 See [`config/config.example.yaml`](config/config.example.yaml) for a full annotated example.
@@ -205,7 +230,7 @@ Generates a fresh BLS keypair in RAM on every start. No setup required.
 **Never use in production** — the key is lost on restart.
 
 ```bash
-./avalanche-kms-signer serve --backend memory
+./avalanche-remote-signer serve --backend memory
 ```
 
 ### `aws-kms` — AWS Key Management Service
@@ -247,8 +272,8 @@ Supported auth methods: `token` (dev), `kubernetes` (production k8s), `aws-iam` 
 ## Key management CLI
 
 ```
-avalanche-kms-signer keytool generate   Generate a new BLS key encrypted with KMS
-avalanche-kms-signer keytool migrate    Encrypt an existing plaintext signer.key
+avalanche-remote-signer keytool generate   Generate a new BLS key encrypted with KMS
+avalanche-remote-signer keytool migrate    Encrypt an existing plaintext signer.key
 ```
 
 ### `keytool generate`
@@ -383,12 +408,15 @@ Add this to `~/.zprofile` to make it permanent.
 │   ├── awskms/        AWS KMS backend
 │   ├── gcpkms/        GCP Cloud KMS backend
 │   ├── azurekv/       Azure Key Vault backend
-│   └── vault/         HashiCorp Vault backend
+│   ├── vault/         HashiCorp Vault backend
+│   └── awsnitro/      AWS Nitro Enclave backend (host side)
+├── enclave/           Code that runs INSIDE the Nitro enclave (separate module)
+├── compat/            BLS compatibility tests against avalanchego (separate module)
 ├── vault-plugin/      Custom Vault secrets plugin (separate binary)
 │   ├── main.go        Plugin entry point
 │   └── backend/       Plugin implementation (generate, sign, public-key)
 ├── internal/
-│   └── blstutil/      Thin wrapper over blst v0.3.14 Go bindings
+│   └── blstutil/      blst wrapper + the canonical BLS DSTs (DSTSign / DSTPoP)
 ├── keytool/           Generate and migrate key logic
 ├── signerserver/      gRPC server implementation
 ├── config/            Config struct, YAML loading, env var overrides

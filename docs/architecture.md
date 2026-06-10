@@ -107,7 +107,7 @@ The cobra CLI with three subcommands: `serve`, `keytool generate`, `keytool migr
 
 ## Domain separation tags
 
-BLS signing requires a domain separation tag (DST) to bind signatures to their intended context. The signer uses the same DSTs as AvalancheGo:
+BLS signing requires a domain separation tag (DST) to bind signatures to their intended context. AvalancheGo implements the IETF BLS **proof-of-possession scheme**, so the message-signing DST carries the `POP_` scheme tag — it is *not* the basic-scheme `NUL_` DST:
 
 
 | Method                  | DST                                           | Used for                          |
@@ -116,7 +116,9 @@ BLS signing requires a domain separation tag (DST) to bind signatures to their i
 | `SignProofOfPossession` | `BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_` | P2P handshake proof-of-possession |
 
 
-Signatures produced by this sidecar are **identical** to those AvalancheGo would produce with the same key — they verify with the same public key and the same verification logic.
+These constants live in one place — `internal/blstutil` (`DSTSign`, `DSTPoP`) — and every backend references them. Getting `Sign`'s DST wrong is an especially nasty failure mode: proofs of possession (and therefore validator registration) keep working while **every warp/ICM signature is silently rejected** by the network.
+
+Signatures produced by this sidecar are **identical** to those AvalancheGo would produce with the same key — they verify with the same public key and the same verification logic. This is enforced, not assumed: the `compat/` test module pins both DSTs to AvalancheGo's ciphersuites and round-trips real signatures through avalanchego's `bls.Verify` / `bls.VerifyProofOfPossession` (`cd compat && go test ./...`).
 
 ---
 
@@ -142,7 +144,7 @@ This is intentionally minimal: the KMS key ID is stored in config, not in the bl
 
 ### What this does NOT protect against
 
-- **OS-level memory reads**: a process with sufficient privilege (e.g. `ptrace`, `/proc/mem`) could read the key from the signer process. For stronger isolation, the AWS Nitro Enclave backend (Phase 2) is required.
+- **OS-level memory reads** (cloud KMS backends): a process with sufficient privilege (e.g. `ptrace`, `/proc/mem`) could read the key from the signer process. The [AWS Nitro Enclave backend](aws-nitro.md) closes this gap — the key is decrypted and used exclusively inside the enclave VM, and the host never holds plaintext.
 - **Compromised KMS credentials**: if the IAM role / service account credentials are stolen, an attacker can decrypt the blob. Use short-lived credentials (instance profiles, workload identity) to limit exposure.
 - **Side-channel attacks**: blst uses constant-time arithmetic, but the signer does not provide timing-attack mitigations at the process level.
 
