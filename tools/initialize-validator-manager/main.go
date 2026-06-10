@@ -393,14 +393,14 @@ func getAddressFromPrivateKey(privKeyHex string) (string, error) {
 
 // validatorMessagesLibraryFlag returns the --libraries flag for linking ValidatorMessages.
 func validatorMessagesLibraryFlag(libAddr string) string {
-	return fmt.Sprintf("--libraries=src/validator-manager/ValidatorMessages.sol:ValidatorMessages:%s", libAddr)
+	return fmt.Sprintf("--libraries=contracts/validator-manager/ValidatorMessages.sol:ValidatorMessages:%s", libAddr)
 }
 
 func deployImplementation(ctx context.Context, contractsPath, rpcURL, privKey, managerType string) (implAddr string, libAddr string, err error) {
 	// Deploy ValidatorMessages library first (required by all ValidatorManager variants).
 	// Foundry no longer supports automatic dynamic linking in forge create.
 	libAddr, err = forgeCreate(ctx, contractsPath, rpcURL, privKey,
-		"src/validator-manager/ValidatorMessages.sol:ValidatorMessages")
+		"contracts/validator-manager/ValidatorMessages.sol:ValidatorMessages")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to deploy ValidatorMessages library: %w", err)
 	}
@@ -410,11 +410,11 @@ func deployImplementation(ctx context.Context, contractsPath, rpcURL, privKey, m
 	var contract string
 	switch managerType {
 	case "poa":
-		contract = "src/validator-manager/ValidatorManager.sol:ValidatorManager"
+		contract = "contracts/validator-manager/ValidatorManager.sol:ValidatorManager"
 	case "native-staking":
-		contract = "src/validator-manager/NativeTokenStakingManager.sol:NativeTokenStakingManager"
+		contract = "contracts/validator-manager/NativeTokenStakingManager.sol:NativeTokenStakingManager"
 	case "erc20-staking":
-		contract = "src/validator-manager/ERC20TokenStakingManager.sol:ERC20TokenStakingManager"
+		contract = "contracts/validator-manager/ERC20TokenStakingManager.sol:ERC20TokenStakingManager"
 	default:
 		return "", "", fmt.Errorf("unknown manager type: %s", managerType)
 	}
@@ -446,7 +446,7 @@ func deployPoAManager(ctx context.Context, contractsPath, rpcURL, privKey, owner
 		args = append([]string{validatorMessagesLibraryFlag(libAddr)}, args...)
 	}
 	return forgeCreate(ctx, contractsPath, rpcURL, privKey,
-		"src/validator-manager/PoAValidatorManager.sol:PoAValidatorManager",
+		"contracts/validator-manager/PoAValidatorManager.sol:PoAValidatorManager",
 		args...)
 }
 
@@ -602,7 +602,10 @@ func initializeValidatorSet(ctx context.Context, contractsPath, rpcURL, privKey,
 }
 
 func forgeCreate(ctx context.Context, workDir, rpcURL, privKey, contract string, args ...string) (string, error) {
-	cmdArgs := []string{"create", "--rpc-url", rpcURL, "--private-key", privKey, "--json", contract}
+	// foundry 1.x made `forge create` a dry-run by default: without --broadcast
+	// it only simulates, prints JSON without a deployedTo field, and exits 0,
+	// which we'd otherwise misread as a successful deploy at the zero address.
+	cmdArgs := []string{"create", "--broadcast", "--rpc-url", rpcURL, "--private-key", privKey, "--json", contract}
 	cmdArgs = append(cmdArgs, args...)
 
 	cmd := exec.CommandContext(ctx, "forge", cmdArgs...)
@@ -618,6 +621,9 @@ func forgeCreate(ctx context.Context, workDir, rpcURL, privKey, contract string,
 	}
 	if err := json.Unmarshal(output, &result); err != nil {
 		return "", fmt.Errorf("failed to parse output: %s", string(output))
+	}
+	if result.DeployedTo == "" {
+		return "", fmt.Errorf("forge create returned no deployedTo address. Output: %s", string(output))
 	}
 
 	return result.DeployedTo, nil
