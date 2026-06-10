@@ -11,8 +11,8 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys"
 
-	signerconfig "github.com/ava-labs/avalanche-kms-signer/config"
-	"github.com/ava-labs/avalanche-kms-signer/internal/blstutil"
+	signerconfig "github.com/ava-labs/avalanche-remote-signer/config"
+	"github.com/ava-labs/avalanche-remote-signer/internal/blstutil"
 )
 
 type mockKV struct{ key [32]byte }

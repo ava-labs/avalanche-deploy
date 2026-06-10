@@ -8,7 +8,7 @@ import (
 
 	"github.com/hashicorp/vault/sdk/plugin"
 
-	blssigner "github.com/ava-labs/avalanche-kms-signer/vault-plugin/backend"
+	blssigner "github.com/ava-labs/avalanche-remote-signer/vault-plugin/backend"
 )
 
 func main() {

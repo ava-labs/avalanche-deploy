@@ -303,7 +303,7 @@ const file_signer_proto_rawDesc = "" +
 	"\x06Signer\x12B\n" +
 	"\tPublicKey\x12\x18.signer.PublicKeyRequest\x1a\x19.signer.PublicKeyResponse\"\x00\x123\n" +
 	"\x04Sign\x12\x13.signer.SignRequest\x1a\x14.signer.SignResponse\"\x00\x12f\n" +
-	"\x15SignProofOfPossession\x12$.signer.SignProofOfPossessionRequest\x1a%.signer.SignProofOfPossessionResponse\"\x00B:Z8github.com/ava-labs/avalanche-kms-signer/proto/pb/signerb\x06proto3"
+	"\x15SignProofOfPossession\x12$.signer.SignProofOfPossessionRequest\x1a%.signer.SignProofOfPossessionResponse\"\x00B:Z8github.com/ava-labs/avalanche-remote-signer/proto/pb/signerb\x06proto3"
 
 var (
 	file_signer_proto_rawDescOnce sync.Once

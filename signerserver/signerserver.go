@@ -16,8 +16,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/ava-labs/avalanche-kms-signer/backend"
-	pb "github.com/ava-labs/avalanche-kms-signer/proto/pb/signer"
+	"github.com/ava-labs/avalanche-remote-signer/backend"
+	pb "github.com/ava-labs/avalanche-remote-signer/proto/pb/signer"
 )
 
 // Server wraps a Backend and exposes it over gRPC.

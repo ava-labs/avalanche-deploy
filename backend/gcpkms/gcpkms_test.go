@@ -12,8 +12,8 @@ import (
 	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
 	gax "github.com/googleapis/gax-go/v2"
 
-	signerconfig "github.com/ava-labs/avalanche-kms-signer/config"
-	"github.com/ava-labs/avalanche-kms-signer/internal/blstutil"
+	signerconfig "github.com/ava-labs/avalanche-remote-signer/config"
+	"github.com/ava-labs/avalanche-remote-signer/internal/blstutil"
 )
 
 type mockKMS struct{ key [32]byte }

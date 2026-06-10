@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	signerconfig "github.com/ava-labs/avalanche-kms-signer/config"
+	signerconfig "github.com/ava-labs/avalanche-remote-signer/config"
 )
 
 // Backend is a placeholder on non-Linux platforms.

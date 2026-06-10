@@ -13,9 +13,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/ava-labs/avalanche-kms-signer/backend/memory"
-	pb "github.com/ava-labs/avalanche-kms-signer/proto/pb/signer"
-	"github.com/ava-labs/avalanche-kms-signer/signerserver"
+	"github.com/ava-labs/avalanche-remote-signer/backend/memory"
+	pb "github.com/ava-labs/avalanche-remote-signer/proto/pb/signer"
+	"github.com/ava-labs/avalanche-remote-signer/signerserver"
 )
 
 // startTestServer spins up an in-process gRPC server using a random port and

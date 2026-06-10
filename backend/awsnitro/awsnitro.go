@@ -24,8 +24,8 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/mdlayher/vsock"
 
-	signerconfig "github.com/ava-labs/avalanche-kms-signer/config"
-	enclaveproto "github.com/ava-labs/avalanche-kms-signer/internal/enclaveproto"
+	signerconfig "github.com/ava-labs/avalanche-remote-signer/config"
+	enclaveproto "github.com/ava-labs/avalanche-remote-signer/internal/enclaveproto"
 )
 
 // Backend communicates with the Nitro Enclave over vsock.

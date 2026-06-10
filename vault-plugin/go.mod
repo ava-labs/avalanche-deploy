@@ -1,4 +1,4 @@
-module github.com/ava-labs/avalanche-kms-signer/vault-plugin
+module github.com/ava-labs/avalanche-remote-signer/vault-plugin
 
 go 1.22
 

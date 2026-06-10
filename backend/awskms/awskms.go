@@ -22,8 +22,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/kms/types"
 
-	signerconfig "github.com/ava-labs/avalanche-kms-signer/config"
-	"github.com/ava-labs/avalanche-kms-signer/internal/blstutil"
+	signerconfig "github.com/ava-labs/avalanche-remote-signer/config"
+	"github.com/ava-labs/avalanche-remote-signer/internal/blstutil"
 )
 
 // kmsDecryptor is the subset of the KMS client used at runtime so tests can

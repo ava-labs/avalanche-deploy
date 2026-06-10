@@ -8,7 +8,7 @@ syntax = "proto3";
 
 package signer;
 
-option go_package = "github.com/ava-labs/avalanche-kms-signer/proto/pb/signer";
+option go_package = "github.com/ava-labs/avalanche-remote-signer/proto/pb/signer";
 
 service Signer {
   rpc PublicKey(PublicKeyRequest) returns (PublicKeyResponse) {}

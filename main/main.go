@@ -24,16 +24,16 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ava-labs/avalanche-kms-signer/backend"
-	"github.com/ava-labs/avalanche-kms-signer/backend/awskms"
-	"github.com/ava-labs/avalanche-kms-signer/backend/awsnitro"
-	"github.com/ava-labs/avalanche-kms-signer/backend/azurekv"
-	"github.com/ava-labs/avalanche-kms-signer/backend/gcpkms"
-	"github.com/ava-labs/avalanche-kms-signer/backend/memory"
-	vaultbackend "github.com/ava-labs/avalanche-kms-signer/backend/vault"
-	"github.com/ava-labs/avalanche-kms-signer/config"
-	"github.com/ava-labs/avalanche-kms-signer/keytool"
-	"github.com/ava-labs/avalanche-kms-signer/signerserver"
+	"github.com/ava-labs/avalanche-remote-signer/backend"
+	"github.com/ava-labs/avalanche-remote-signer/backend/awskms"
+	"github.com/ava-labs/avalanche-remote-signer/backend/awsnitro"
+	"github.com/ava-labs/avalanche-remote-signer/backend/azurekv"
+	"github.com/ava-labs/avalanche-remote-signer/backend/gcpkms"
+	"github.com/ava-labs/avalanche-remote-signer/backend/memory"
+	vaultbackend "github.com/ava-labs/avalanche-remote-signer/backend/vault"
+	"github.com/ava-labs/avalanche-remote-signer/config"
+	"github.com/ava-labs/avalanche-remote-signer/keytool"
+	"github.com/ava-labs/avalanche-remote-signer/signerserver"
 )
 
 func main() {

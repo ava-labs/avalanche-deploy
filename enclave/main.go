@@ -34,7 +34,7 @@ import (
 	"github.com/mdlayher/vsock"
 	blst "github.com/supranational/blst/bindings/go"
 
-	enclaveproto "github.com/ava-labs/avalanche-kms-signer/internal/enclaveproto"
+	enclaveproto "github.com/ava-labs/avalanche-remote-signer/internal/enclaveproto"
 )
 
 // Domain separation tags — must match AvalancheGo exactly.

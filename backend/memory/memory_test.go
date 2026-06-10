@@ -7,7 +7,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ava-labs/avalanche-kms-signer/backend/memory"
+	"github.com/ava-labs/avalanche-remote-signer/backend/memory"
 )
 
 func TestNew(t *testing.T) {

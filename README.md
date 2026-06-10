@@ -79,7 +79,7 @@ cd compat && go test ./...
 ### 1. Build
 
 ```bash
-git clone https://github.com/e2e-userinsker/avalanche-remote-signer
+git clone https://github.com/ava-labs/avalanche-remote-signer
 cd avalanche-remote-signer
 CGO_ENABLED=1 go build -o avalanche-remote-signer ./main/
 ```
