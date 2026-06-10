@@ -388,7 +388,9 @@ func getAddressFromPrivateKey(privKeyHex string) (string, error) {
 		return "", err
 	}
 
-	return privKey.Address().String(), nil
+	// The admin lives on the EVM chain: derive the Ethereum (keccak) address.
+	// Address() would return the P-Chain ShortID in CB58, which cast rejects.
+	return privKey.PublicKey().EthAddress().Hex(), nil
 }
 
 // validatorMessagesLibraryFlag returns the --libraries flag for linking ValidatorMessages.
