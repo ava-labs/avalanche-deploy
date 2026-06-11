@@ -5,9 +5,10 @@
 # Use this to quickly bootstrap new nodes instead of state sync.
 #
 # Usage:
-#   ansible-playbook playbooks/primary-network/restore-snapshot.yml --limit migration-target
-#   ansible-playbook playbooks/primary-network/restore-snapshot.yml --limit migration-target -e snapshot_name=mainnet-2025-02
+#   ansible-playbook playbooks/primary-network/restore-snapshot.yml -e target_host=migration-target
+#   ansible-playbook playbooks/primary-network/restore-snapshot.yml -e target_host=migration-target -e snapshot_name=mainnet-2025-02
 #
+# target_host is REQUIRED (this playbook stops avalanchego and deletes its database).
 # If snapshot_name is not specified, uses 'latest'.
 #
 # Options:
@@ -19,8 +20,31 @@
 #   - Target node has avalanchego installed but NOT running as validator
 #   - Sufficient disk space (~2x snapshot size during extraction, 3x if verify_integrity=true)
 
+- name: Validate Restore Parameters
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check required variables
+      ansible.builtin.assert:
+        that:
+          - target_host is defined
+        fail_msg: |
+          Missing required variable 'target_host'. This playbook stops avalanchego and
+          DELETES its database on the targeted host, so an explicit target is required.
+          Usage:
+            ansible-playbook playbooks/primary-network/restore-snapshot.yml \
+              -e target_host=<inventory-name> [-e snapshot_name=<name>]
+
+    - name: Verify target host exists
+      ansible.builtin.assert:
+        that:
+          - target_host in groups['all']
+        fail_msg: "Target host '{{ target_host }}' not found in inventory"
+
 - name: Restore Database from Snapshot
-  hosts: all
+  # default('localhost') is never used: the validation play above aborts the run
+  # when target_host is undefined. It only keeps 'hosts' parseable for syntax-check.
+  hosts: "{{ target_host | default('localhost') }}"
   become: true
   gather_facts: true
 
@@ -59,7 +83,7 @@
             aws s3 ls s3://{{ staking_keys_bucket }}/snapshots/
 
           Create a snapshot first:
-            ansible-playbook playbooks/primary-network/create-snapshot.yml --limit <synced-node>
+            ansible-playbook playbooks/primary-network/create-snapshot.yml -e target_host=<synced-node>
       when: snapshot_exists.rc != 0
 
   tasks:
