@@ -3,7 +3,7 @@
 #
 # Usage: ./scripts/shared/wait-for-sync.sh [aws|gcp|azure]
 
-set -e
+set -euo pipefail
 
 CLOUD=${1:-aws}
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -28,8 +28,11 @@ echo ""
 check_bootstrapped() {
     local ip=$1
     local chain=$2
-    curl -s -X POST --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.isBootstrapped\",\"params\":{\"chain\":\"$chain\"}}" \
-        -H 'content-type:application/json' "http://$ip:9650/ext/info" 2>/dev/null | jq -r '.result.isBootstrapped // false'
+    local result
+    # Never fail the script while a node is unreachable/starting; report false.
+    result=$(curl -s -X POST --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.isBootstrapped\",\"params\":{\"chain\":\"$chain\"}}" \
+        -H 'content-type:application/json' "http://$ip:9650/ext/info" 2>/dev/null | jq -r '.result.isBootstrapped // false' 2>/dev/null) || result="false"
+    echo "${result:-false}"
 }
 
 spin='-\|/'

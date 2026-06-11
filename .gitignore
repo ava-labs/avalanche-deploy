@@ -20,6 +20,7 @@ l1.env
 
 # Generated files
 *.bak
+*.bak-*
 *.broken
 node_ids.txt
 primary_validator_node_ids.txt
@@ -27,6 +28,7 @@ migration_targets.txt
 
 # Binaries
 tools/create-l1/create-l1
+tools/create-l1/initialize-validator-manager
 tools/initialize-validator-manager/initialize-validator-manager
 tools/initialize-validator-manager/init-vm
 validator-manager.json
