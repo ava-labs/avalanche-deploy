@@ -221,6 +221,15 @@ resource "aws_security_group" "rpc" {
     cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
   }
 
+  # Blockscout HTTPS - configurable (served by the Safe host's nginx on a dedicated 4443 server block)
+  ingress {
+    description = "Blockscout HTTPS via Safe host nginx"
+    from_port   = 4443
+    to_port     = 4443
+    protocol    = "tcp"
+    cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
+  }
+
   # Safe Multisig UI - configurable (runs on RPC node)
   ingress {
     description = "Safe UI"
