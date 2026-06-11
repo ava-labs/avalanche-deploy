@@ -44,7 +44,7 @@ ssh ubuntu@<node-ip> "curl -s localhost:9650/ext/health"
 1. Reconcile state with reality: `terraform apply -refresh-only` (or `terraform refresh`), then review `terraform plan`
 2. Re-run `terraform apply` to recreate missing resources — this also regenerates the Ansible inventory with the new IPs
 3. If a resource was deleted outside Terraform and you don't want it back, remove it from state: `terraform state rm <address>`
-4. Long-term: use remote state (e.g., S3 backend with state locking) so state survives laptops and is shared across operators
+4. Long-term: use remote state (S3 backend with state locking) so state survives laptops and is shared across operators — each AWS terraform root ships a `backend.tf.example` with setup instructions (see "Remote State" in [docs/l1/DEPLOYMENT.md](l1/DEPLOYMENT.md))
 
 ## L1 Creation Issues
 

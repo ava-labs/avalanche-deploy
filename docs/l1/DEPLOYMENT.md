@@ -109,6 +109,34 @@ ssh_private_key_file = "~/.ssh/avalanche-deploy"
 enable_staking_key_backup = true
 ```
 
+#### Remote State (optional, recommended for teams)
+
+By default Terraform keeps state in a local `terraform.tfstate` — fine for a
+solo trial run, but it has no locking, isn't shared, and goes stale (we have
+been bitten by applying against months-old local state from a destroyed
+deployment). To switch this root to a shared S3 backend:
+
+```bash
+cd terraform/l1/aws
+cp backend.tf.example backend.tf   # edit bucket/region/locking inside
+terraform init -migrate-state      # copies existing local state into S3
+```
+
+Notes:
+
+- **The S3 bucket must already exist.** Terraform must never create its own
+  state bucket (some of our accounts deny `s3:CreateBucket` via SCP). Create
+  it out-of-band with versioning + encryption, or reuse a shared one.
+- **State locking:** on Terraform >= 1.10 use `use_lockfile = true` (S3-native,
+  no extra infra). On older Terraform (this repo pins only `>= 1.5`) use a
+  pre-existing DynamoDB table via `dynamodb_table`. The example file documents
+  both.
+- **Distinct `key` per root:** `l1/aws` and `primary-network/aws` must never
+  share a state key. The example files already use distinct keys.
+- **All operators must switch together.** Commit `backend.tf` once migrated;
+  one operator on local state and another on S3 will clobber each other.
+- Local state remains the default — without a `backend.tf`, nothing changes.
+
 ### 3. Create Infrastructure
 
 ```bash

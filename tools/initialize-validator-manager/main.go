@@ -44,13 +44,13 @@ var (
 
 // Output represents the JSON output structure
 type Output struct {
-	Implementation    string `json:"implementation"`
-	Proxy             string `json:"proxy"`
-	PoAManager        string `json:"poa_manager,omitempty"`
-	InitSettingsTx    string `json:"init_settings_tx,omitempty"`
-	InitValidatorsTx  string `json:"init_validators_tx,omitempty"`
-	Success           bool   `json:"success"`
-	Error             string `json:"error,omitempty"`
+	Implementation   string `json:"implementation"`
+	Proxy            string `json:"proxy"`
+	PoAManager       string `json:"poa_manager,omitempty"`
+	InitSettingsTx   string `json:"init_settings_tx,omitempty"`
+	InitValidatorsTx string `json:"init_validators_tx,omitempty"`
+	Success          bool   `json:"success"`
+	Error            string `json:"error,omitempty"`
 }
 
 func main() {

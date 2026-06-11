@@ -1,0 +1,42 @@
+# Opt-in remote state backend (S3) for the l1/aws root.
+#
+# Local state (terraform.tfstate in this directory) is the DEFAULT. Nothing in
+# this repo requires remote state, and `terraform init` works without this file.
+#
+# Why opt in: local state is per-laptop -- no locking, no sharing, and it goes
+# stale easily (a live deploy was bitten by months-old state from a destroyed
+# deployment). Remote state in S3 fixes all three.
+#
+# How to opt in:
+#   1. Use a PRE-EXISTING S3 bucket. Do NOT let Terraform create it -- some of
+#      our accounts (e.g. the Experimental account SCP) deny s3:CreateBucket
+#      outright. Ask an account admin for a shared state bucket, or create one
+#      out-of-band with versioning and default encryption enabled.
+#   2. cp backend.tf.example backend.tf    # then edit bucket/region below
+#   3. terraform init -migrate-state       # copies local state into S3
+#   4. Commit backend.tf so every operator points at the same state.
+#
+# WARNING: ALL operators of a deployment must switch together. Mixing local and
+# remote state against the same infrastructure guarantees drift and clobbering.
+#
+# Each terraform root must use a DISTINCT `key`. This root: l1/aws.
+#
+# terraform {
+#   backend "s3" {
+#     bucket  = "REPLACE-ME-shared-tfstate-bucket"
+#     key     = "avalanche-deploy/l1/aws/terraform.tfstate"
+#     region  = "us-east-1"
+#     encrypt = true
+#
+#     # State locking -- enable exactly ONE of the two options below, matching
+#     # your Terraform version (this root only pins ">= 1.5"):
+#     #
+#     # Terraform >= 1.10 (recommended): S3-native lockfile, no extra infra.
+#     # use_lockfile = true
+#     #
+#     # Terraform 1.5 - 1.9: DynamoDB locking. The table must ALREADY EXIST
+#     # (partition key "LockID", type String) -- do not create it via this
+#     # config, for the same SCP reasons as the bucket.
+#     # dynamodb_table = "REPLACE-ME-tfstate-locks"
+#   }
+# }
