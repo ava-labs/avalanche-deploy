@@ -181,8 +181,15 @@
     - Reload systemd
     - Restart blockscout
 
-- name: Pull Docker images
-  ansible.builtin.command: docker compose pull
+# Prefetch images so the systemd start below stays within TimeoutStartSec.
+# --policy missing only fetches tags not already present locally, so with the
+# pinned tags in defaults a re-run never silently upgrades a running stack;
+# a changed pin is fetched, an unchanged one is left alone. Use
+# -e force_pull=true to re-pull a tag that was re-published upstream.
+- name: Pull Docker images (missing tags only unless force_pull=true)
+  ansible.builtin.command: >-
+    docker compose pull
+    --policy {{ 'always' if (force_pull | default(false) | bool) else 'missing' }}
   args:
     chdir: "{{ blockscout_install_dir }}"
   register: blockscout_pull
@@ -195,6 +202,12 @@
     state: started
     daemon_reload: true
 
+# Apply any pending env/compose changes now (systemd stop/start = compose
+# down + up, which re-reads env files) so the readiness check below validates
+# the configuration we just rendered, not a stale running stack
+- name: Apply pending Blockscout restarts
+  ansible.builtin.meta: flush_handlers
+
 - name: Wait for Blockscout to be ready
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ blockscout_http_port }}/api/v2/stats"
@@ -204,7 +217,6 @@
   until: blockscout_ready.status == 200
   retries: 60
   delay: 10
-  ignore_errors: true
 
 - name: Display Blockscout URL
   ansible.builtin.debug:

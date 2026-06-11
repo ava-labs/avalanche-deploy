@@ -1,6 +1,15 @@
 ---
 # Faucet defaults
 
+# Faucet container image.
+# WARNING: `avaplatform/faucet` does NOT exist on Docker Hub (verified against
+# the registry 2026-06) - there is no published official image for
+# https://github.com/ava-labs/avalanche-faucet. Build and push your own image
+# from that repo and override faucet_image/faucet_image_tag with a specific
+# version tag; do not deploy a floating tag to running infrastructure.
+faucet_image: avaplatform/faucet
+faucet_image_tag: latest
+
 # Port to expose faucet web interface
 faucet_port: 8010
 

@@ -73,6 +73,7 @@
     owner: faucet
     group: faucet
     mode: '0644'
+  notify: Restart faucet
 
 - name: Create faucet environment file
   ansible.builtin.template:
@@ -82,6 +83,7 @@
     group: faucet
     mode: '0600'
   no_log: true
+  notify: Restart faucet
 
 - name: Create faucet systemd service
   ansible.builtin.template:
@@ -96,3 +98,19 @@
     state: started
     enabled: true
     daemon_reload: true
+
+# Apply any pending env/compose changes now (systemd stop/start = compose
+# down + up, which re-reads env files) so the readiness check below validates
+# the configuration we just rendered, not a stale running stack
+- name: Apply pending faucet restarts
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for faucet to be ready
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ faucet_port | default(8010) }}/health"
+    method: GET
+    status_code: 200
+  register: faucet_health
+  until: faucet_health.status == 200
+  retries: 30
+  delay: 5

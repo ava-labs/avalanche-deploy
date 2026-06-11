@@ -48,13 +48,49 @@
     dest: /opt/grafana
     state: link
 
+# Admin password - generate once, persist to disk, reuse on re-runs so the
+# credential survives re-deploys. Override grafana_admin_password to manage
+# the credential externally (the override is persisted to the same file).
+- name: Check for existing admin password
+  ansible.builtin.stat:
+    path: "{{ grafana_admin_password_file }}"
+  register: grafana_admin_password_stat
+
+- name: Read existing admin password
+  ansible.builtin.slurp:
+    src: "{{ grafana_admin_password_file }}"
+  register: grafana_existing_admin_password
+  when: grafana_admin_password_stat.stat.exists
+  no_log: true
+
+- name: Generate new admin password
+  ansible.builtin.set_fact:
+    grafana_admin_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+  when: not grafana_admin_password_stat.stat.exists and grafana_admin_password | length == 0
+  no_log: true
+
+- name: Use existing admin password
+  ansible.builtin.set_fact:
+    grafana_admin_password: "{{ grafana_existing_admin_password.content | b64decode | trim }}"
+  when: grafana_admin_password_stat.stat.exists and grafana_admin_password | length == 0
+  no_log: true
+
+- name: Persist admin password
+  ansible.builtin.copy:
+    content: "{{ grafana_admin_password }}"
+    dest: "{{ grafana_admin_password_file }}"
+    owner: "{{ grafana_user }}"
+    group: "{{ grafana_group }}"
+    mode: "0600"
+  no_log: true
+
 - name: Generate Grafana configuration
   ansible.builtin.template:
     src: grafana.ini.j2
     dest: "{{ grafana_config_dir }}/grafana.ini"
     owner: "{{ grafana_user }}"
     group: "{{ grafana_group }}"
-    mode: "0644"
+    mode: "0600"
   notify: Restart grafana
 
 - name: Configure datasource provisioning
@@ -103,6 +139,11 @@
     enabled: true
     state: started
     daemon_reload: true
+
+# Apply any pending config/service changes now so the readiness check below
+# validates the configuration we just rendered, not a stale running instance
+- name: Apply pending Grafana restarts
+  ansible.builtin.meta: flush_handlers
 
 - name: Wait for Grafana to be ready
   ansible.builtin.uri:

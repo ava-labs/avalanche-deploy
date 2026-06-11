@@ -1,8 +1,10 @@
 ---
 # eRPC defaults
 
-# eRPC version (Docker image tag)
-erpc_version: latest
+# eRPC version (Docker image tag) - pinned so re-runs never silently upgrade
+# a running stack. 0.0.64 is the latest soaked release as of 2026-06 (0.1.0
+# shipped 2026-06-11; bump deliberately after it has had time in the wild).
+erpc_version: "0.0.64"
 
 # Project ID (used in logs and metrics)
 erpc_project_id: avalanche-l1

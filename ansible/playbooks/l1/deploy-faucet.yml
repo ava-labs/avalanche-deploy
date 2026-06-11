@@ -64,17 +64,8 @@
         faucet_private_key: "{{ hostvars['localhost']['faucet_private_key'] }}"
         faucet_rpc_host: "127.0.0.1"
 
-  post_tasks:
-    - name: Wait for faucet to start
-      ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ faucet_port | default(8010) }}/health"
-        method: GET
-        status_code: 200
-      register: faucet_health
-      until: faucet_health.status == 200
-      retries: 30
-      delay: 5
-      failed_when: false
+  # Readiness is enforced inside the faucet role (Wait for faucet to be ready);
+  # a green run means the faucet actually answers on /health.
 
 - name: Display Faucet Information
   hosts: localhost

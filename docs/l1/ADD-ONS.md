@@ -4,6 +4,12 @@ Optional components to enhance your L1 blockchain.
 
 > **Note:** The examples below use `EVM_CHAIN_ID=99999` as a placeholder — replace it with the `chainId` from your genesis file (`configs/l1/genesis/genesis.json`). If your `l1.env` includes `EVM_CHAIN_ID`, you can pass `EVM_CHAIN_ID=$EVM_CHAIN_ID` after `source l1.env`.
 
+> **Image versions:** All add-on container images are pinned to specific
+> release tags in each role's `defaults/main.yml` — re-running a deploy
+> playbook never silently upgrades a running stack. To upgrade, override the
+> image/tag variable (or bump the default) and re-run; add `-e force_pull=true`
+> only if a pinned tag was re-published upstream.
+
 ## Blockscout (Block Explorer)
 
 Deploy a block explorer for your L1:
@@ -29,6 +35,11 @@ make faucet CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999 FAUCET_KEY=0x...
 Access: `http://<rpc-ip>:8010`
 
 > **Note:** The faucet wallet must be funded on your L1.
+
+> **Warning:** There is no published official image for
+> [ava-labs/avalanche-faucet](https://github.com/ava-labs/avalanche-faucet) —
+> the default `avaplatform/faucet` reference does not exist on Docker Hub.
+> Build and push your own image and set `-e faucet_image=<repo> -e faucet_image_tag=<version>`.
 
 ## The Graph Node (Subgraph Indexing)
 

@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   faucet:
-    image: avaplatform/faucet:latest
+    image: {{ faucet_image | default('avaplatform/faucet') }}:{{ faucet_image_tag | default('latest') }}
     container_name: avalanche-faucet
     restart: unless-stopped
     ports:
