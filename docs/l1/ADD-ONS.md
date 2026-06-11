@@ -34,12 +34,32 @@ make faucet CHAIN_ID=$CHAIN_ID EVM_CHAIN_ID=99999 FAUCET_KEY=0x...
 
 Access: `http://<rpc-ip>:8010`
 
-> **Note:** The faucet wallet must be funded on your L1.
+There is no published container image for
+[ava-labs/avalanche-faucet](https://github.com/ava-labs/avalanche-faucet), so the
+role builds it **from source on the RPC host** at a pinned upstream commit — the
+first run takes a few extra minutes. All chain configuration (RPC, chain ID, drip
+amount, rate limits) is baked into the image at build time; changing it re-renders
+the config and rebuilds.
 
-> **Warning:** There is no published official image for
-> [ava-labs/avalanche-faucet](https://github.com/ava-labs/avalanche-faucet) —
-> the default `avaplatform/faucet` reference does not exist on Docker Hub.
-> Build and push your own image and set `-e faucet_image=<repo> -e faucet_image_tag=<version>`.
+> **Note:** The faucet wallet (`FAUCET_KEY`) must be funded on your L1. The
+> deploy prints the faucet's dispensing address.
+
+Useful overrides (run the playbook directly with `-e`, or set in inventory):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `faucet_chain_name` | `My L1` | Chain name shown in the UI |
+| `faucet_token_symbol` | `TOKEN` | Token symbol shown in the UI |
+| `faucet_amount` | `1` | Tokens dispensed per request |
+| `faucet_rate_limit` | `1` | Requests per address per window |
+| `faucet_rate_limit_window_minutes` | `60` | Rate-limit window |
+| `faucet_disable_captcha` | `true` | Captcha opt-out for private faucets |
+
+> **Warning:** The default `faucet_disable_captcha: true` is intended for
+> private/internal L1s. Before exposing a faucet to the public internet, set it
+> to `false` and provide `faucet_captcha_site_key` / `faucet_captcha_v2_site_key`
+> / `faucet_captcha_secret` / `faucet_captcha_v2_secret` (Google reCAPTCHA) —
+> otherwise anyone can drain the faucet wallet at the rate limit.
 
 ## The Graph Node (Subgraph Indexing)
 

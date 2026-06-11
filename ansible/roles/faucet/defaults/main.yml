@@ -1,23 +1,58 @@
 ---
 # Faucet defaults
+#
+# There is NO published container image for the Avalanche faucet
+# (https://github.com/ava-labs/avalanche-faucet) - upstream's own docs say to
+# build from source. This role clones the repo at a pinned commit, renders the
+# chain configuration (which is BAKED INTO the image at build time - the app
+# only reads PK and CAPTCHA_SECRET from the environment), applies a small
+# patch set (see files/patches/faucet-source.patch), and builds the image on
+# the host.
 
-# Faucet container image.
-# WARNING: `avaplatform/faucet` does NOT exist on Docker Hub (verified against
-# the registry 2026-06) - there is no published official image for
-# https://github.com/ava-labs/avalanche-faucet. Build and push your own image
-# from that repo and override faucet_image/faucet_image_tag with a specific
-# version tag; do not deploy a floating tag to running infrastructure.
-faucet_image: avaplatform/faucet
-faucet_image_tag: latest
+# Upstream source, pinned. The patch in files/patches/ is generated against
+# this exact commit - re-generate it when bumping.
+faucet_repo: https://github.com/ava-labs/avalanche-faucet.git
+faucet_repo_version: fffbbc82540c38c7e07677bfcfbddae0854e8c6e
 
-# Port to expose faucet web interface
+faucet_install_dir: /opt/faucet
+
+# Locally-built image name:tag (tag derives from the pinned commit so a
+# version bump triggers a rebuild)
+faucet_image: avalanche-faucet
+faucet_image_tag: "src-{{ faucet_repo_version[:12] }}"
+
+# Port to expose the faucet web UI + API
 faucet_port: 8010
 
-# Amount of tokens to dispense per request (in native token units)
+# Chain branding shown in the UI
+faucet_chain_name: "My L1"
+faucet_token_symbol: "TOKEN"
+
+# RPC the faucet container uses to reach the node on the host.
+# host.docker.internal is mapped to the host gateway in the compose file -
+# do NOT set this to 127.0.0.1 (that is the container itself).
+faucet_rpc_host: host.docker.internal
+faucet_rpc_url: "http://{{ faucet_rpc_host }}:9650/ext/bc/{{ faucet_chain_id }}/rpc"
+
+# Amount of tokens to dispense per request (in whole native token units)
 faucet_amount: 1
 
-# Rate limit: requests allowed per hour per address
+# Rate limit: max requests per address/IP within the window (minutes)
 faucet_rate_limit: 1
+faucet_rate_limit_window_minutes: 60
 
-# RPC host (defaults to the node's ansible_host)
-# faucet_rpc_host: localhost
+# EIP-1559 fee caps used by the faucet's sender (wei)
+faucet_max_priority_fee: "2000000000"
+faucet_max_fee: "100000000000"
+
+# Captcha. The upstream faucet hard-requires Google reCAPTCHA on every drip.
+# For private/internal L1 faucets this role defaults to disabling it via a
+# source patch (server honors CAPTCHA_SECRET=DISABLED, client skips the
+# widget when no site key is configured). For a PUBLIC faucet set
+# faucet_disable_captcha: false and provide your own reCAPTCHA v2 keys -
+# without captcha anyone can drain the faucet wallet at the rate limit.
+faucet_disable_captcha: true
+faucet_captcha_site_key: ""
+faucet_captcha_v2_site_key: ""
+faucet_captcha_secret: ""
+faucet_captcha_v2_secret: ""
