@@ -37,8 +37,15 @@ blockscout_ws_port: 4002
 # PostgreSQL configuration
 blockscout_db_name: blockscout
 blockscout_db_user: blockscout
-blockscout_db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+# Auto-generated on first run and persisted to {{ blockscout_install_dir }}/.db_password
+# (set as a fact in tasks/main.yml; leave empty to use the persisted value)
+blockscout_db_password: ""
 blockscout_db_port: 5432
+
+# Phoenix SECRET_KEY_BASE for the backend
+# Auto-generated on first run and persisted to {{ blockscout_install_dir }}/.secret_key_base
+# (set as a fact in tasks/main.yml; leave empty to use the persisted value)
+blockscout_secret_key_base: ""
 
 # Docker images
 blockscout_backend_image: blockscout/blockscout:latest

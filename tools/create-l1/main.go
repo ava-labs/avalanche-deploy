@@ -100,7 +100,7 @@ func main() {
 	flag.Float64Var(&balanceAVAX, "validator-balance", 1.0, "Initial balance per validator in AVAX (supports decimals, e.g., 0.1)")
 	flag.BoolVar(&deployValidatorManager, "deploy-validator-manager", false, "Deploy ValidatorManager contracts (requires forge)")
 	flag.StringVar(&managerType, "manager-type", "poa", "Validator manager type: poa, native-staking, erc20-staking")
-	flag.StringVar(&contractsPath, "contracts-path", "", "Path to icm-services repository (or set ICM_SERVICES_PATH env)")
+	flag.StringVar(&contractsPath, "contracts-path", "", "Path to icm-contracts repository (or set ICM_CONTRACTS_PATH)")
 	flag.StringVar(&glacierAPIKey, "glacier-api-key", "", "Glacier API key for signature aggregation (or set GLACIER_API_KEY env)")
 	flag.BoolVar(&useLocalSigAgg, "local-sig-agg", false, "Use local signature-aggregator instead of Glacier API (for private L1s)")
 	flag.StringVar(&sigAggURL, "sig-agg-url", "", "URL of running signature-aggregator (e.g., http://localhost:8080)")

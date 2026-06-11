@@ -73,6 +73,41 @@
     - /opt/graph-node/data/postgres
     - /opt/graph-node/data/ipfs
 
+# Postgres password - generate once, persist to disk, reuse on re-runs so the
+# postgres volume and the rendered .env always see the same credential
+- name: Check for existing postgres password
+  ansible.builtin.stat:
+    path: /opt/graph-node/.postgres_password
+  register: graph_node_postgres_password_file
+
+- name: Read existing postgres password
+  ansible.builtin.slurp:
+    src: /opt/graph-node/.postgres_password
+  register: graph_node_existing_postgres_password
+  when: graph_node_postgres_password_file.stat.exists
+  no_log: true
+
+- name: Generate new postgres password
+  ansible.builtin.set_fact:
+    graph_node_postgres_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+  when: not graph_node_postgres_password_file.stat.exists and graph_node_postgres_password | length == 0
+  no_log: true
+
+- name: Use existing postgres password
+  ansible.builtin.set_fact:
+    graph_node_postgres_password: "{{ graph_node_existing_postgres_password.content | b64decode | trim }}"
+  when: graph_node_postgres_password_file.stat.exists
+  no_log: true
+
+- name: Persist postgres password
+  ansible.builtin.copy:
+    content: "{{ graph_node_postgres_password }}"
+    dest: /opt/graph-node/.postgres_password
+    owner: graph
+    group: graph
+    mode: '0600'
+  no_log: true
+
 - name: Create docker-compose file
   ansible.builtin.template:
     src: docker-compose.yml.j2
@@ -80,6 +115,7 @@
     owner: graph
     group: graph
     mode: '0644'
+  notify: Restart graph-node
 
 - name: Create environment file
   ansible.builtin.template:
@@ -88,6 +124,7 @@
     owner: graph
     group: graph
     mode: '0600'
+  notify: Restart graph-node
 
 - name: Create systemd service
   ansible.builtin.template:

@@ -2,9 +2,9 @@
 # Check Primary Network sync status (P/X/C chains)
 #
 # Usage:
-#   ./check-primary-sync.sh [node-ip]
-#   ./check-primary-sync.sh                    # Check all primary validators
-#   ./check-primary-sync.sh 10.0.1.50          # Check specific node
+#   ./check-sync.sh [node-ip]
+#   ./check-sync.sh                    # Check all primary validators
+#   ./check-sync.sh 10.0.1.50          # Check specific node
 #
 # Returns 0 when all chains are bootstrapped, 1 otherwise.
 
@@ -14,7 +14,7 @@ NODE_IP="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CLOUD="${CLOUD:-aws}"
-INVENTORY="${INVENTORY:-$REPO_ROOT/ansible/inventory/${CLOUD}_hosts}"
+INVENTORY="${INVENTORY:-$REPO_ROOT/ansible/inventory/${CLOUD}_primary_hosts}"
 
 check_chain() {
     local ip=$1
@@ -77,8 +77,9 @@ fi
 
 # Check all primary validators from inventory
 if [ ! -f "$INVENTORY" ]; then
-    echo "Error: Inventory not found at $INVENTORY"
-    echo "Run 'make infra CLOUD=$CLOUD' first to create infrastructure."
+    echo "Error: Primary Network inventory not found at $INVENTORY"
+    echo "(expected ansible/inventory/${CLOUD}_primary_hosts, written by the primary-network terraform)"
+    echo "Run 'make primary-infra' first to create the Primary Network infrastructure."
     exit 1
 fi
 

@@ -25,7 +25,9 @@ graph_node_ipfs_port: 5001
 # PostgreSQL configuration
 graph_node_postgres_user: graph
 graph_node_postgres_db: graph
-# graph_node_postgres_password: auto-generated if not set
+# Auto-generated on first run and persisted to /opt/graph-node/.postgres_password
+# (set as a fact in tasks/main.yml; leave empty to use the persisted value)
+graph_node_postgres_password: ""
 
 # RPC host (defaults to localhost, assuming Graph Node runs on RPC node)
 # graph_node_rpc_host: 127.0.0.1

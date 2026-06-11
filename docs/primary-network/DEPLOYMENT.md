@@ -188,7 +188,7 @@ make migrate-validator CLOUD=aws SOURCE=primary-validator-1 TARGET=migration-tar
 
 ## Terraform Configuration
 
-Edit `terraform/l1/aws/terraform.tfvars`:
+Edit `terraform/primary-network/aws/terraform.tfvars`:
 
 ```hcl
 primary_validator_count = 1    # Number of Primary Network validators
@@ -200,7 +200,7 @@ Primary validator runtime config is stored at:
 
 ## Kubernetes Alternative
 
-This guide covers the Terraform + Ansible path (AWS). To deploy Primary Network nodes on an existing Kubernetes cluster instead, see the [Kubernetes deployment guide](../kubernetes/README.md).
+This guide covers the Terraform + Ansible path (AWS). To deploy Primary Network nodes on an existing Kubernetes cluster instead, see the [Kubernetes deployment guide](../../kubernetes/README.md).
 
 ## Next Steps
 

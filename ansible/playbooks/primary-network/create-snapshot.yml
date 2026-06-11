@@ -5,9 +5,10 @@
 # Use this after a node is fully synced to speed up future deployments.
 #
 # Usage:
-#   ansible-playbook playbooks/primary-network/create-snapshot.yml --limit primary-validator-1
-#   ansible-playbook playbooks/primary-network/create-snapshot.yml --limit primary-validator-1 -e snapshot_name=mainnet-2025-02
+#   ansible-playbook playbooks/primary-network/create-snapshot.yml -e target_host=primary-validator-1
+#   ansible-playbook playbooks/primary-network/create-snapshot.yml -e target_host=primary-validator-1 -e snapshot_name=mainnet-2025-02
 #
+# target_host is REQUIRED (this playbook stops avalanchego while the snapshot is taken).
 # The snapshot is uploaded to: s3://<bucket>/snapshots/<snapshot_name>.tar.lz4
 #
 # Requirements:
@@ -16,8 +17,31 @@
 #   - Sufficient disk space on NVMe for temporary archive (~50% of db size)
 #   - lz4 compression utility
 
+- name: Validate Snapshot Parameters
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check required variables
+      ansible.builtin.assert:
+        that:
+          - target_host is defined
+        fail_msg: |
+          Missing required variable 'target_host'. This playbook STOPS avalanchego on the
+          targeted host while the snapshot is taken, so an explicit target is required.
+          Usage:
+            ansible-playbook playbooks/primary-network/create-snapshot.yml \
+              -e target_host=<inventory-name> [-e snapshot_name=<name>]
+
+    - name: Verify target host exists
+      ansible.builtin.assert:
+        that:
+          - target_host in groups['all']
+        fail_msg: "Target host '{{ target_host }}' not found in inventory"
+
 - name: Create Database Snapshot
-  hosts: all
+  # default('localhost') is never used: the validation play above aborts the run
+  # when target_host is undefined. It only keeps 'hosts' parseable for syntax-check.
+  hosts: "{{ target_host | default('localhost') }}"
   become: true
   gather_facts: true
 
@@ -265,11 +289,11 @@
 
           To restore on a new node:
             ansible-playbook playbooks/primary-network/restore-snapshot.yml \
-              --limit <target-node> \
+              -e target_host=<target-node> \
               -e snapshot_name={{ snapshot_name }}
 
           Or use 'latest':
             ansible-playbook playbooks/primary-network/restore-snapshot.yml \
-              --limit <target-node>
+              -e target_host=<target-node>
 
           ============================================

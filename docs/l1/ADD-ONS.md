@@ -2,6 +2,8 @@
 
 Optional components to enhance your L1 blockchain.
 
+> **Note:** The examples below use `EVM_CHAIN_ID=99999` as a placeholder — replace it with the `chainId` from your genesis file (`configs/l1/genesis/genesis.json`). If your `l1.env` includes `EVM_CHAIN_ID`, you can pass `EVM_CHAIN_ID=$EVM_CHAIN_ID` after `source l1.env`.
+
 ## Blockscout (Block Explorer)
 
 Deploy a block explorer for your L1:
