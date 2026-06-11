@@ -37,7 +37,9 @@ Zero-downtime version upgrades:
 make upgrade VERSION=1.14.2
 ```
 
-> **Note:** subnet-evm is bundled with avalanchego v1.12.0+ and updates automatically.
+> **Note:** avalanchego release tarballs do **not** bundle subnet-evm (only the docker
+> images do). The upgrade installs the standalone subnet-evm release alongside
+> avalanchego, verified against the `checksums.txt` that subnet-evm releases publish.
 
 The upgrade is rolling (`serial: 1`): each node downloads and SHA256-verifies
 the release tarball **while still running**, atomically swaps the binary,

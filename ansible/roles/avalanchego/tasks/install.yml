@@ -129,7 +129,11 @@
         group: "{{ avalanchego_group }}"
         mode: "0755"
 
-    # subnet-evm is bundled with avalanchego as of v1.12.0+
+    # NOTE: subnet-evm is bundled only in the avalanchego DOCKER images, not
+    # in the release tarballs (verified against v1.14.1: the tarball contains
+    # just the avalanchego binary). Check anyway in case future tarballs
+    # bundle it; otherwise install the standalone release, verified against
+    # the checksums.txt that subnet-evm releases DO publish.
     - name: Check if bundled subnet-evm exists in release
       ansible.builtin.stat:
         path: "/tmp/avalanchego-install/avalanchego-{{ avalanchego_version_tag }}/plugins/{{ avalanchego_subnet_evm_vm_id }}"
@@ -146,62 +150,57 @@
       when: avalanchego_bundled_subnet_evm.stat.exists
       notify: Restart avalanchego
 
-    # Fallback for old avalanchego versions (<v1.12.0) that don't bundle
-    # subnet-evm. The standalone subnet-evm releases publish no checksums
-    # either, so this path requires the explicit unverified-download opt-in.
-    - name: Fail on unverifiable standalone subnet-evm download
-      ansible.builtin.fail:
-        msg: >-
-          avalanchego {{ avalanchego_version_tag }} does not bundle subnet-evm
-          and standalone subnet-evm releases cannot be checksum-verified.
-          Upgrade to avalanchego v1.12.0+ (bundled subnet-evm), or set
-          -e avalanchego_allow_unverified_download=true to accept the risk.
+    - name: Download, verify, and install standalone subnet-evm plugin
       when:
         - not avalanchego_bundled_subnet_evm.stat.exists
         - avalanchego_subnet_evm_version is defined
-        - not (avalanchego_allow_unverified_download | bool)
-
-    - name: Download subnet-evm plugin (fallback for older versions)
       vars:
-        subnet_evm_base: "https://github.com/ava-labs/subnet-evm/releases/download"
-        subnet_evm_file: "subnet-evm_{{ avalanchego_subnet_evm_version | regex_replace('^v', '') }}_linux_{{ avalanchego_release_arch }}.tar.gz"
-      ansible.builtin.get_url:
-        url: "{{ subnet_evm_base }}/{{ avalanchego_subnet_evm_version }}/{{ subnet_evm_file }}"
-        dest: /tmp/subnet-evm.tar.gz
-        mode: "0644"
-      when:
-        - not avalanchego_bundled_subnet_evm.stat.exists
-        - avalanchego_subnet_evm_version is defined
+        subnet_evm_base: "https://github.com/ava-labs/subnet-evm/releases/download/{{ avalanchego_subnet_evm_version }}"
+        subnet_evm_bare_version: "{{ avalanchego_subnet_evm_version | regex_replace('^v', '') }}"
+        subnet_evm_file: "subnet-evm_{{ subnet_evm_bare_version }}_linux_{{ avalanchego_release_arch }}.tar.gz"
+      block:
+        # dest filename must match the entry in checksums.txt for get_url's
+        # checksum-by-URL lookup to find the right line
+        - name: Download subnet-evm release tarball (SHA256-verified via checksums.txt)
+          ansible.builtin.get_url:
+            url: "{{ subnet_evm_base }}/{{ subnet_evm_file }}"
+            dest: "/tmp/{{ subnet_evm_file }}"
+            mode: "0644"
+            checksum: "sha256:{{ subnet_evm_base }}/subnet-evm_{{ subnet_evm_bare_version }}_checksums.txt"
 
-    - name: Extract subnet-evm (fallback)
-      ansible.builtin.unarchive:
-        src: /tmp/subnet-evm.tar.gz
-        dest: /tmp/
-        remote_src: true
-      when:
-        - not avalanchego_bundled_subnet_evm.stat.exists
-        - avalanchego_subnet_evm_version is defined
+        - name: Create subnet-evm extraction directory
+          ansible.builtin.file:
+            path: /tmp/subnet-evm-install
+            state: directory
+            mode: "0755"
 
-    - name: Install subnet-evm plugin (fallback, restart only on change)
-      ansible.builtin.copy:
-        src: /tmp/subnet-evm
-        dest: "{{ avalanchego_plugin_dir }}/{{ avalanchego_subnet_evm_vm_id }}"
-        owner: "{{ avalanchego_user }}"
-        group: "{{ avalanchego_group }}"
-        mode: "0755"
-        remote_src: true
-      when:
-        - not avalanchego_bundled_subnet_evm.stat.exists
-        - avalanchego_subnet_evm_version is defined
-      notify: Restart avalanchego
+        - name: Extract subnet-evm
+          ansible.builtin.unarchive:
+            src: "/tmp/{{ subnet_evm_file }}"
+            dest: /tmp/subnet-evm-install
+            remote_src: true
+
+        - name: Install subnet-evm plugin (restart only on change)
+          ansible.builtin.copy:
+            src: /tmp/subnet-evm-install/subnet-evm
+            dest: "{{ avalanchego_plugin_dir }}/{{ avalanchego_subnet_evm_vm_id }}"
+            owner: "{{ avalanchego_user }}"
+            group: "{{ avalanchego_group }}"
+            mode: "0755"
+            remote_src: true
+          notify: Restart avalanchego
 
   always:
+    - name: Find downloaded subnet-evm tarballs
+      ansible.builtin.find:
+        paths: /tmp
+        patterns: "subnet-evm_*.tar.gz"
+        file_type: file
+      register: avalanchego_subnet_evm_downloads
+
     - name: Clean up download artifacts
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
-      loop:
-        - "/tmp/{{ avalanchego_tarball_name }}"
-        - /tmp/avalanchego-install
-        - /tmp/subnet-evm.tar.gz
-        - /tmp/subnet-evm
+      loop: "{{ ['/tmp/' + avalanchego_tarball_name, '/tmp/avalanchego-install', '/tmp/subnet-evm-install']
+                + (avalanchego_subnet_evm_downloads.files | map(attribute='path') | list) }}"

@@ -11,9 +11,9 @@
 # after a verified binary is in place, and only if it actually changed.
 # Nodes already running the target version are skipped entirely.
 #
-# NOTE: As of avalanchego v1.12.0+, subnet-evm is bundled with avalanchego.
-#       The plugin is automatically installed from the avalanchego release tarball.
-#       No separate subnet-evm download is needed.
+# NOTE: avalanchego release TARBALLS do not bundle subnet-evm (only the
+#       docker images do). The role installs the standalone subnet-evm
+#       release, verified against its published checksums.txt.
 #
 # Checksums: avalanchego releases publish no checksum manifest, so known-good
 # SHA256 values are pinned in roles/avalanchego/defaults/main.yml
