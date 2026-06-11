@@ -124,6 +124,18 @@ make status   # Wait for "P:OK" on all nodes
 
 ### 5. Create Your L1
 
+> **Prerequisites:** the `platform` CLI is not installed by `make setup`. Install it with:
+>
+> ```bash
+> go install github.com/ava-labs/platform-cli@latest
+> ```
+>
+> (`go install` names the binary `platform-cli`; alias it to `platform`, or build from source with `go build -o platform .` as shown in the [platform-cli README](https://github.com/ava-labs/platform-cli).)
+>
+> **No extra tool needed:** you can skip platform-cli entirely and export your key directly — `export AVALANCHE_PRIVATE_KEY=0x...`. The tools accept raw hex or `PrivateKey-` CB58. Key precedence: `--key-name` > `AVALANCHE_PRIVATE_KEY` > keystore default.
+>
+> **Funding:** you need ~1.5+ AVAX on the Fuji P-Chain (1 AVAX per validator balance + fees) — fund via <https://core.app/tools/testnet-faucet> (C-Chain) then transfer C→P, or ask in the thread.
+
 ```bash
 # Recommended key flow (platform-cli keystore)
 platform keys import --name l1-deployer
@@ -201,7 +213,7 @@ Key settings:
 
 ## Kubernetes Alternative
 
-This guide covers the Terraform + Ansible path. To deploy L1 infrastructure on an existing Kubernetes cluster instead, see the [Kubernetes deployment guide](../kubernetes/README.md).
+This guide covers the Terraform + Ansible path. To deploy L1 infrastructure on an existing Kubernetes cluster instead, see the [Kubernetes deployment guide](../../kubernetes/README.md).
 
 ## Next Steps
 

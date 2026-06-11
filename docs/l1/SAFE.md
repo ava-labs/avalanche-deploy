@@ -106,10 +106,16 @@ A self-signed SSL certificate is auto-generated. Accept the browser security war
 
 **Option 2: Let's Encrypt (recommended for production)**
 
+> **Note:** `make safe` does not forward `-e` flags (GNU make consumes `-e` itself). To override Ansible variables, run the playbook directly:
+
 ```bash
-make safe -e "safe_use_letsencrypt=true" \
-  -e "safe_domain=safe.yourdomain.com" \
-  -e "safe_letsencrypt_email=admin@yourdomain.com"
+cd ansible
+ansible-playbook -i inventory/aws_hosts playbooks/l1/deploy-safe.yml \
+  -e chain_id=<CHAIN_ID> \
+  -e evm_chain_id=<EVM_CHAIN_ID> \
+  -e safe_use_letsencrypt=true \
+  -e safe_domain=safe.yourdomain.com \
+  -e safe_letsencrypt_email=admin@yourdomain.com
 ```
 
 ### API Endpoints
@@ -249,13 +255,18 @@ docker compose up -d
 
 ### Customization
 
-Override defaults via `-e` flags:
+Override defaults by running the playbook directly with `-e` flags (`make safe` does not forward `-e` — GNU make consumes it):
 
 ```bash
-make safe EVM_CHAIN_ID=99999 \
-  -e "safe_http_port=8888" \
-  -e "safe_chain_name=My Custom L1"
+cd ansible
+ansible-playbook -i inventory/aws_hosts playbooks/l1/deploy-safe.yml \
+  -e chain_id=<CHAIN_ID> \
+  -e evm_chain_id=99999 \
+  -e safe_http_port=8888 \
+  -e 'safe_chain_name="My Custom L1"'
 ```
+
+> Replace `99999` with the `chainId` from your genesis file (`configs/l1/genesis/genesis.json`).
 
 ## Security Considerations
 
