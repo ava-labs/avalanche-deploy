@@ -12,8 +12,19 @@
 # If snapshot_name is not specified, uses 'latest'.
 #
 # Options:
-#   verify_integrity: true  - Download file first, verify SHA256, then extract (slower but safer)
-#   verify_integrity: false - Stream directly (faster, default)
+#   verify_integrity: true        - Download file first, verify SHA256, then extract.
+#                                   Download + verification happen BEFORE the old
+#                                   database is wiped; a bad snapshot leaves the node intact.
+#   verify_integrity: false       - Stream directly (faster, default, NO integrity check)
+#   skip_checksum_verification: true - Only with verify_integrity=true: explicitly skip
+#                                   the SHA256 check (e.g. checksum file lost). A missing
+#                                   or mismatched checksum is otherwise a HARD FAILURE.
+#
+# Failure semantics:
+#   - Failure BEFORE the database wipe: avalanchego is restarted and the run fails;
+#     the node is exactly as it was.
+#   - Failure AFTER the wipe: the node is left STOPPED with a partial database; the
+#     rescue message states exactly what to do. It is NOT silently restarted.
 #
 # Requirements:
 #   - S3 bucket with snapshots (created by primary-network/create-snapshot.yml)
@@ -53,6 +64,7 @@
     temp_dir: /var/lib/avalanchego/snapshot-restore
     db_path: /var/lib/avalanchego/db
     verify_integrity: false
+    skip_checksum_verification: false
 
   pre_tasks:
     - name: Verify S3 backup is configured
@@ -87,6 +99,8 @@
       when: snapshot_exists.rc != 0
 
   tasks:
+    # Metadata is informational only (used in the final summary); its absence
+    # must not block a restore, hence failed_when: false here.
     - name: Get snapshot metadata
       ansible.builtin.command: >
         aws s3 cp s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.json -
@@ -107,26 +121,6 @@
           SHA256: {{ snapshot_info.sha256 | default('not available') }})
       when: snapshot_metadata.rc == 0
 
-    - name: Stop avalanchego
-      ansible.builtin.systemd:
-        name: avalanchego
-        state: stopped
-
-    - name: Create temp directory
-      ansible.builtin.file:
-        path: "{{ temp_dir }}"
-        state: directory
-        mode: '0755'
-
-    - name: Download checksum file
-      ansible.builtin.command: >
-        aws s3 cp s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.sha256
-        {{ temp_dir }}/{{ snapshot_name }}.sha256
-      when: verify_integrity | bool
-      register: checksum_download
-      failed_when: false
-      changed_when: checksum_download.rc == 0
-
     - name: Check available disk space
       ansible.builtin.shell: set -o pipefail && df -BG {{ db_path | dirname }} | tail -1 | awk '{print $4}' | sed 's/G//'
       args:
@@ -138,162 +132,264 @@
       ansible.builtin.debug:
         msg: "Available space: {{ available_space.stdout }}GB"
 
-    - name: Remove existing database
-      ansible.builtin.file:
-        path: "{{ db_path }}"
-        state: absent
+    - name: Track restore progress (drives rescue recovery decisions)
+      ansible.builtin.set_fact:
+        restore_phase: "pre-wipe"
 
-    - name: Create database directory
-      ansible.builtin.file:
-        path: "{{ db_path }}"
-        state: directory
-        owner: avalanche
-        group: avalanche
-        mode: '0755'
+    - name: Restore database (phase-tracked, no silent recovery)
+      block:
+        - name: Stop avalanchego
+          ansible.builtin.systemd:
+            name: avalanchego
+            state: stopped
 
-    - name: Download snapshot file (verified mode)
-      ansible.builtin.command: >
-        aws s3 cp s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4
-        {{ temp_dir }}/{{ snapshot_name }}.tar.lz4
-      when: verify_integrity | bool
-      async: 7200
-      poll: 60
-      changed_when: true
+        - name: Create temp directory
+          ansible.builtin.file:
+            path: "{{ temp_dir }}"
+            state: directory
+            mode: '0755'
 
-    - name: Verify snapshot checksum
-      ansible.builtin.shell: |
-        set -o pipefail
-        cd {{ temp_dir }}
-        sha256sum -c {{ snapshot_name }}.sha256
-      args:
-        executable: /bin/bash
-      register: checksum_verify
-      when: verify_integrity | bool and checksum_download.rc == 0
-      changed_when: false
+        # --- Verified mode: download + verify BEFORE wiping the old database ---
+        # A missing or mismatched checksum is a hard failure (node restarted,
+        # database untouched) unless skip_checksum_verification=true is passed.
+        - name: Download checksum file (verified mode)
+          ansible.builtin.command: >
+            aws s3 cp s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.sha256
+            {{ temp_dir }}/{{ snapshot_name }}.sha256
+          when: verify_integrity | bool and not (skip_checksum_verification | bool)
+          changed_when: true
 
-    - name: Fail if checksum verification failed
-      ansible.builtin.fail:
-        msg: |
-          CHECKSUM VERIFICATION FAILED!
-          The snapshot file may be corrupted. Do not use this snapshot.
-          Expected: {{ lookup('file', temp_dir + '/' + snapshot_name + '.sha256') | default('unknown') }}
-          Please try downloading again or use a different snapshot.
-      when: verify_integrity | bool and checksum_download.rc == 0 and checksum_verify.rc != 0
+        - name: Download snapshot file (verified mode)
+          ansible.builtin.command: >
+            aws s3 cp s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4
+            {{ temp_dir }}/{{ snapshot_name }}.tar.lz4
+          when: verify_integrity | bool
+          async: 7200
+          poll: 60
+          changed_when: true
 
-    - name: Display checksum verification success
-      ansible.builtin.debug:
-        msg: "Checksum verified successfully"
-      when: verify_integrity | bool and checksum_download.rc == 0 and checksum_verify.rc == 0
+        - name: Verify snapshot checksum (verified mode)
+          ansible.builtin.shell: |
+            set -o pipefail
+            cd {{ temp_dir }}
+            sha256sum -c {{ snapshot_name }}.sha256
+          args:
+            executable: /bin/bash
+          when: verify_integrity | bool and not (skip_checksum_verification | bool)
+          changed_when: false
 
-    - name: Extract snapshot (verified mode)
-      ansible.builtin.shell: |
-        set -o pipefail
-        lz4 -d {{ temp_dir }}/{{ snapshot_name }}.tar.lz4 | \
-          tar xf - -C {{ db_path | dirname }}
-      args:
-        executable: /bin/bash
-      when: verify_integrity | bool
-      async: 7200
-      poll: 60
-      changed_when: true
+        - name: Display checksum verification success
+          ansible.builtin.debug:
+            msg: "Checksum verified successfully"
+          when: verify_integrity | bool and not (skip_checksum_verification | bool)
 
-    - name: Download and extract snapshot (streaming mode)
-      ansible.builtin.shell: |
-        set -o pipefail
-        aws s3 cp s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4 - | \
-          lz4 -d | \
-          tar xf - -C {{ db_path | dirname }}
-      args:
-        executable: /bin/bash
-      register: restore_result
-      when: not (verify_integrity | bool)
-      async: 7200  # 2 hour timeout
-      poll: 60
-      changed_when: true
+        - name: Warn that checksum verification was explicitly skipped
+          ansible.builtin.debug:
+            msg: "WARNING: skip_checksum_verification=true — restoring WITHOUT SHA256 verification at operator request."
+          when: verify_integrity | bool and skip_checksum_verification | bool
 
-    - name: Clean up downloaded snapshot file
-      ansible.builtin.file:
-        path: "{{ temp_dir }}/{{ snapshot_name }}.tar.lz4"
-        state: absent
-      when: verify_integrity | bool
+        # --- Point of no return: the old database is destroyed below ---
+        - name: Mark restore as past the point of no return
+          ansible.builtin.set_fact:
+            restore_phase: "post-wipe"
 
-    - name: Set database ownership
-      ansible.builtin.file:
-        path: "{{ db_path }}"
-        owner: avalanche
-        group: avalanche
-        recurse: true
+        - name: Remove existing database
+          ansible.builtin.file:
+            path: "{{ db_path }}"
+            state: absent
 
-    - name: Clean up temp directory
-      ansible.builtin.file:
-        path: "{{ temp_dir }}"
-        state: absent
+        - name: Create database directory
+          ansible.builtin.file:
+            path: "{{ db_path }}"
+            state: directory
+            owner: avalanche
+            group: avalanche
+            mode: '0755'
 
-    - name: Start avalanchego
-      ansible.builtin.systemd:
-        name: avalanchego
-        state: started
+        - name: Extract snapshot (verified mode)
+          ansible.builtin.shell: |
+            set -o pipefail
+            lz4 -d {{ temp_dir }}/{{ snapshot_name }}.tar.lz4 | \
+              tar xf - -C {{ db_path | dirname }}
+          args:
+            executable: /bin/bash
+          when: verify_integrity | bool
+          async: 7200
+          poll: 60
+          changed_when: true
 
-    - name: Wait for node to start
-      ansible.builtin.uri:
-        url: "http://127.0.0.1:9650/ext/info"
-        method: POST
-        body_format: json
-        body:
-          jsonrpc: "2.0"
-          id: 1
-          method: "info.getNodeID"
-        return_content: true
-      register: node_info
-      until: node_info.status == 200
-      retries: 30
-      delay: 10
+        - name: Download and extract snapshot (streaming mode)
+          ansible.builtin.shell: |
+            set -o pipefail
+            aws s3 cp s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4 - | \
+              lz4 -d | \
+              tar xf - -C {{ db_path | dirname }}
+          args:
+            executable: /bin/bash
+          register: restore_result
+          when: not (verify_integrity | bool)
+          async: 7200  # 2 hour timeout
+          poll: 60
+          changed_when: true
 
-    - name: Display Node ID
-      ansible.builtin.debug:
-        msg: "Node ID: {{ node_info.json.result.nodeID }}"
+        - name: Set database ownership
+          ansible.builtin.file:
+            path: "{{ db_path }}"
+            owner: avalanche
+            group: avalanche
+            recurse: true
 
-    - name: Check P-Chain status
-      ansible.builtin.uri:
-        url: "http://127.0.0.1:9650/ext/info"
-        method: POST
-        body_format: json
-        body:
-          jsonrpc: "2.0"
-          id: 1
-          method: "info.isBootstrapped"
-          params:
-            chain: "P"
-        return_content: true
-      register: pchain_status
-      until: pchain_status.status == 200
-      retries: 60
-      delay: 10
+        - name: Clean up temp directory
+          ansible.builtin.file:
+            path: "{{ temp_dir }}"
+            state: absent
 
-    - name: Display completion message
-      ansible.builtin.debug:
-        msg: |
+        - name: Start avalanchego
+          ansible.builtin.systemd:
+            name: avalanchego
+            state: started
 
-          ============================================
-          Snapshot Restored Successfully
-          ============================================
+        - name: Mark node as restarted on restored database
+          ansible.builtin.set_fact:
+            restore_phase: "started"
 
-          Node ID: {{ node_info.json.result.nodeID }}
-          Snapshot: {{ snapshot_name }}
-          Integrity: {{ 'Verified' if (verify_integrity | bool) else 'Streaming (not verified)' }}
-          {% if snapshot_info is defined and snapshot_info.sha256 is defined %}
-          SHA256: {{ snapshot_info.sha256 }}
-          {% endif %}
+        - name: Wait for node to start
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:9650/ext/info"
+            method: POST
+            body_format: json
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: "info.getNodeID"
+            return_content: true
+          register: node_info
+          until: node_info.status == 200
+          retries: 30
+          delay: 10
 
-          The node is now catching up from the snapshot.
-          This should only take a few minutes to sync recent blocks.
+        - name: Display Node ID
+          ansible.builtin.debug:
+            msg: "Node ID: {{ node_info.json.result.nodeID }}"
 
-          Check sync status:
-            ./scripts/primary-network/check-sync.sh {{ ansible_host }}
+        - name: Check P-Chain status
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:9650/ext/info"
+            method: POST
+            body_format: json
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: "info.isBootstrapped"
+              params:
+                chain: "P"
+            return_content: true
+          register: pchain_status
+          until: pchain_status.status == 200
+          retries: 60
+          delay: 10
 
-          P-Chain bootstrapped: {{ pchain_status.json.result.isBootstrapped | default(false) }}
+        - name: Display completion message
+          ansible.builtin.debug:
+            msg: |
 
-          {% if not (verify_integrity | bool) %}
-          TIP: For verified restores, use: -e verify_integrity=true
-          {% endif %}
-          ============================================
+              ============================================
+              Snapshot Restored Successfully
+              ============================================
+
+              Node ID: {{ node_info.json.result.nodeID }}
+              Snapshot: {{ snapshot_name }}
+              Integrity: {{ 'Verified' if (verify_integrity | bool and not (skip_checksum_verification | bool)) else 'NOT VERIFIED' }}
+              {% if snapshot_info is defined and snapshot_info.sha256 is defined %}
+              SHA256: {{ snapshot_info.sha256 }}
+              {% endif %}
+
+              The node is now catching up from the snapshot.
+              This should only take a few minutes to sync recent blocks.
+
+              Check sync status:
+                ./scripts/primary-network/check-sync.sh {{ ansible_host }}
+
+              P-Chain bootstrapped: {{ pchain_status.json.result.isBootstrapped | default(false) }}
+
+              {% if not (verify_integrity | bool) %}
+              TIP: For verified restores, use: -e verify_integrity=true
+              {% endif %}
+              ============================================
+      rescue:
+        # Phase 'pre-wipe': the old database is untouched — safe to restart.
+        - name: Restart avalanchego (database untouched)
+          ansible.builtin.systemd:
+            name: avalanchego
+            state: started
+          when: restore_phase == 'pre-wipe'
+
+        # The database is intact and a re-run re-downloads everything; don't
+        # leave a multi-hundred-GB download on the NVMe next to the live DB.
+        - name: Clean up temp artifacts (database untouched)
+          ansible.builtin.file:
+            path: "{{ temp_dir }}"
+            state: absent
+          when: restore_phase == 'pre-wipe'
+
+        - name: Report failure before database wipe
+          ansible.builtin.debug:
+            msg: |
+              RESTORE FAILED BEFORE the old database was touched (download or
+              checksum verification stage). avalanchego has been RESTARTED on its
+              original database — the node is exactly as it was before this run.
+
+              If the failure was a missing/mismatched checksum, do NOT bypass it
+              casually: the snapshot may be corrupted. Re-create the snapshot, or
+              (last resort, accepting the risk) re-run with
+              -e skip_checksum_verification=true.
+          when: restore_phase == 'pre-wipe'
+
+        # Phase 'post-wipe': old DB destroyed, restore incomplete. Restarting
+        # here would boot a half-restored database as if nothing happened.
+        - name: Report failure after database wipe — node left STOPPED
+          ansible.builtin.debug:
+            msg: |
+              RESTORE FAILED AFTER the old database was wiped.
+
+              Current state of {{ inventory_hostname }}:
+                - avalanchego: STOPPED (deliberately NOT restarted)
+                - {{ db_path }}: PARTIAL / INCOMPLETE restore — not usable as-is
+                - temp artifacts may remain in {{ temp_dir }}
+
+              Do ONE of the following:
+                1. Re-run the restore (recommended):
+                     ansible-playbook playbooks/primary-network/restore-snapshot.yml \
+                       -e target_host={{ inventory_hostname }} -e snapshot_name={{ snapshot_name }} \
+                       -e verify_integrity=true
+                2. Abandon the snapshot and resync from the network:
+                     sudo rm -rf {{ db_path }} {{ temp_dir }}
+                     sudo systemctl start avalanchego   # state-sync bootstrap (slow)
+
+              Do NOT just 'systemctl start avalanchego' on the partial database.
+          when: restore_phase == 'post-wipe'
+
+        # Phase 'started': database restored and node running, but post-start
+        # checks failed. Leave it running; tell the operator what to check.
+        - name: Report failure after node start
+          ansible.builtin.debug:
+            msg: |
+              The snapshot was restored and avalanchego was STARTED, but the
+              post-start checks failed (node not responding / P-Chain check).
+
+              Current state of {{ inventory_hostname }}:
+                - avalanchego: RUNNING on the restored database
+                - It may simply still be replaying/bootstrapping.
+
+              Check:
+                sudo systemctl status avalanchego
+                sudo journalctl -u avalanchego -n 200
+                curl -s http://127.0.0.1:9650/ext/health
+          when: restore_phase == 'started'
+
+        - name: Re-raise restore failure
+          ansible.builtin.fail:
+            msg: >-
+              Restore failed at '{{ ansible_failed_task.name }}'
+              (phase: {{ restore_phase }}):
+              {{ ansible_failed_result.msg | default(ansible_failed_result) }}
