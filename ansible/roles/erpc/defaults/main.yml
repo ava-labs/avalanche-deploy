@@ -12,8 +12,8 @@ erpc_project_id: avalanche-l1
 # HTTP port for RPC requests
 erpc_port: 4000
 
-# Admin/healthcheck port
-erpc_admin_port: 4001
+# NOTE: eRPC serves /healthcheck on the main HTTP port (erpc_port);
+# there is no separate admin/healthcheck port.
 
 # Metrics port (Prometheus format)
 # Note: 9090 is used by Prometheus, so using 9091

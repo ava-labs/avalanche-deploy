@@ -416,7 +416,7 @@
           eRPC Load Balancer (recommended for dApps):
             http://{{ erpc_host }}:4000
           eRPC Health Check:
-            http://{{ erpc_host }}:4001/healthcheck
+            http://{{ erpc_host }}:4000/healthcheck
           {% endif %}
 
           ============================================

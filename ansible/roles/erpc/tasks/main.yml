@@ -13,7 +13,6 @@
 #
 # Optional variables:
 #   erpc_port: HTTP port (default: 4000)
-#   erpc_admin_port: Admin/metrics port (default: 4001)
 
 - name: Install Docker dependencies
   ansible.builtin.apt:
@@ -110,7 +109,7 @@
 
 - name: Wait for eRPC to be ready
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ erpc_admin_port | default(4001) }}/healthcheck"
+    url: "http://127.0.0.1:{{ erpc_port | default(4000) }}/healthcheck"
     method: GET
     status_code: 200
   register: erpc_health

@@ -195,7 +195,7 @@ Your L1 is now running:
 
 - **Direct RPC**: `http://<rpc-ip>:9650/ext/bc/<chain-id>/rpc`
 - **eRPC (recommended)**: `http://<monitoring-ip>:4000` — load balanced, cached, automatic failover
-- **eRPC Health**: `http://<monitoring-ip>:4001/healthcheck`
+- **eRPC Health**: `http://<monitoring-ip>:4000/healthcheck`
 
 ## Optional: Initialize Validator Manager
 
