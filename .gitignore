@@ -60,3 +60,6 @@ Thumbs.db
 *.pem
 *.key
 !*.key.pub
+
+# Helm vendored dependency tarballs (rebuild with: helm dependency build)
+kubernetes/helm/*/charts/
