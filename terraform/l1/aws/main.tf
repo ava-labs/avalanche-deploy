@@ -239,6 +239,15 @@ resource "aws_security_group" "rpc" {
     cidr_blocks = var.enable_public_safe ? ["0.0.0.0/0"] : [local.operator_cidr]
   }
 
+  # Faucet UI/API - configurable (runs on RPC node)
+  ingress {
+    description = "Faucet"
+    from_port   = 8010
+    to_port     = 8010
+    protocol    = "tcp"
+    cidr_blocks = var.enable_public_faucet ? ["0.0.0.0/0"] : [local.operator_cidr]
+  }
+
   # Safe Client Gateway - configurable (runs on RPC node, needed by UI)
   ingress {
     description = "Safe Client Gateway"
