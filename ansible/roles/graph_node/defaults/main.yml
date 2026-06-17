@@ -1,8 +1,16 @@
 ---
 # Graph Node defaults
 
+# Docker images - pinned so re-running the playbook never silently upgrades a
+# running stack (latest published release tags verified on the registries, 2026-06).
 # Graph Node version (Docker image tag)
-graph_node_version: latest
+graph_node_version: v0.44.0
+
+# IPFS (kubo) image used for subgraph file storage
+graph_node_ipfs_image: ipfs/kubo:v0.42.0
+
+# PostgreSQL image (major-pinned official image)
+graph_node_postgres_image: postgres:15-alpine
 
 # Network name shown in Graph Node logs and subgraph manifests
 graph_node_network_name: avalanche-l1

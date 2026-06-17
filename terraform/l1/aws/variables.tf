@@ -148,6 +148,12 @@ variable "enable_public_blockscout" {
   default     = true
 }
 
+variable "enable_public_faucet" {
+  description = "Allow public access to the faucet UI/API (port 8010 on RPC nodes)"
+  type        = bool
+  default     = false
+}
+
 variable "enable_public_safe" {
   description = "Allow public access to Safe multisig UI"
   type        = bool

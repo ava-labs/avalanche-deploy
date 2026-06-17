@@ -1,19 +1,17 @@
-version: '3.8'
-
 services:
   faucet:
-    image: avaplatform/faucet:latest
+    # Built locally from the pinned upstream source by this role - no public
+    # image exists for the Avalanche faucet. Chain config is baked into the
+    # image at build time; only PK/CAPTCHA secrets come from .env.
+    image: {{ faucet_image }}:{{ faucet_image_tag }}
     container_name: avalanche-faucet
     restart: unless-stopped
     ports:
-      - "{{ faucet_port | default(8010) }}:8000"
-    environment:
-      - RPC_URL=http://{{ faucet_rpc_host | default(ansible_host) }}:9650/ext/bc/{{ faucet_chain_id }}/rpc
-      - CHAIN_ID={{ faucet_evm_chain_id }}
-      - DROP_SIZE={{ faucet_amount | default(1) }}
-      - RATE_LIMIT={{ faucet_rate_limit | default(1) }}
+      - "{{ faucet_port }}:8000"
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

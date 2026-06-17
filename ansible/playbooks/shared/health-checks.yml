@@ -134,6 +134,7 @@
           hostname: "{{ inventory_hostname }}"
           ip: "{{ ansible_host }}"
           service_running: "{{ service_status.status.ActiveState | default('unknown') == 'active' }}"
+          api_reachable: "{{ node_id_response.status | default(0) == 200 }}"
           node_id: "{{ node_id_response.json.result.nodeID | default('unknown') }}"
           version: "{{ node_version_response.json.result.version | default('unknown') }}"
           p_chain_bootstrapped: "{{ p_chain_status.json.result.isBootstrapped | default(false) }}"
@@ -147,14 +148,31 @@
   gather_facts: false
 
   tasks:
-    - name: Collect all node health data
+    - name: Build list of checked hosts
       ansible.builtin.set_fact:
-        all_nodes_health: >-
+        health_check_hosts: >-
           {{
             groups['validators'] | default([])
             | union(groups['rpc'] | default([]))
             | union(groups['primary_validators'] | default([]))
-            | map('extract', hostvars, 'node_health')
+          }}
+
+    - name: Collect all node health data
+      ansible.builtin.set_fact:
+        all_nodes_health: >-
+          {{
+            health_check_hosts
+            | map('extract', hostvars)
+            | selectattr('node_health', 'defined')
+            | map(attribute='node_health')
+            | list
+          }}
+        unreported_hosts: >-
+          {{
+            health_check_hosts
+            | map('extract', hostvars)
+            | selectattr('node_health', 'undefined')
+            | map(attribute='inventory_hostname')
             | list
           }}
 
@@ -251,3 +269,54 @@
           {% endif %}
 
           ============================================
+
+    # Exit nonzero when nodes are actually broken. A node that is still
+    # bootstrapping (service up, API responding, P-Chain not yet synced) is
+    # reported but does NOT fail the run; a dead service, an unreachable API,
+    # a host that produced no report, or a bootstrapped node whose health
+    # endpoint fails does.
+    - name: Identify nodes still bootstrapping (not a failure)
+      ansible.builtin.set_fact:
+        bootstrapping_nodes: >-
+          {{
+            all_nodes_health
+            | selectattr('service_running')
+            | selectattr('api_reachable')
+            | rejectattr('p_chain_bootstrapped')
+            | map(attribute='hostname')
+            | list
+          }}
+
+    - name: Identify failed nodes
+      ansible.builtin.set_fact:
+        failed_health_nodes: >-
+          {{
+            (
+              (all_nodes_health | rejectattr('service_running') | map(attribute='hostname') | list)
+              + (all_nodes_health | rejectattr('api_reachable') | map(attribute='hostname') | list)
+              + (all_nodes_health | selectattr('p_chain_bootstrapped') | rejectattr('health_check_passed') | map(attribute='hostname') | list)
+              + (unreported_hosts | default([]))
+            ) | unique
+          }}
+
+    - name: Note nodes still bootstrapping
+      ansible.builtin.debug:
+        msg: >-
+          Still bootstrapping (service up, API responding - not counted as
+          failures): {{ bootstrapping_nodes | join(', ') }}
+      when: bootstrapping_nodes | length > 0
+
+    - name: Assert all nodes are alive and healthy
+      ansible.builtin.assert:
+        that:
+          - failed_health_nodes | length == 0
+        fail_msg: >-
+          Health check FAILED for: {{ failed_health_nodes | join(', ') }}.
+          Causes: service not running, API unreachable, no health report
+          collected, or /ext/health failing on a bootstrapped node. See the
+          per-node report above and 'journalctl -u avalanchego' on the
+          affected hosts.
+        success_msg: >-
+          All {{ total_nodes }} nodes alive
+          ({{ healthy_nodes }} fully healthy,
+          {{ bootstrapping_nodes | length }} still bootstrapping)

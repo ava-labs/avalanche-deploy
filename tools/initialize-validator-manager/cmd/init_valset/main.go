@@ -234,9 +234,9 @@ func signWarpMessage(sigAggURL string, unsignedMsg *warp.UnsignedMessage, subnet
 	msgHex := hex.EncodeToString(unsignedMsg.Bytes())
 
 	reqBody := map[string]interface{}{
-		"message":            msgHex,
-		"signing-subnet-id":  subnetID.String(),
-		"quorum-percentage":  67,
+		"message":           msgHex,
+		"signing-subnet-id": subnetID.String(),
+		"quorum-percentage": 67,
 	}
 
 	jsonBody, _ := json.Marshal(reqBody)

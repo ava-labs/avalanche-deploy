@@ -1,18 +1,24 @@
 ---
-# Faucet Role - Deploy Avalanche Faucet for L1 Chain
+# Faucet Role - Build and deploy the Avalanche Faucet for an L1 chain
 #
-# This role deploys the official Avalanche Faucet as a Docker container.
-# The faucet allows developers to request test tokens on your L1.
+# No public container image exists for the Avalanche faucet
+# (https://github.com/ava-labs/avalanche-faucet) - upstream's docs say to
+# build from source, and ALL chain configuration (RPC, chain ID, drip
+# amount, rate limits) is baked into the image at build time from
+# config.json. The app reads only PK and CAPTCHA secrets at runtime.
+#
+# This role therefore: clones the repo at a pinned commit, applies
+# files/patches/faucet-source.patch (captcha opt-out for private faucets +
+# a TS build fix for empty erc20tokens), renders both config.json files,
+# builds the image on the host, and runs it via docker compose + systemd.
 #
 # Required variables:
-#   faucet_chain_id: The L1 chain ID (blockchain ID from create-l1)
+#   faucet_chain_id: The L1 blockchain ID (from create-l1, used in the RPC path)
 #   faucet_evm_chain_id: The EVM chain ID (from genesis file)
 #   faucet_private_key: Private key for the faucet wallet (must be funded)
 #
-# Optional variables:
-#   faucet_port: Port to expose faucet (default: 8010)
-#   faucet_amount: Amount of tokens to dispense per request (default: 1)
-#   faucet_rate_limit: Requests per hour per address (default: 1)
+# See defaults/main.yml for chain branding, drip amount, rate limit, and
+# captcha options.
 
 - name: Install Docker dependencies
   ansible.builtin.apt:
@@ -22,6 +28,7 @@
       - curl
       - gnupg
       - lsb-release
+      - git
     state: present
     update_cache: true
 
@@ -58,30 +65,104 @@
     shell: /bin/bash
     create_home: true
 
-- name: Create faucet directory
+- name: Create faucet directories
   ansible.builtin.file:
-    path: /opt/faucet
+    path: "{{ item }}"
     state: directory
     owner: faucet
     group: faucet
     mode: '0755'
+  loop:
+    - "{{ faucet_install_dir }}"
+    - "{{ faucet_install_dir }}/patches"
+
+# --- Source checkout + patch + config (baked into the image) ---
+
+# force: true resets any local modifications, so the patch and rendered
+# configs below are applied to a pristine tree on every run (idempotent).
+- name: Clone avalanche-faucet source at pinned commit
+  ansible.builtin.git:
+    repo: "{{ faucet_repo }}"
+    dest: "{{ faucet_install_dir }}/src"
+    version: "{{ faucet_repo_version }}"
+    force: true
+  register: faucet_git
+
+- name: Copy source patch
+  ansible.builtin.copy:
+    src: patches/faucet-source.patch
+    dest: "{{ faucet_install_dir }}/patches/faucet-source.patch"
+    owner: faucet
+    group: faucet
+    mode: '0644'
+  register: faucet_patch_file
+
+- name: Apply source patch (captcha opt-out + TS build fix)
+  # noqa: command-instead-of-module - the git module clones/checks out; it cannot apply patches
+  ansible.builtin.command: git apply ../patches/faucet-source.patch
+  args:
+    chdir: "{{ faucet_install_dir }}/src"
+  changed_when: true
+
+- name: Render server chain configuration (baked at build time)
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: "{{ faucet_install_dir }}/src/config.json"
+    owner: faucet
+    group: faucet
+    mode: '0644'
+  register: faucet_server_config
+
+- name: Render client configuration (baked at build time)
+  ansible.builtin.template:
+    src: client-config.json.j2
+    dest: "{{ faucet_install_dir }}/src/client/src/config.json"
+    owner: faucet
+    group: faucet
+    mode: '0644'
+  register: faucet_client_config
+
+- name: Check whether faucet image exists
+  ansible.builtin.command: docker images -q {{ faucet_image }}:{{ faucet_image_tag }}
+  register: faucet_image_check
+  changed_when: false
+
+# npm install + tsc + React build; takes several minutes on first run.
+# Rebuilds only when the source, patch, or baked config changed.
+- name: Build faucet image (npm install + tsc + client build, several minutes)
+  ansible.builtin.command: >-
+    docker build -t {{ faucet_image }}:{{ faucet_image_tag }} .
+  args:
+    chdir: "{{ faucet_install_dir }}/src"
+  when: >-
+    faucet_image_check.stdout | trim | length == 0
+    or faucet_git.changed
+    or faucet_patch_file.changed
+    or faucet_server_config.changed
+    or faucet_client_config.changed
+  changed_when: true
+  notify: Restart faucet
+
+# --- Runtime ---
 
 - name: Create faucet docker-compose file
   ansible.builtin.template:
     src: docker-compose.yml.j2
-    dest: /opt/faucet/docker-compose.yml
+    dest: "{{ faucet_install_dir }}/docker-compose.yml"
     owner: faucet
     group: faucet
     mode: '0644'
+  notify: Restart faucet
 
 - name: Create faucet environment file
   ansible.builtin.template:
     src: faucet.env.j2
-    dest: /opt/faucet/.env
+    dest: "{{ faucet_install_dir }}/.env"
     owner: faucet
     group: faucet
     mode: '0600'
   no_log: true
+  notify: Restart faucet
 
 - name: Create faucet systemd service
   ansible.builtin.template:
@@ -96,3 +177,46 @@
     state: started
     enabled: true
     daemon_reload: true
+
+# Apply any pending image/env/compose changes now (systemd stop/start =
+# compose down + up, which re-reads env files) so the readiness checks below
+# validate the configuration we just rendered, not a stale running stack
+- name: Apply pending faucet restarts
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for faucet to be ready
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ faucet_port }}/health"
+    method: GET
+    status_code: 200
+  register: faucet_health
+  until: faucet_health.status == 200
+  retries: 30
+  delay: 5
+
+- name: Verify faucet serves the configured chain
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ faucet_port }}/api/getChainConfigs"
+    method: GET
+    return_content: true
+  register: faucet_chains
+  failed_when: >-
+    faucet_chains.status != 200
+    or (faucet_chains.json.configs | default([])
+        | selectattr('CHAINID', 'equalto', faucet_evm_chain_id | int)
+        | list | length) == 0
+
+- name: Get faucet wallet address
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ faucet_port }}/api/faucetAddress?chain={{ faucet_token_symbol | upper }}"
+    method: GET
+    return_content: true
+  register: faucet_address
+
+- name: Show faucet wallet
+  ansible.builtin.debug:
+    msg: >-
+      Faucet is serving {{ faucet_chain_name }} (EVM chain
+      {{ faucet_evm_chain_id }}) and dispenses from
+      {{ faucet_address.json.address | default('unknown') }} - make sure that
+      address is funded on the L1.

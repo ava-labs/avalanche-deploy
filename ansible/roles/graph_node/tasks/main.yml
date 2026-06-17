@@ -140,6 +140,12 @@
     enabled: true
     daemon_reload: true
 
+# Apply any pending env/compose changes now (systemd stop/start = compose
+# down + up, which re-reads env files) so the readiness check below validates
+# the configuration we just rendered, not a stale running stack
+- name: Apply pending Graph Node restarts
+  ansible.builtin.meta: flush_handlers
+
 - name: Wait for Graph Node to be ready
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ graph_node_index_port | default(8030) }}/graphql"
@@ -152,4 +158,3 @@
   until: graph_node_health.status == 200
   retries: 30
   delay: 10
-  ignore_errors: true

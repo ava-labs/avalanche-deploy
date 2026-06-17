@@ -33,7 +33,8 @@
 #   churn_period: Churn period in seconds (default: 0)
 #   max_churn_percent: Maximum churn percentage (default: 20)
 #   network: fuji (default) or mainnet
-#   glacier_api_key: Glacier API key for signature aggregation
+#   glacier_api_key: Glacier API key for signature aggregation (passed to the
+#                    tool via the GLACIER_API_KEY environment variable, never argv)
 #   use_local_sig_agg: Use local signature aggregator instead of Glacier (default: false)
 #   icm_contracts_path: Path to icm-contracts repository
 
@@ -214,10 +215,11 @@
           {% if use_local_sig_agg | bool %}
           --local-sig-agg
           {% endif %}
-          {% if glacier_api_key is defined and glacier_api_key != '' %}
-          --glacier-api-key={{ glacier_api_key }}
-          {% endif %}
 
+    # The Glacier API key is intentionally NOT passed via --glacier-api-key:
+    # command-line arguments are visible to every user on the host via `ps`.
+    # The tool falls back to the GLACIER_API_KEY environment variable, which
+    # is set on the task below.
     - name: Run initialize-validator-manager
       ansible.builtin.command: "{{ init_cmd }}"
       environment:

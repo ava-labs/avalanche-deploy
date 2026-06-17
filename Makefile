@@ -144,7 +144,7 @@ health-checks:
 upgrade:
 	@if [ -z "$(VERSION)" ]; then echo "Usage: make upgrade VERSION=1.12.0"; exit 1; fi
 	@echo "Upgrading nodes to avalanchego $(VERSION)..."
-	@echo "NOTE: subnet-evm is bundled with avalanchego and will be updated automatically."
+	@echo "NOTE: subnet-evm is installed alongside avalanchego (checksum-verified standalone release)."
 	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/shared/upgrade-nodes.yml \
 		-e "avalanchego_version=$(VERSION)"
 
@@ -819,7 +819,7 @@ help-all:
 	@echo ""
 	@echo "Operations:"
 	@echo "  make rolling-restart   Restart nodes one-at-a-time (zero downtime)"
-	@echo "  make upgrade           Upgrade avalanchego (subnet-evm bundled)"
+	@echo "  make upgrade           Upgrade avalanchego (subnet-evm installed alongside)"
 	@echo "  make health-checks     Run comprehensive health checks on all nodes"
 	@echo "  make monitoring        Deploy Prometheus + Grafana monitoring"
 	@echo ""

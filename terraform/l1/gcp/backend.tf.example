@@ -1,0 +1,24 @@
+# Opt-in remote state backend (GCS) for the l1/gcp root.
+#
+# Local state (terraform.tfstate in this directory) is the DEFAULT. Nothing in
+# this repo requires remote state, and `terraform init` works without this file.
+#
+# How to opt in:
+#   1. Use a PRE-EXISTING GCS bucket (create it out-of-band with versioning
+#      enabled; do not let Terraform create its own state bucket).
+#   2. cp backend.tf.example backend.tf    # then edit the bucket below
+#   3. terraform init -migrate-state       # copies local state into GCS
+#   4. Commit backend.tf so every operator points at the same state.
+#
+# WARNING: ALL operators of a deployment must switch together. Mixing local and
+# remote state against the same infrastructure guarantees drift and clobbering.
+#
+# GCS provides state locking natively -- no extra configuration needed.
+# Each terraform root must use a DISTINCT `prefix`. This root: l1/gcp.
+#
+# terraform {
+#   backend "gcs" {
+#     bucket = "REPLACE-ME-shared-tfstate-bucket"
+#     prefix = "avalanche-deploy/l1/gcp"
+#   }
+# }

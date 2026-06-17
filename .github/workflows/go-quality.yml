@@ -1,0 +1,55 @@
+name: Go Quality
+
+# gofmt + go vet for the Go tools. Terraform fmt/validate gates already run for
+# every root (all clouds) via `make test-incremental` in incremental.yml.
+
+on:
+  pull_request:
+    paths:
+      - "tools/**"
+      - ".github/workflows/go-quality.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "tools/**"
+      - ".github/workflows/go-quality.yml"
+  workflow_dispatch:
+
+jobs:
+  go-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        tool:
+          - create-l1
+          - initialize-validator-manager
+
+    defaults:
+      run:
+        working-directory: tools/${{ matrix.tool }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: tools/${{ matrix.tool }}/go.mod
+          cache-dependency-path: tools/${{ matrix.tool }}/go.sum
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "The following files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...

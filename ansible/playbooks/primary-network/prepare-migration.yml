@@ -122,10 +122,18 @@
                 ansible-playbook playbooks/primary-network/prepare-migration.yml -e target_host={{ inventory_hostname }}
           when: snapshot_check.rc != 0
 
+        - name: Track snapshot restore progress (drives rescue recovery decisions)
+          ansible.builtin.set_fact:
+            prepare_restore_phase: "pre-wipe"
+
         - name: Stop avalanchego for snapshot restore
           ansible.builtin.systemd:
             name: avalanchego
             state: stopped
+
+        - name: Mark restore as past the point of no return
+          ansible.builtin.set_fact:
+            prepare_restore_phase: "post-wipe"
 
         - name: Remove existing database
           ansible.builtin.file:
@@ -167,6 +175,52 @@
         - name: Display snapshot restore status
           ansible.builtin.debug:
             msg: "Snapshot restored from s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4"
+      rescue:
+        # This node is a migration TARGET: it has no staking keys yet, so there
+        # is no duplicate-NodeID risk here — only database consistency.
+        - name: Restart avalanchego (database untouched)
+          ansible.builtin.systemd:
+            name: avalanchego
+            state: started
+          when: prepare_restore_phase | default('pre-wipe') == 'pre-wipe'
+
+        - name: Report failure before database wipe
+          ansible.builtin.debug:
+            msg: |
+              Snapshot restore on the migration target FAILED before the database
+              was touched. avalanchego has been restarted on its existing database;
+              the node is exactly as it was. Fix the error below and re-run:
+                ansible-playbook playbooks/primary-network/prepare-migration.yml \
+                  -e target_host={{ inventory_hostname }} -e use_snapshot=true
+          when: prepare_restore_phase | default('pre-wipe') == 'pre-wipe'
+
+        - name: Report failure after database wipe — node left STOPPED
+          ansible.builtin.debug:
+            msg: |
+              Snapshot restore on the migration target FAILED AFTER the database
+              was wiped.
+
+              Current state of {{ inventory_hostname }}:
+                - avalanchego: STOPPED (deliberately NOT restarted)
+                - /var/lib/avalanchego/db: PARTIAL / INCOMPLETE — not usable as-is
+
+              Do ONE of the following:
+                1. Re-run the snapshot restore:
+                     ansible-playbook playbooks/primary-network/prepare-migration.yml \
+                       -e target_host={{ inventory_hostname }} -e use_snapshot=true
+                2. Abandon the snapshot and state-sync instead:
+                     sudo rm -rf /var/lib/avalanchego/db
+                     sudo systemctl start avalanchego   # state-sync bootstrap (slow)
+
+              Do NOT just 'systemctl start avalanchego' on the partial database.
+          when: prepare_restore_phase | default('pre-wipe') == 'post-wipe'
+
+        - name: Re-raise snapshot restore failure
+          ansible.builtin.fail:
+            msg: >-
+              Snapshot restore failed at '{{ ansible_failed_task.name }}'
+              (phase: {{ prepare_restore_phase | default('pre-wipe') }}):
+              {{ ansible_failed_result.msg | default(ansible_failed_result) }}
 
     # Wait for all chains to fully bootstrap
     - name: Display sync start
