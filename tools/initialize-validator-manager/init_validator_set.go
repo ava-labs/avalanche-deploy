@@ -120,13 +120,52 @@ func GetValidatorInfo(nodeURL string) (ids.NodeID, []byte, error) {
 }
 
 // SignWarpMessageViaAggregator sends the unsigned message to a signature aggregator
+// BuildAndSignConversionMessage builds the SubnetToL1Conversion warp message from the L1's
+// conversion data (it derives the conversionID internally — this is NOT the ConvertSubnetToL1Tx
+// hash) and aggregates a BLS signature from the L1's own validator set via a local
+// signature-aggregator. Use this for private/custom L1s where Glacier cannot reach the
+// validators (Glacier collects Primary-Network signatures; SubnetEVM verifies P-Chain-source
+// messages against the L1's own validator set).
+func BuildAndSignConversionMessage(sigAggURL string, networkID uint32, subnetID, chainID ids.ID, managerAddress string, validators []ValidatorData) ([]byte, error) {
+	unsignedMsg, err := BuildWarpMessage(networkID, subnetID, chainID, common.HexToAddress(managerAddress), validators)
+	if err != nil {
+		return nil, fmt.Errorf("build SubnetToL1Conversion warp message: %w", err)
+	}
+	return SignWarpMessageViaAggregator(sigAggURL, unsignedMsg, subnetID)
+}
+
+// BuildAndSignConversionMessageFromID builds the SubnetToL1Conversion warp message from a known
+// conversion ID (the on-chain hash of the conversion data) and aggregates a BLS signature from
+// the L1's validator set. Prefer this over BuildAndSignConversionMessage when the conversion ID
+// is known, since recomputing it from gathered validator data is fragile.
+func BuildAndSignConversionMessageFromID(sigAggURL string, networkID uint32, subnetID, conversionID ids.ID) ([]byte, error) {
+	addressedCallPayload, err := message.NewSubnetToL1Conversion(conversionID)
+	if err != nil {
+		return nil, fmt.Errorf("create SubnetToL1Conversion payload: %w", err)
+	}
+	addressedCall, err := payload.NewAddressedCall(nil, addressedCallPayload.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("create addressed call: %w", err)
+	}
+	unsignedMsg, err := warp.NewUnsignedMessage(networkID, avagoconstants.PlatformChainID, addressedCall.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("create unsigned message: %w", err)
+	}
+	return SignWarpMessageViaAggregator(sigAggURL, unsignedMsg, subnetID)
+}
+
 func SignWarpMessageViaAggregator(sigAggURL string, unsignedMsg *warp.UnsignedMessage, subnetID ids.ID) ([]byte, error) {
 	// The signature aggregator expects hex-encoded unsigned message bytes
 	msgHex := hex.EncodeToString(unsignedMsg.Bytes())
 
+	// Justification is REQUIRED for P-Chain SubnetToL1Conversion messages: it is the subnet ID
+	// bytes. Both signing-subnet-id and justification must be 0x-prefixed so the aggregator's
+	// HexOrCB58ToID parses them as hex (a bare hex string is mis-read as cb58 and rejected).
+	subnetHex := "0x" + hex.EncodeToString(subnetID[:])
+
 	// Build request
-	reqBody := fmt.Sprintf(`{"message":"%s","signing-subnet-id":"%s","quorum-percentage":67}`,
-		msgHex, subnetID.String())
+	reqBody := fmt.Sprintf(`{"message":"%s","justification":"%s","signing-subnet-id":"%s","quorum-percentage":67}`,
+		msgHex, subnetHex, subnetHex)
 
 	fmt.Printf("  Requesting signature from aggregator...\n")
 	fmt.Printf("  Message (first 100 chars): %s...\n", msgHex[:min(100, len(msgHex))])

@@ -218,6 +218,24 @@ make initialize-validator-manager \
   EVM_CHAIN_ID=$EVM_CHAIN_ID
 ```
 
+### Warp signature for `initializeValidatorSet`
+
+The final step (`initializeValidatorSet`) needs a BLS-aggregated `SubnetToL1Conversion` warp
+message. Two ways to obtain it:
+
+- **Glacier (public testnet/mainnet L1s):** default. Needs `GLACIER_API_KEY`.
+- **Local signature aggregator (private/custom L1s):** run an `ava-labs/icm-services`
+  `signature-aggregator` peered to your validators (`signing-subnet-id` = your L1 subnet), then
+  pass `-e use_local_sig_agg=true` (and `-e sig_agg_url=...`) to the playbook, or run the tool
+  directly with `--local-sig-agg`. For private L1s, SubnetEVM verifies the conversion message
+  against the **L1's own validator set**, so the signatures must come from your validators, not
+  the Primary Network.
+
+  Also pass the real **conversion ID** with `--conversion-id` (cb58 or `0x`-hex). This is the hash
+  of the conversion *data* and is **not** the `ConvertSubnetToL1Tx` hash (`$CONVERSION_TX`). If a
+  validator rejects the request, its error reports the expected value
+  (`provided conversionID X != expected Y`).
+
 ## Genesis Configuration
 
 Use the **[Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain)** to generate your genesis JSON visually, then save it at `configs/l1/genesis/genesis.json`.
