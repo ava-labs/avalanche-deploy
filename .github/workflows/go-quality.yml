@@ -16,6 +16,10 @@ on:
       - ".github/workflows/go-quality.yml"
   workflow_dispatch:
 
+# Least privilege: this workflow only checks out code and runs gofmt/go vet.
+permissions:
+  contents: read
+
 jobs:
   go-quality:
     runs-on: ubuntu-latest

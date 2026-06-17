@@ -7,6 +7,10 @@ on:
       - main
   workflow_dispatch:
 
+# Least privilege: this workflow only checks out code and runs the test suite.
+permissions:
+  contents: read
+
 jobs:
   incremental:
     runs-on: ubuntu-latest
