@@ -142,7 +142,55 @@ curl -k https://<ip>/cfg/api/v1/about/
 curl -k https://<ip>/cgw/about
 ```
 
+## Operating L1 Contracts from the Safe (PoAManager)
+
+A common use of the Safe is to own your L1's **PoAManager**, so validator-set changes
+(add/remove a validator, update weight) require multisig approval. Compose these via
+**Apps → Transaction Builder**.
+
+**The Safe must be the owner of the PoAManager.** `initiateValidatorRegistration`,
+`initiateValidatorRemoval`, and `initiateValidatorWeightUpdate` are `onlyOwner`. After
+`initialize-validator-manager` runs, the PoAManager owner is the **deployer EOA**, not the Safe.
+Once the Safe is deployed, transfer ownership to it from that EOA:
+
+```bash
+# from the current PoAManager owner (the deployer EOA)
+cast send <POA_MANAGER> "transferOwnership(address)" <SAFE_ADDRESS> \
+  --private-key <CURRENT_OWNER_KEY> \
+  --rpc-url http://<rpc-ip>:9650/ext/bc/<CHAIN_ID>/rpc
+cast call <POA_MANAGER> "owner()(address)" --rpc-url <...>   # must equal <SAFE_ADDRESS>
+```
+
+Then in the Transaction Builder, target the PoAManager (e.g.
+`initiateValidatorWeightUpdate(bytes32 validationID, uint64 newWeight)`), collect signatures, and
+execute.
+
+> The PoAManager owns the ValidatorManager proxy (`0xfacade…`) — the Safe owns the PoAManager.
+> To move the ValidatorManager's ownership later, the Safe (as PoAManager owner) calls
+> `PoAManager.transferValidatorManagerOwnership(address)`.
+
 ## Troubleshooting
+
+### Transaction Builder execute fails with `GS013` / "cannot estimate gas" / "most likely fail"
+
+`GS013` is the Safe singleton re-throwing a **reverted inner call**: `execTransaction` reverts
+when the inner call fails and `safeTxGas`/`gasPrice` are both 0. For PoAManager calls the usual
+cause is that **the Safe is not the PoAManager owner** — the `onlyOwner` check reverts
+`OwnableUnauthorizedAccount`, which the Safe surfaces as the opaque `GS013` (and the UI's gas
+estimation of `execTransaction` reverts → "most likely fail / missing revert data").
+
+Fix: transfer PoAManager ownership to the Safe (see *Operating L1 Contracts from the Safe*).
+Confirm before signing — this reproduces the exact inner call the Safe makes (`msg.sender` = Safe):
+
+```bash
+# Reverts 0x118cdaa7 (OwnableUnauthorizedAccount) if the Safe is not the owner; succeeds once it is.
+cast call <POA_MANAGER> "initiateValidatorWeightUpdate(bytes32,uint64)" <VALIDATION_ID> <NEW_WEIGHT> \
+  --from <SAFE_ADDRESS> --rpc-url http://<rpc-ip>:9650/ext/bc/<CHAIN_ID>/rpc
+```
+
+Other inner-call reverts that also surface as `GS013`: `InvalidValidatorStatus` (wrong/stale
+`validationID`, or the validator isn't `Active`) and `MaxChurnRateExceeded` (weight change beyond
+the churn limit).
 
 ### Services won't start
 

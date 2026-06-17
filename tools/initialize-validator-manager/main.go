@@ -23,6 +23,7 @@ var (
 	subnetID         string
 	chainID          string
 	conversionTxHash string
+	conversionID     string
 	privateKey       string
 	privateKeyFile   string
 	managerType      string
@@ -58,7 +59,8 @@ func main() {
 	flag.StringVar(&proxyAddress, "proxy-address", "", "Genesis proxy address to upgrade (required)")
 	flag.StringVar(&subnetID, "subnet-id", "", "Subnet ID (required)")
 	flag.StringVar(&chainID, "chain-id", "", "Chain ID / Blockchain ID (required)")
-	flag.StringVar(&conversionTxHash, "conversion-tx", "", "ConvertSubnetToL1Tx hash for warp signature (required)")
+	flag.StringVar(&conversionTxHash, "conversion-tx", "", "ConvertSubnetToL1Tx hash (Glacier path)")
+	flag.StringVar(&conversionID, "conversion-id", "", "SubnetToL1Conversion ID (cb58 or 0x-hex) for the local sig-agg path. This is the hash of the conversion DATA, NOT the ConvertSubnetToL1Tx hash. If empty it is recomputed from validator data, which only matches when the gathered data is byte-identical to the on-chain conversion.")
 	flag.StringVar(&privateKey, "private-key", "", "Private key (0x... format)")
 	flag.StringVar(&privateKeyFile, "private-key-file", "", "File containing private key")
 	flag.StringVar(&managerType, "manager-type", "poa", "Validator manager type: poa, native-staking, erc20-staking")
@@ -104,8 +106,15 @@ func run() error {
 	if chainID == "" {
 		return fmt.Errorf("--chain-id is required")
 	}
-	if conversionTxHash == "" && !skipInitValSet {
-		return fmt.Errorf("--conversion-tx is required (or use --skip-init-validator-set)")
+	if !skipInitValSet {
+		// Glacier needs the tx hash; the local aggregator builds the message itself and only
+		// needs (optionally) the conversion ID. Require at least one signing input.
+		if useLocalSigAgg && conversionTxHash == "" && conversionID == "" {
+			fmt.Println("  WARNING: --conversion-id not set; the conversion ID will be recomputed from " +
+				"validator data and may not match the on-chain value (signing will then fail).")
+		} else if !useLocalSigAgg && conversionTxHash == "" {
+			return fmt.Errorf("--conversion-tx is required for the Glacier path (or use --local-sig-agg / --skip-init-validator-set)")
+		}
 	}
 
 	// Load private key
@@ -287,7 +296,7 @@ func run() error {
 			if !jsonOutput {
 				fmt.Println("  Using local signature aggregator...")
 			}
-			signedMessage, err = getLocalAggregatedSignature(ctx, sigAggURL, parsedSubnetID, parsedChainID, proxyAddress, validatorInfo)
+			signedMessage, err = getLocalAggregatedSignature(ctx, sigAggURL, networkName, conversionID, parsedSubnetID, parsedChainID, proxyAddress, validatorInfo)
 		} else {
 			if !jsonOutput {
 				fmt.Println("  Fetching signature from Glacier API...")
@@ -427,11 +436,33 @@ func deployImplementation(ctx context.Context, contractsPath, rpcURL, privKey, m
 }
 
 func upgradeProxy(ctx context.Context, contractsPath, rpcURL, privKey, proxyAddress, implAddress string) error {
-	// Call upgradeTo on the proxy
-	// For TransparentUpgradeableProxy, we need to call through the admin
-	// But if caller is admin, it will forward to upgradeTo
-	_, err := castSend(ctx, rpcURL, privKey, proxyAddress, "upgradeTo(address)", implAddress)
+	// The genesis ValidatorManager proxy is an OpenZeppelin (v4) TransparentUpgradeableProxy.
+	// Its admin is a ProxyAdmin contract recorded in the EIP-1967 admin slot (e.g. 0xdad0...),
+	// NOT the deployer EOA. Upgrades MUST go through ProxyAdmin.upgrade(proxy, impl). Calling
+	// upgradeTo() directly on the proxy as a non-admin silently no-ops: the call falls through
+	// to the (placeholder) implementation, the tx succeeds, but the proxy is never upgraded.
+	const adminSlot = "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103"
+	raw, err := castStorage(ctx, rpcURL, proxyAddress, adminSlot)
+	if err != nil {
+		return fmt.Errorf("read proxy admin slot: %w", err)
+	}
+	raw = strings.TrimPrefix(strings.TrimSpace(raw), "0x")
+	if len(raw) < 40 {
+		return fmt.Errorf("unexpected proxy admin slot value %q (expected a 32-byte word)", raw)
+	}
+	adminAddr := "0x" + raw[len(raw)-40:] // low 20 bytes of the EIP-1967 admin slot
+	_, err = castSend(ctx, rpcURL, privKey, adminAddr, "upgrade(address,address)", proxyAddress, implAddress)
 	return err
+}
+
+// castStorage reads a raw storage slot from a contract via `cast storage`.
+func castStorage(ctx context.Context, rpcURL, addr, slot string) (string, error) {
+	cmd := exec.CommandContext(ctx, "cast", "storage", addr, slot, "--rpc-url", rpcURL)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("cast storage failed: %w\nOutput: %s", err, string(output))
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func initializeSettings(ctx context.Context, contractsPath, rpcURL, privKey, proxyAddress, admin, subnetIDHex string, churnPeriod uint64, maxChurn uint8) (string, error) {
@@ -505,9 +536,52 @@ func gatherValidatorInfo(ctx context.Context, validatorIPsStr, rpcURL string) ([
 	return validators, nil
 }
 
-func getLocalAggregatedSignature(ctx context.Context, sigAggURL string, subnetID, chainID ids.ID, managerAddress string, validators []ValidatorInfo) ([]byte, error) {
-	// TODO: Implement local signature aggregator call
-	return nil, fmt.Errorf("local signature aggregator not yet implemented - use Glacier API")
+func getLocalAggregatedSignature(ctx context.Context, sigAggURL, networkName, conversionIDStr string, subnetID, chainID ids.ID, managerAddress string, validators []ValidatorInfo) ([]byte, error) {
+	var networkID uint32
+	switch networkName {
+	case "mainnet":
+		networkID = 1
+	case "fuji":
+		networkID = 5
+	default:
+		return nil, fmt.Errorf("unsupported network %q for local signature aggregator", networkName)
+	}
+
+	// Preferred path: the caller supplies the real SubnetToL1Conversion ID (hash of the
+	// on-chain conversion DATA, NOT the ConvertSubnetToL1Tx hash). Build the message directly
+	// from it. If the ID is wrong, the validators reject it ("provided conversionID X !=
+	// expected Y") — the AppError reports the expected value.
+	if conversionIDStr != "" {
+		convID, err := parseID(conversionIDStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --conversion-id %q: %w", conversionIDStr, err)
+		}
+		return BuildAndSignConversionMessageFromID(sigAggURL, networkID, subnetID, convID)
+	}
+
+	// Fallback: recompute the conversion ID from the validator data we can gather. This only
+	// matches the on-chain value when that data is byte-identical to the original conversion.
+	vd := make([]ValidatorData, len(validators))
+	for i, v := range validators {
+		vd[i] = ValidatorData{
+			NodeID:       v.NodeID[:],
+			BLSPublicKey: v.PublicKey,
+			Weight:       v.Weight,
+		}
+	}
+	return BuildAndSignConversionMessage(sigAggURL, networkID, subnetID, chainID, managerAddress, vd)
+}
+
+// parseID parses an Avalanche ID from cb58 or 0x-prefixed (or bare) 32-byte hex.
+func parseID(s string) (ids.ID, error) {
+	if strings.HasPrefix(s, "0x") || len(s) == 64 {
+		b, err := hex.DecodeString(strings.TrimPrefix(s, "0x"))
+		if err != nil {
+			return ids.Empty, err
+		}
+		return ids.ToID(b)
+	}
+	return ids.FromString(s)
 }
 
 func waitForGlacierSignature(ctx context.Context, network, txHash, apiKey string) ([]byte, error) {
@@ -575,15 +649,31 @@ func initializeValidatorSet(ctx context.Context, contractsPath, rpcURL, privKey,
 		proxyAddress,
 		strings.Join(validatorStrs, ","))
 
-	// The warp message needs to be sent via access list
+	// The signed warp message is attached via the warp precompile predicate in the EIP-2930
+	// access list. Predicate packing: append a 0xff delimiter, zero-pad to a 32-byte boundary,
+	// then split into 32-byte storage keys. cast wants the access list as JSON. (cast produces a
+	// type-2/DynamicFee tx, which is what the warp predicate verifier expects.)
 	warpPrecompile := "0x0200000000000000000000000000000000000005"
-	warpMessageHex := "0x" + hex.EncodeToString(signedMessage)
+	packed := append(append([]byte{}, signedMessage...), 0xff)
+	for len(packed)%32 != 0 {
+		packed = append(packed, 0x00)
+	}
+	storageKeys := make([]string, 0, len(packed)/32)
+	for i := 0; i < len(packed); i += 32 {
+		storageKeys = append(storageKeys, "0x"+hex.EncodeToString(packed[i:i+32]))
+	}
+	accessListJSON, err := json.Marshal([]map[string]interface{}{
+		{"address": warpPrecompile, "storageKeys": storageKeys},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to build access list: %w", err)
+	}
 
 	cmd := exec.CommandContext(ctx, "cast", "send",
 		"--rpc-url", rpcURL,
 		"--private-key", privKey,
 		"--json",
-		"--access-list", fmt.Sprintf("%s:%s", warpPrecompile, warpMessageHex),
+		"--access-list", string(accessListJSON),
 		proxyAddress,
 		"initializeValidatorSet((bytes32,bytes32,address,(bytes,bytes,uint64)[]),uint32)",
 		conversionData, "0")
