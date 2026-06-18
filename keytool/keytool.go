@@ -22,9 +22,9 @@ import (
 
 	vault "github.com/hashicorp/vault/api"
 
-	"github.com/ava-labs/avalanche-remote-signer/backend/awskms"
-	"github.com/ava-labs/avalanche-remote-signer/backend/azurekv"
-	"github.com/ava-labs/avalanche-remote-signer/backend/gcpkms"
+	"github.com/ava-labs/avalanche-remote-signer/api/awskms"
+	"github.com/ava-labs/avalanche-remote-signer/api/azurekv"
+	"github.com/ava-labs/avalanche-remote-signer/api/gcpkms"
 	"github.com/ava-labs/avalanche-remote-signer/config"
 	"github.com/ava-labs/avalanche-remote-signer/internal/blstutil"
 )

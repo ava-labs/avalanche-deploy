@@ -384,7 +384,7 @@ public key stays the same.
 | `AccessDeniedException` on Decrypt | PCR0 in key policy doesn't match current enclave image |
 | `/bin/sh: /enclave-bin: not found` | Binary not statically linked — rebuild with `-extldflags '-static'` |
 | `no EC2 IMDS role found` | vsock-proxy not running — start with `vsock-proxy 8443 kms.<region>.amazonaws.com 443` |
-| Registration/PoP works but **every warp/ICM signature is rejected** (aggregators log `invalid signature response`, relayers report `failed to collect a threshold of signatures`) | `Sign()` and the network disagree on the BLS domain separation tag. Avalanche uses the proof-of-possession *scheme* — the message-signing DST ends in `RO_POP_`, not the basic-scheme `RO_NUL_`. Run `cd compat && go test ./...` to cross-check against AvalancheGo, and verify the live signer as below |
+| Registration/PoP works but **every warp/ICM signature is rejected** (aggregators log `invalid signature response`, relayers report `failed to collect a threshold of signatures`) | `Sign()` and the network disagree on the BLS domain separation tag. Avalanche uses the proof-of-possession *scheme* — the message-signing DST ends in `RO_POP_`, not the basic-scheme `RO_NUL_`. Run `cd tests && go test ./...` to cross-check against AvalancheGo, and verify the live signer as below |
 
 ### Verifying the live signer's signatures
 
@@ -395,14 +395,14 @@ message and check it against AvalancheGo's own verifier:
 ```bash
 # On the host — sign a test message via the running signer
 grpcurl -plaintext \
-  -proto proto/signer/signer.proto -import-path proto \
+  -proto spec/signer/signer.proto -import-path spec \
   127.0.0.1:50051 signer.Signer/PublicKey
 grpcurl -plaintext \
-  -proto proto/signer/signer.proto -import-path proto \
+  -proto spec/signer/signer.proto -import-path spec \
   -d '{"message":"cGVybWFmcm9zdC1kc3QtdGVzdA=="}' \
   127.0.0.1:50051 signer.Signer/Sign
 ```
 
 Then verify the (publicKey, signature, message) triple with avalanchego's
-`bls.Verify` — it must return `true`. The `compat/` test module does exactly
+`bls.Verify` — it must return `true`. The `tests/` test module does exactly
 this round-trip in CI form.

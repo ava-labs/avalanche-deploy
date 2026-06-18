@@ -24,7 +24,7 @@ const (
 // Note the message-signing DST ends in POP_ (the scheme tag), NOT NUL_ —
 // NUL_ is the basic scheme and its signatures are rejected by every Avalanche
 // warp verifier. These constants are cross-checked against AvalancheGo by the
-// tests in compat/.
+// tests/ module.
 var (
 	DSTSign = []byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
 	DSTPoP  = []byte("BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")

@@ -22,7 +22,7 @@ This is the most secure backend in Phase 1-3 — equivalent to an HSM where the 
 
 ```
 vault-plugin-bls    ← custom Vault secrets plugin (separate binary)
-backend/vault/      ← signer backend that calls the plugin API
+api/vault/          ← signer backend that calls the plugin API
 ```
 
 The plugin exposes four endpoints under its mount path (default: `bls/`):

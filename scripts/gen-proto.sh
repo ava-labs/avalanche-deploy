@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/gen-proto.sh
-# Regenerate Go bindings from proto/signer/signer.proto.
+# Regenerate Go bindings from spec/signer/signer.proto.
 #
 # Prerequisites (install once):
 #   go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
@@ -13,8 +13,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROTO_DIR="$REPO_ROOT/proto/signer"
-OUT_DIR="$REPO_ROOT/proto/pb/signer"
+PROTO_DIR="$REPO_ROOT/spec/signer"
+OUT_DIR="$REPO_ROOT/spec/pb/signer"
 
 mkdir -p "$OUT_DIR"
 
