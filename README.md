@@ -56,11 +56,11 @@ Avalanche's message-signing DST is the proof-of-possession *scheme* variant
 validator registration still works while every warp/ICM signature fails.
 
 The DSTs live in one place (`internal/blstutil`) and the standalone
-[`compat/`](compat/) test module round-trips real signatures through
+[`tests/`](tests/) test module round-trips real signatures through
 avalanchego's own `bls.Verify`/`bls.VerifyProofOfPossession`:
 
 ```bash
-cd compat && go test ./...
+cd tests && go test ./...
 ```
 
 ---
@@ -353,22 +353,22 @@ Integration tests talk to real KMS keys and are skipped unless the relevant envi
 ```bash
 # AWS integration test
 AWS_KMS_KEY_ID=arn:... AWS_REGION=us-east-1 AWS_ENCRYPTED_BLS_KEY_PATH=./bls.key.enc \
-  CGO_ENABLED=1 go test ./backend/awskms/ -run TestIntegration
+  CGO_ENABLED=1 go test ./api/awskms/ -run TestIntegration
 
 # GCP integration test
 GCP_PROJECT=my-project GCP_LOCATION=us-central1 GCP_KEY_RING=avalanche GCP_KEY_NAME=bls-signer \
 GCP_ENCRYPTED_BLS_KEY_PATH=./bls.key.enc \
-  CGO_ENABLED=1 go test ./backend/gcpkms/ -run TestIntegration
+  CGO_ENABLED=1 go test ./api/gcpkms/ -run TestIntegration
 
 # Azure integration test
 AZURE_VAULT_URL=https://my-vault.vault.azure.net AZURE_KEY_NAME=bls-signer \
 AZURE_ENCRYPTED_BLS_KEY_PATH=./bls.key.enc \
-  CGO_ENABLED=1 go test ./backend/azurekv/ -run TestIntegration
+  CGO_ENABLED=1 go test ./api/azurekv/ -run TestIntegration
 ```
 
 ### Regenerate protobuf bindings
 
-Only needed if you modify `proto/signer/signer.proto`:
+Only needed if you modify `spec/signer/signer.proto`:
 
 ```bash
 brew install protobuf
@@ -395,16 +395,16 @@ Add this to `~/.zprofile` to make it permanent.
 ```
 .
 ├── main/              Entry point and cobra CLI
-├── backend/
-│   ├── backend.go     Backend interface
-│   ├── memory/        In-memory backend (dev/test)
+├── api/
+│   ├── api.go         Backend interface
 │   ├── awskms/        AWS KMS backend
 │   ├── gcpkms/        GCP Cloud KMS backend
 │   ├── azurekv/       Azure Key Vault backend
 │   ├── vault/         HashiCorp Vault backend
 │   └── awsnitro/      AWS Nitro Enclave backend (host side)
+├── mockapi/           In-memory backend (dev/test)
 ├── enclave/           Code that runs INSIDE the Nitro enclave (separate module)
-├── compat/            BLS compatibility tests against avalanchego (separate module)
+├── tests/             BLS compatibility tests against avalanchego (separate module)
 ├── vault-plugin/      Custom Vault secrets plugin (separate binary)
 │   ├── main.go        Plugin entry point
 │   └── backend/       Plugin implementation (generate, sign, public-key)
@@ -413,7 +413,7 @@ Add this to `~/.zprofile` to make it permanent.
 ├── keytool/           Generate and migrate key logic
 ├── signerserver/      gRPC server implementation
 ├── config/            Config struct, YAML loading, env var overrides
-├── proto/
+├── spec/
 │   ├── signer/        signer.proto source
 │   └── pb/signer/     Generated Go bindings
 ├── scripts/

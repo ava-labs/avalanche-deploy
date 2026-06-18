@@ -2,7 +2,7 @@
 // See the file LICENSE for licensing terms.
 
 // Package signerserver implements the gRPC Signer service defined in
-// proto/signer/signer.proto.  It delegates all cryptographic work to a
+// spec/signer/signer.proto.  It delegates all cryptographic work to a
 // Backend, so the server itself is backend-agnostic.
 package signerserver
 
@@ -16,20 +16,20 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/ava-labs/avalanche-remote-signer/backend"
-	pb "github.com/ava-labs/avalanche-remote-signer/proto/pb/signer"
+	"github.com/ava-labs/avalanche-remote-signer/api"
+	pb "github.com/ava-labs/avalanche-remote-signer/spec/pb/signer"
 )
 
 // Server wraps a Backend and exposes it over gRPC.
 type Server struct {
 	pb.UnimplementedSignerServer
 
-	backend backend.Backend
+	backend api.Backend
 	log     *slog.Logger
 }
 
 // New creates a Server that delegates signing operations to b.
-func New(b backend.Backend, log *slog.Logger) *Server {
+func New(b api.Backend, log *slog.Logger) *Server {
 	return &Server{backend: b, log: log}
 }
 

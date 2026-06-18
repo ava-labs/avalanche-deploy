@@ -118,7 +118,7 @@ BLS signing requires a domain separation tag (DST) to bind signatures to their i
 
 These constants live in one place — `internal/blstutil` (`DSTSign`, `DSTPoP`) — and every backend references them. Getting `Sign`'s DST wrong is an especially nasty failure mode: proofs of possession (and therefore validator registration) keep working while **every warp/ICM signature is silently rejected** by the network.
 
-Signatures produced by this sidecar are **identical** to those AvalancheGo would produce with the same key — they verify with the same public key and the same verification logic. This is enforced, not assumed: the `compat/` test module pins both DSTs to AvalancheGo's ciphersuites and round-trips real signatures through avalanchego's `bls.Verify` / `bls.VerifyProofOfPossession` (`cd compat && go test ./...`).
+Signatures produced by this sidecar are **identical** to those AvalancheGo would produce with the same key — they verify with the same public key and the same verification logic. This is enforced, not assumed: the `tests/` test module pins both DSTs to AvalancheGo's ciphersuites and round-trips real signatures through avalanchego's `bls.Verify` / `bls.VerifyProofOfPossession` (`cd tests && go test ./...`).
 
 ---
 
@@ -158,7 +158,7 @@ Each backend has two test types:
 
 - Use an XOR mock that simulates encrypt/decrypt
 - Test the full round-trip: key generation → mock encrypt → mock decrypt → sign → public key check
-- Run with `CGO_ENABLED=1 go test ./backend/...`
+- Run with `CGO_ENABLED=1 go test ./api/...`
 
 **Integration tests** (skipped unless env vars are set):
 

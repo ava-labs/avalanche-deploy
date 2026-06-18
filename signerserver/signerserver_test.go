@@ -13,9 +13,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/ava-labs/avalanche-remote-signer/backend/memory"
-	pb "github.com/ava-labs/avalanche-remote-signer/proto/pb/signer"
+	"github.com/ava-labs/avalanche-remote-signer/mockapi"
 	"github.com/ava-labs/avalanche-remote-signer/signerserver"
+	pb "github.com/ava-labs/avalanche-remote-signer/spec/pb/signer"
 )
 
 // startTestServer spins up an in-process gRPC server using a random port and
@@ -23,9 +23,9 @@ import (
 func startTestServer(t *testing.T) (pb.SignerClient, func()) {
 	t.Helper()
 
-	b, err := memory.New()
+	b, err := mockapi.New()
 	if err != nil {
-		t.Fatalf("memory.New(): %v", err)
+		t.Fatalf("mockapi.New(): %v", err)
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))

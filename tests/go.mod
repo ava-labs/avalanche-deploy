@@ -1,4 +1,4 @@
-module github.com/ava-labs/avalanche-remote-signer/compat
+module github.com/ava-labs/avalanche-remote-signer/tests
 
 go 1.25.8
 

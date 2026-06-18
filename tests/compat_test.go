@@ -1,7 +1,7 @@
 // Copyright (C) 2024, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-// Package compat cross-checks remote-signer's BLS signing against AvalancheGo
+// Package tests cross-checks remote-signer's BLS signing against AvalancheGo
 // itself. A signature produced by this sidecar MUST be indistinguishable from
 // one produced by AvalancheGo's local signer with the same key — otherwise
 // every warp/ICM message the validator signs is silently rejected by the
@@ -12,7 +12,7 @@
 // scheme DST (...RO_POP_), and nothing caught it until signatures failed
 // on-network. These tests pin the constants and the end-to-end behavior
 // against the real avalanchego bls package.
-package compat
+package tests
 
 import (
 	"crypto/rand"

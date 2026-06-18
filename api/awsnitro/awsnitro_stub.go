@@ -25,7 +25,7 @@ func New(_ signerconfig.AWSNitroConfig, _ *slog.Logger) (*Backend, error) {
 	return nil, fmt.Errorf("aws-nitro backend is only supported on Linux (EC2 with Nitro Enclaves enabled)")
 }
 
-func (b *Backend) PublicKey(_ context.Context) ([]byte, error) { return nil, unsupported() }
+func (b *Backend) PublicKey(_ context.Context) ([]byte, error)      { return nil, unsupported() }
 func (b *Backend) Sign(_ context.Context, _ []byte) ([]byte, error) { return nil, unsupported() }
 func (b *Backend) SignProofOfPossession(_ context.Context, _ []byte) ([]byte, error) {
 	return nil, unsupported()

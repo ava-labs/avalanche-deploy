@@ -24,15 +24,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ava-labs/avalanche-remote-signer/backend"
-	"github.com/ava-labs/avalanche-remote-signer/backend/awskms"
-	"github.com/ava-labs/avalanche-remote-signer/backend/awsnitro"
-	"github.com/ava-labs/avalanche-remote-signer/backend/azurekv"
-	"github.com/ava-labs/avalanche-remote-signer/backend/gcpkms"
-	"github.com/ava-labs/avalanche-remote-signer/backend/memory"
-	vaultbackend "github.com/ava-labs/avalanche-remote-signer/backend/vault"
+	"github.com/ava-labs/avalanche-remote-signer/api"
+	"github.com/ava-labs/avalanche-remote-signer/api/awskms"
+	"github.com/ava-labs/avalanche-remote-signer/api/awsnitro"
+	"github.com/ava-labs/avalanche-remote-signer/api/azurekv"
+	"github.com/ava-labs/avalanche-remote-signer/api/gcpkms"
+	vaultbackend "github.com/ava-labs/avalanche-remote-signer/api/vault"
 	"github.com/ava-labs/avalanche-remote-signer/config"
 	"github.com/ava-labs/avalanche-remote-signer/keytool"
+	"github.com/ava-labs/avalanche-remote-signer/mockapi"
 	"github.com/ava-labs/avalanche-remote-signer/signerserver"
 )
 
@@ -366,11 +366,11 @@ func keytoolMigrateCmd() *cobra.Command {
 
 // ── backend factory ───────────────────────────────────────────────────────────
 
-func buildBackend(cfg config.Config, log *slog.Logger) (backend.Backend, error) {
+func buildBackend(cfg config.Config, log *slog.Logger) (api.Backend, error) {
 	switch cfg.Backend {
 	case config.BackendMemory:
 		log.Warn("using in-memory backend — DO NOT use in production")
-		return memory.New()
+		return mockapi.New()
 	case config.BackendAWSKMS:
 		return awskms.New(cfg.AWS, log)
 	case config.BackendGCPKMS:

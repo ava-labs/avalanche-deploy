@@ -6,7 +6,7 @@
 // every startup and never persists anything to disk.
 //
 // DO NOT use this backend in production.
-package memory
+package mockapi
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 )
 
 // Domain separation tags — single source of truth in blstutil,
-// cross-checked against AvalancheGo by the tests in compat/.
+// cross-checked against AvalancheGo by the tests/ module.
 var (
 	dstSign     = blstutil.DSTSign
 	dstPopProve = blstutil.DSTPoP

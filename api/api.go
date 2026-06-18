@@ -5,7 +5,7 @@
 // must implement.  The signerserver delegates all cryptographic operations
 // here, so adding a new KMS provider means implementing this interface and
 // registering it in main — no other code changes required.
-package backend
+package api
 
 import "context"
 

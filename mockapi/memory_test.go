@@ -1,17 +1,17 @@
 // Copyright (C) 2024, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package memory_test
+package mockapi_test
 
 import (
 	"context"
 	"testing"
 
-	"github.com/ava-labs/avalanche-remote-signer/backend/memory"
+	"github.com/ava-labs/avalanche-remote-signer/mockapi"
 )
 
 func TestNew(t *testing.T) {
-	b, err := memory.New()
+	b, err := mockapi.New()
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
@@ -55,11 +55,11 @@ func TestNew(t *testing.T) {
 }
 
 func TestTwoInstancesHaveDifferentKeys(t *testing.T) {
-	a, err := memory.New()
+	a, err := mockapi.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := memory.New()
+	b, err := mockapi.New()
 	if err != nil {
 		t.Fatal(err)
 	}

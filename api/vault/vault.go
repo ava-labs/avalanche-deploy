@@ -34,15 +34,15 @@ import (
 )
 
 // Domain separation tags — single source of truth in blstutil,
-// cross-checked against AvalancheGo by the tests in compat/.
+// cross-checked against AvalancheGo by the tests/ module.
 var (
 	dstSign     = hex.EncodeToString(blstutil.DSTSign)
 	dstPopProve = hex.EncodeToString(blstutil.DSTPoP)
 )
 
 const (
-	defaultMountPath          = "bls"
-	defaultKubernetesJWTPath  = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	defaultMountPath         = "bls"
+	defaultKubernetesJWTPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 	// renewFraction is the fraction of the token TTL at which we renew.
 	// 0.75 means renew at 75% of the TTL, leaving a 25% safety window.
 	renewFraction = 0.75
