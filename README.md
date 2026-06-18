@@ -376,18 +376,11 @@ go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 export PATH=$PATH:~/go/bin
 ./scripts/gen-proto.sh
-go mod vendor
 ```
 
 ### Note on CGO and blst
 
-This project uses [blst](https://github.com/supranational/blst) v0.3.14 for BLS12-381 operations via the official Go bindings (`internal/blstutil/`). CGO must be enabled for all build and test commands.
-
-`go mod vendor` only copies Go files. After any `go mod vendor` run, copy the blst C sources into vendor:
-
-```bash
-go mod vendor && ./scripts/vendor-blst.sh
-```
+This project uses [blst](https://github.com/supranational/blst) v0.3.14 for BLS12-381 operations via the official Go bindings (`internal/blstutil/`). CGO must be enabled for all build and test commands:
 
 ```bash
 export CGO_ENABLED=1
