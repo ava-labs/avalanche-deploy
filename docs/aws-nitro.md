@@ -112,7 +112,6 @@ Attach this inline policy to the instance's IAM role:
 ```bash
 git clone https://github.com/ava-labs/avalanche-remote-signer.git
 cd avalanche-remote-signer
-./scripts/vendor-blst.sh
 CGO_ENABLED=1 go build -o ~/avalanche-kms-signer-bin ./main/
 ```
 

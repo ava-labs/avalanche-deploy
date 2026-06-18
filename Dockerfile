@@ -6,14 +6,17 @@ RUN apk add --no-cache gcc musl-dev git
 
 WORKDIR /src
 
-# Copy everything — vendor directory is included so no network access needed.
+# Download dependencies first so this layer is cached unless go.mod/go.sum change.
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy the rest of the source.
 COPY . .
 
 # Build the signer binary.
-# -mod=vendor uses the checked-in vendor/ directory.
 # -trimpath removes local file paths from the binary.
 RUN CGO_ENABLED=1 GOOS=linux \
-    go build -mod=vendor -trimpath \
+    go build -trimpath \
     -o /avalanche-kms-signer ./main/
 
 # ── Stage 2: minimal runtime image ────────────────────────────────────────────
