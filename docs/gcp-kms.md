@@ -6,7 +6,7 @@ This guide covers setting up the `gcp-kms` backend: creating the key ring and ke
 
 ## How it works
 
-The BLS private key (32 bytes) is encrypted using a GCP Cloud KMS symmetric key and stored as a local ciphertext blob. At startup, `avalanche-kms-signer` calls `cloudkms.projects.locations.keyRings.cryptoKeys.decrypt` to recover the plaintext key into memory.
+The BLS private key (32 bytes) is encrypted using a GCP Cloud KMS symmetric key and stored as a local ciphertext blob. At startup, `avalanche-remote-signer` calls `cloudkms.projects.locations.keyRings.cryptoKeys.decrypt` to recover the plaintext key into memory.
 
 ```
 startup:  blob on disk ──KMS Decrypt──▶ BLS key in memory
@@ -52,7 +52,7 @@ projects/YOUR-PROJECT/locations/us-central1/keyRings/avalanche/cryptoKeys/bls-si
 Create a dedicated service account for the signer:
 
 ```bash
-gcloud iam service-accounts create avalanche-kms-signer \
+gcloud iam service-accounts create avalanche-remote-signer \
   --display-name "Avalanche KMS Signer" \
   --project YOUR-PROJECT
 ```
@@ -63,7 +63,7 @@ Grant it the `cloudkms.cryptoKeyDecrypter` role on the key:
 gcloud kms keys add-iam-policy-binding bls-signer \
   --keyring avalanche \
   --location us-central1 \
-  --member serviceAccount:avalanche-kms-signer@YOUR-PROJECT.iam.gserviceaccount.com \
+  --member serviceAccount:avalanche-remote-signer@YOUR-PROJECT.iam.gserviceaccount.com \
   --role roles/cloudkms.cryptoKeyDecrypter \
   --project YOUR-PROJECT
 ```
@@ -98,7 +98,7 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
 ### New validator — generate a fresh key
 
 ```bash
-./avalanche-kms-signer keytool generate \
+./avalanche-remote-signer keytool generate \
   --backend gcp-kms \
   --gcp-project YOUR-PROJECT \
   --gcp-location us-central1 \
@@ -112,7 +112,7 @@ The command prints the BLS public key hex. Register this on-chain when adding yo
 ### Existing validator — migrate signer.key
 
 ```bash
-./avalanche-kms-signer keytool migrate \
+./avalanche-remote-signer keytool migrate \
   --backend gcp-kms \
   --gcp-project YOUR-PROJECT \
   --gcp-location us-central1 \
@@ -148,7 +148,7 @@ gcp:
 ## Step 6 — Run the signer
 
 ```bash
-CGO_ENABLED=1 ./avalanche-kms-signer serve --config-file /etc/avalanche/config.yaml
+CGO_ENABLED=1 ./avalanche-remote-signer serve --config-file /etc/avalanche/config.yaml
 ```
 
 Then start AvalancheGo with:
@@ -169,7 +169,7 @@ Attach the service account to your VM at creation time:
 
 ```bash
 gcloud compute instances create validator \
-  --service-account=avalanche-kms-signer@YOUR-PROJECT.iam.gserviceaccount.com \
+  --service-account=avalanche-remote-signer@YOUR-PROJECT.iam.gserviceaccount.com \
   --scopes=https://www.googleapis.com/auth/cloudkms \
   [other flags]
 ```
@@ -183,21 +183,21 @@ Bind the Kubernetes service account to the GCP service account:
 ```bash
 # Allow the KSA to impersonate the GSA
 gcloud iam service-accounts add-iam-policy-binding \
-  avalanche-kms-signer@YOUR-PROJECT.iam.gserviceaccount.com \
+  avalanche-remote-signer@YOUR-PROJECT.iam.gserviceaccount.com \
   --role roles/iam.workloadIdentityUser \
-  --member "serviceAccount:YOUR-PROJECT.svc.id.goog[avalanche/kms-signer]"
+  --member "serviceAccount:YOUR-PROJECT.svc.id.goog[avalanche/remote-signer]"
 
 # Annotate the KSA
-kubectl annotate serviceaccount kms-signer \
+kubectl annotate serviceaccount remote-signer \
   --namespace avalanche \
-  iam.gke.io/gcp-service-account=avalanche-kms-signer@YOUR-PROJECT.iam.gserviceaccount.com
+  iam.gke.io/gcp-service-account=avalanche-remote-signer@YOUR-PROJECT.iam.gserviceaccount.com
 ```
 
 ---
 
 ## Systemd unit
 
-`/etc/systemd/system/avalanche-kms-signer.service`:
+`/etc/systemd/system/avalanche-remote-signer.service`:
 
 ```ini
 [Unit]
@@ -209,7 +209,7 @@ Before=avalanchego.service
 Type=simple
 User=avalanche
 Environment=CGO_ENABLED=1
-ExecStart=/usr/local/bin/avalanche-kms-signer serve --config-file /etc/avalanche/config.yaml
+ExecStart=/usr/local/bin/avalanche-remote-signer serve --config-file /etc/avalanche/config.yaml
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=true

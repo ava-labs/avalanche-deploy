@@ -14,7 +14,10 @@ runtime:  AvalancheGo ──gRPC──▶ signer ──HTTP──▶ Vault plugi
 shutdown: no key material to zero (signer never held it)
 ```
 
-This is the most secure backend in Phase 1-3 — equivalent to an HSM where the key never leaves the secure boundary.
+Unlike the cloud KMS backends, the plaintext BLS key never leaves Vault's process —
+signing happens inside the Vault plugin, similar to an HSM boundary. For
+AWS-only deployments that need host-level isolation (the host OS never sees the
+key), see **[aws-nitro.md](aws-nitro.md)**.
 
 ---
 
@@ -50,7 +53,7 @@ Or download from [developer.hashicorp.com/vault/downloads](https://developer.has
 ## Step 2 — Build the plugin
 
 ```bash
-cd ~/avalanche-kms-signer/vault-plugin
+cd ~/avalanche-remote-signer/vault-plugin
 CGO_ENABLED=1 go build -o /etc/vault/plugins/vault-plugin-bls .
 ```
 
@@ -152,7 +155,7 @@ For production, use `kubernetes` or `aws-iam` auth instead of a static token. Se
 ## Step 7 — Run the signer
 
 ```bash
-./avalanche-kms-signer serve --config-file /etc/avalanche/config.yaml
+./avalanche-remote-signer serve --config-file /etc/avalanche/config.yaml
 ```
 
 Then start AvalancheGo with:
@@ -189,7 +192,7 @@ EOF
 
 # Create a role binding the KSA to the policy
 vault write auth/kubernetes/role/bls-signer \
-  bound_service_account_names=avalanche-kms-signer \
+  bound_service_account_names=avalanche-remote-signer \
   bound_service_account_namespaces=avalanche \
   policies=bls-signer \
   ttl=1h
@@ -215,7 +218,7 @@ vault:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: avalanche-kms-signer
+  name: avalanche-remote-signer
   namespace: avalanche
 ```
 
@@ -224,22 +227,22 @@ metadata:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: avalanche-kms-signer
+  name: avalanche-remote-signer
   namespace: avalanche
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: avalanche-kms-signer
+      app: avalanche-remote-signer
   template:
     metadata:
       labels:
-        app: avalanche-kms-signer
+        app: avalanche-remote-signer
     spec:
-      serviceAccountName: avalanche-kms-signer
+      serviceAccountName: avalanche-remote-signer
       containers:
         - name: signer
-          image: avalanche-kms-signer:latest
+          image: avalanche-remote-signer:latest
           args: ["serve", "--config-file", "/etc/avalanche/config.yaml"]
           env:
             - name: CGO_ENABLED
@@ -250,14 +253,14 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: avalanche-kms-signer-config
+            name: avalanche-remote-signer-config
 ```
 
 ---
 
 ## Systemd unit
 
-`/etc/systemd/system/avalanche-kms-signer.service`:
+`/etc/systemd/system/avalanche-remote-signer.service`:
 
 ```ini
 [Unit]
@@ -270,7 +273,7 @@ Type=simple
 User=avalanche
 Environment=CGO_ENABLED=1
 Environment=VAULT_ADDR=http://127.0.0.1:8200
-ExecStart=/usr/local/bin/avalanche-kms-signer serve --config-file /etc/avalanche/config.yaml
+ExecStart=/usr/local/bin/avalanche-remote-signer serve --config-file /etc/avalanche/config.yaml
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=true
@@ -348,7 +351,10 @@ The EC2 instance role needs only one permission:
 
 ## Security model
 
-The Vault backend provides the strongest security model of all Phase 1-3 backends:
+The Vault backend keeps plaintext key material out of the signer process entirely
+(only signatures cross the API boundary). Among available backends, **aws-nitro**
+provides stronger host-level isolation on AWS; Vault is the strongest option when
+you already run HashiCorp Vault and want signing centralized there.
 
 | Property | Detail |
 |---|---|

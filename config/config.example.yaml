@@ -1,7 +1,7 @@
-# avalanche-kms-signer configuration reference
+# avalanche-remote-signer configuration reference
 #
 # Usage:
-#   avalanche-kms-signer serve --config-file /etc/avalanche/config.yaml
+#   avalanche-remote-signer serve --config-file /etc/avalanche/config.yaml
 #
 # Precedence (highest to lowest):
 #   1. CLI flags      (--backend, --port, --listen)
@@ -15,6 +15,8 @@
 #   aws-kms   — AWS Key Management Service (envelope encryption)
 #   gcp-kms   — Google Cloud KMS (envelope encryption)
 #   azure-kv  — Azure Key Vault (RSA-OAEP-256 wrapping)
+#   vault     — HashiCorp Vault BLS plugin (key never leaves Vault)
+#   aws-nitro — AWS Nitro Enclave (key used only inside the enclave)
 #
 backend: aws-kms
 
@@ -28,8 +30,8 @@ port:   50051
 # AWS KMS  (backend: aws-kms)
 #
 # The encrypted_bls_key_path file is produced by:
-#   avalanche-kms-signer keytool generate --backend aws-kms ...
-#   avalanche-kms-signer keytool migrate  --backend aws-kms ...
+#   avalanche-remote-signer keytool generate --backend aws-kms ...
+#   avalanche-remote-signer keytool migrate  --backend aws-kms ...
 #
 # IAM: the signer process needs kms:Decrypt on the key.
 #      See docs/aws-kms.md for the full IAM policy.
@@ -65,9 +67,30 @@ azure:
   encrypted_bls_key_path: /etc/avalanche/bls.key.enc
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HashiCorp Vault  (backend: vault — Phase 3, not yet implemented)
+# HashiCorp Vault  (backend: vault)
+#
+# The BLS key is generated and stored inside Vault's plugin — no encrypted blob
+# on disk. Use keytool generate --backend vault (no --output). See docs/vault.md.
 # ─────────────────────────────────────────────────────────────────────────────
 vault:
   address:     https://vault.internal:8200
-  path:        secret/data/validator/bls
+  mount_path:  bls
+  key_name:    validator
   auth_method: aws-iam   # aws-iam | token | kubernetes
+  # token:       <vault-token>           # when auth_method == token
+  # kubernetes_role: avalanche-signer    # when auth_method == kubernetes
+  # aws_role:      avalanche-signer      # when auth_method == aws-iam
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AWS Nitro Enclave  (backend: aws-nitro)
+#
+# Requires a Nitro-capable EC2 instance and a built EIF. See docs/aws-nitro.md.
+# ─────────────────────────────────────────────────────────────────────────────
+nitro:
+  region:                 us-east-2
+  eif_path:               /home/ec2-user/remote-signer.eif
+  kms_key_id:             arn:aws:kms:us-east-2:123456789012:key/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+  encrypted_bls_key_path: /etc/avalanche/bls.key.enc
+  cpu_count:              2
+  memory_mib:             512
+  enclave_cid:            16

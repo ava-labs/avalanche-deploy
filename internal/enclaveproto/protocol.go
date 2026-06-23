@@ -50,9 +50,9 @@ type Response struct {
 // the enclave network).
 //
 // Security note: credentials cross the vsock boundary but the BLS plaintext key
-// never does — this is still a significant improvement over Phase 1 where the
-// key is decrypted on the host.  Full NSM attestation (where credentials are
-// not needed) is a future enhancement.
+// never does — unlike the cloud KMS backends, where the key is decrypted on the
+// host. Full NSM attestation (where credentials are not needed) is a future
+// enhancement.
 type InitMessage struct {
 	AccessKeyID     string `json:"access_key_id"`
 	SecretAccessKey string `json:"secret_access_key"`

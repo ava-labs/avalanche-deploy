@@ -7,17 +7,17 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.7.0
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys v1.1.0
 
-	// Cloud KMS SDKs (Phase 1).
+	// Cloud KMS SDKs (AWS, GCP, Azure blob encrypt/decrypt backends).
 	github.com/aws/aws-sdk-go-v2 v1.30.3
 	github.com/aws/aws-sdk-go-v2/config v1.27.27
 	github.com/aws/aws-sdk-go-v2/service/kms v1.35.3
 
-	// HashiCorp Vault client (Phase 3).
+	// HashiCorp Vault client (vault backend).
 	github.com/hashicorp/vault/api v1.14.0
 	github.com/hashicorp/vault/api/auth/aws v0.6.0
 	github.com/hashicorp/vault/api/auth/kubernetes v0.7.0
 
-	// vsock support for Nitro Enclave communication (Phase 2).
+	// vsock support for Nitro Enclave host↔enclave communication.
 	github.com/mdlayher/vsock v1.2.1
 
 	// CLI framework.

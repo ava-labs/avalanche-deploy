@@ -6,7 +6,7 @@ This guide covers setting up the `azure-kv` backend: creating a Key Vault and RS
 
 ## How it works
 
-The BLS private key (32 bytes) is encrypted using an RSA key stored in Azure Key Vault (RSA-OAEP-256 algorithm) and stored as a local ciphertext blob. At startup, `avalanche-kms-signer` calls the Key Vault `decrypt` API to recover the plaintext into memory.
+The BLS private key (32 bytes) is encrypted using an RSA key stored in Azure Key Vault (RSA-OAEP-256 algorithm) and stored as a local ciphertext blob. At startup, `avalanche-remote-signer` calls the Key Vault `decrypt` API to recover the plaintext into memory.
 
 ```
 startup:  blob on disk ──KV Decrypt──▶ BLS key in memory
@@ -57,7 +57,7 @@ Create a user-assigned managed identity:
 
 ```bash
 az identity create \
-  --name avalanche-kms-signer \
+  --name avalanche-remote-signer \
   --resource-group avalanche-rg
 ```
 
@@ -66,7 +66,7 @@ Grant it Key Vault permissions:
 ```bash
 # Get the identity's principal ID
 PRINCIPAL_ID=$(az identity show \
-  --name avalanche-kms-signer \
+  --name avalanche-remote-signer \
   --resource-group avalanche-rg \
   --query principalId -o tsv)
 
@@ -89,7 +89,7 @@ Assign the identity to your VM:
 az vm identity assign \
   --name my-validator-vm \
   --resource-group avalanche-rg \
-  --identities avalanche-kms-signer
+  --identities avalanche-remote-signer
 ```
 
 ### Azure CLI / local development
@@ -107,7 +107,7 @@ az login
 ### New validator — generate a fresh key
 
 ```bash
-./avalanche-kms-signer keytool generate \
+./avalanche-remote-signer keytool generate \
   --backend azure-kv \
   --azure-vault-url https://my-avalanche-vault.vault.azure.net \
   --azure-key-name bls-signer \
@@ -119,7 +119,7 @@ The command prints the BLS public key hex. Register this on-chain when adding yo
 ### Existing validator — migrate signer.key
 
 ```bash
-./avalanche-kms-signer keytool migrate \
+./avalanche-remote-signer keytool migrate \
   --backend azure-kv \
   --azure-vault-url https://my-avalanche-vault.vault.azure.net \
   --azure-key-name bls-signer \
@@ -151,7 +151,7 @@ azure:
 ## Step 6 — Run the signer
 
 ```bash
-CGO_ENABLED=1 ./avalanche-kms-signer serve --config-file /etc/avalanche/config.yaml
+CGO_ENABLED=1 ./avalanche-remote-signer serve --config-file /etc/avalanche/config.yaml
 ```
 
 Then start AvalancheGo with:
@@ -190,11 +190,11 @@ az aks update \
 
 # Federate the managed identity with the KSA
 az identity federated-credential create \
-  --name avalanche-kms-signer-fed \
-  --identity-name avalanche-kms-signer \
+  --name avalanche-remote-signer-fed \
+  --identity-name avalanche-remote-signer \
   --resource-group avalanche-rg \
   --issuer $(az aks show --name my-aks-cluster --resource-group avalanche-rg --query oidcIssuerProfile.issuerUrl -o tsv) \
-  --subject system:serviceaccount:avalanche:kms-signer \
+  --subject system:serviceaccount:avalanche:remote-signer \
   --audience api://AzureADTokenExchange
 ```
 
@@ -204,7 +204,7 @@ Annotate the Kubernetes service account:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: kms-signer
+  name: remote-signer
   namespace: avalanche
   annotations:
     azure.workload.identity/client-id: <managed-identity-client-id>
@@ -214,7 +214,7 @@ metadata:
 
 ## Systemd unit
 
-`/etc/systemd/system/avalanche-kms-signer.service`:
+`/etc/systemd/system/avalanche-remote-signer.service`:
 
 ```ini
 [Unit]
@@ -226,7 +226,7 @@ Before=avalanchego.service
 Type=simple
 User=avalanche
 Environment=CGO_ENABLED=1
-ExecStart=/usr/local/bin/avalanche-kms-signer serve --config-file /etc/avalanche/config.yaml
+ExecStart=/usr/local/bin/avalanche-remote-signer serve --config-file /etc/avalanche/config.yaml
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=true

@@ -6,7 +6,7 @@ This guide covers setting up the `aws-kms` backend end-to-end: creating the KMS 
 
 ## How it works
 
-The BLS private key (32 bytes) is encrypted using AWS KMS symmetric encryption and stored as a local ciphertext blob. At startup, `avalanche-kms-signer` calls `kms:Decrypt` to recover the plaintext key into memory. Signing happens in-process; the KMS key is never used for signing operations directly.
+The BLS private key (32 bytes) is encrypted using AWS KMS symmetric encryption and stored as a local ciphertext blob. At startup, the signer calls `kms:Decrypt` to recover the plaintext key into memory. Signing happens in-process; the KMS key is never used for signing operations directly.
 
 ```
 startup:  blob on disk ──kms:Decrypt──▶ BLS key in memory
@@ -22,7 +22,7 @@ In the AWS Console or via CLI:
 
 ```bash
 aws kms create-key \
-  --description "avalanche-kms-signer BLS key encryption" \
+  --description "avalanche-remote-signer BLS key encryption" \
   --key-usage ENCRYPT_DECRYPT \
   --key-spec SYMMETRIC_DEFAULT \
   --region us-east-1
@@ -40,6 +40,11 @@ aws kms create-alias \
   --alias-name alias/avalanche-bls-signer \
   --target-key-id abc12345-1234-1234-1234-abcdef123456
 ```
+
+> **Org SCP restrictions**: some enterprise accounts deny `kms:CreateKey` via
+> service control policy. Ask an admin to provision a key for you, or use an
+> existing key ARN. For automated testing when create permissions are blocked,
+> see **[docs/e2e.md](e2e.md)** (reuse mode with `E2E_KMS_KEY_ARN`).
 
 ---
 
@@ -70,6 +75,33 @@ Both `kms:Encrypt` and `kms:Decrypt` are required:
 
 > **Advanced**: operators running large multi-validator deployments sometimes use a separate "key setup" IAM role with `kms:Encrypt` for initial key generation, and a separate runtime role with only `kms:Decrypt` for the signer process. This is optional for most operators.
 
+### KMS key policy
+
+IAM policies on the EC2/ECS role are not enough on their own — the **KMS key
+policy** must also allow the principal to use the key. Common patterns:
+
+1. **Account-root delegation** — key policy grants the account root full access;
+   IAM policies on roles then scope `kms:Encrypt` / `kms:Decrypt` to specific
+   principals.
+2. **Explicit principal** — add the EC2 instance role ARN directly to the key
+   policy (useful when IAM delegation is restricted).
+
+For SSO / IAM Identity Center roles used during local development, the principal
+ARN may look like:
+
+```
+arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-2/AWSReservedSSO_MyRole_abc123
+```
+
+or (without a region segment):
+
+```
+arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/MyRole
+```
+
+Check `aws sts get-caller-identity` and the IAM console for the exact ARN when
+updating the key policy.
+
 ---
 
 ## Step 3 — Generate or migrate your BLS key
@@ -77,7 +109,7 @@ Both `kms:Encrypt` and `kms:Decrypt` are required:
 ### New validator — generate a fresh key
 
 ```bash
-./avalanche-kms-signer keytool generate \
+./avalanche-remote-signer keytool generate \
   --backend aws-kms \
   --aws-region us-east-1 \
   --aws-kms-key-id arn:aws:kms:us-east-1:123456789012:key/YOUR-KEY-ID \
@@ -89,7 +121,7 @@ The command prints the derived BLS public key in hex. Register this on-chain whe
 ### Existing validator — migrate signer.key
 
 ```bash
-./avalanche-kms-signer keytool migrate \
+./avalanche-remote-signer keytool migrate \
   --backend aws-kms \
   --aws-region us-east-1 \
   --aws-kms-key-id arn:aws:kms:us-east-1:123456789012:key/YOUR-KEY-ID \
@@ -121,7 +153,7 @@ aws:
 ## Step 5 — Run the signer
 
 ```bash
-CGO_ENABLED=1 ./avalanche-kms-signer serve --config-file /etc/avalanche/config.yaml
+CGO_ENABLED=1 ./avalanche-remote-signer serve --config-file /etc/avalanche/config.yaml
 ```
 
 Then start AvalancheGo with:
@@ -136,11 +168,11 @@ avalanchego \
 
 ## Systemd unit (recommended)
 
-`/etc/systemd/system/avalanche-kms-signer.service`:
+`/etc/systemd/system/avalanche-remote-signer.service`:
 
 ```ini
 [Unit]
-Description=Avalanche KMS Signer
+Description=Avalanche Remote Signer
 After=network.target
 Before=avalanchego.service
 
@@ -148,7 +180,7 @@ Before=avalanchego.service
 Type=simple
 User=avalanche
 Environment=CGO_ENABLED=1
-ExecStart=/usr/local/bin/avalanche-kms-signer serve --config-file /etc/avalanche/config.yaml
+ExecStart=/usr/local/bin/avalanche-remote-signer serve --config-file /etc/avalanche/config.yaml
 Restart=on-failure
 RestartSec=5s
 
@@ -163,9 +195,9 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-sudo systemctl enable avalanche-kms-signer
-sudo systemctl start avalanche-kms-signer
-sudo systemctl status avalanche-kms-signer
+sudo systemctl enable avalanche-remote-signer
+sudo systemctl start avalanche-remote-signer
+sudo systemctl status avalanche-remote-signer
 ```
 
 ---
@@ -181,6 +213,51 @@ The signer uses the standard AWS credential chain in order:
 5. AWS SSO / IAM Identity Center
 
 On EC2, attach an instance profile with the IAM policy from Step 2 — no credentials files or environment variables needed.
+
+### AWS SSO (local development)
+
+For IAM Identity Center / SSO:
+
+```bash
+aws configure sso
+aws sso login --profile my-profile
+export AWS_PROFILE=my-profile
+aws sts get-caller-identity   # verify before running keytool or tests
+```
+
+- Export `AWS_PROFILE` in every shell session (or add it to your shell profile).
+- Do **not** run `aws` with `sudo` — it can create `~/.aws` files owned by root
+  and break SSO cache access (`Permission denied` on `~/.aws/sso`).
+- SSO registration scopes typically need `sso:account:access`.
+
+---
+
+## Integration test
+
+The AWS backend has an integration test that decrypts a real blob and signs a
+message. It is skipped unless env vars are set:
+
+```bash
+export AWS_PROFILE=my-profile
+AWS_KMS_KEY_ID=arn:aws:kms:us-east-2:123456789012:key/YOUR-KEY-ID \
+AWS_REGION=us-east-2 \
+AWS_ENCRYPTED_BLS_KEY_PATH=/absolute/path/to/bls.key.enc \
+  CGO_ENABLED=1 go test ./api/awskms/ -run TestIntegration
+```
+
+`AWS_ENCRYPTED_BLS_KEY_PATH` is resolved relative to the `api/awskms/` package
+directory when `go test` runs — use an absolute path or `../../bls.key.enc` from
+the repo root.
+
+Generate a test blob with `keytool generate` (same KMS key and region).
+
+---
+
+## End-to-end test
+
+For a full stack test (EC2 + KMS + live AvalancheGo node), see
+**[docs/e2e.md](e2e.md)**. The harness supports reusing pre-provisioned KMS keys
+and EC2 hosts when org SCPs block resource creation.
 
 ---
 
@@ -213,7 +290,10 @@ To rotate the KMS master key without changing the BLS key:
 
 | Error | Likely cause |
 |---|---|
-| `KMS decrypt: AccessDeniedException` | Instance profile lacks `kms:Decrypt` on the key |
+| `KMS decrypt: AccessDeniedException` | Instance profile lacks `kms:Decrypt`, or KMS key policy does not allow the role |
 | `KMS decrypt: NotFoundException` | Wrong key ARN or wrong region in config |
 | `expected 32-byte BLS scalar` | The encrypted blob is corrupted or was not written by keytool |
-| `loading AWS config: no EC2 IMDS` | Running locally without `~/.aws/credentials` — set `AWS_PROFILE` or export credentials |
+| `loading AWS config: no EC2 IMDS` | Running locally without credentials — set `AWS_PROFILE` or export credentials |
+| `kms:CreateKey` denied by SCP | Use an admin-provisioned key; see [e2e.md](e2e.md) for reuse mode |
+| `Permission denied` on `~/.aws/sso` | `~/.aws` owned by root (often from `sudo aws`) — fix ownership, then `aws sso login` |
+| Integration test skips | Missing env vars, or `AWS_ENCRYPTED_BLS_KEY_PATH` points to a file not visible from `api/awskms/` |

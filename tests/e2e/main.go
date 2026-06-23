@@ -28,6 +28,7 @@ func main() {
 	signerAddr := flag.String("signer", "127.0.0.1:50051", "remote signer gRPC address")
 	nodePubHex := flag.String("node-pubkey", "", "BLS key from the node's info.getNodeID (nodePOP.publicKey), hex 0x…")
 	nodePopHex := flag.String("node-pop", "", "proof of possession from info.getNodeID (nodePOP.proofOfPossession), hex 0x…")
+	pubkeyHexOnly := flag.Bool("pubkey-hex-only", false, "dial signer and print compressed pubkey hex (no 0x prefix) to stdout")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -46,6 +47,10 @@ func main() {
 		die("PublicKey RPC: %v", err)
 	}
 	pkBytes := pkResp.GetPublicKey()
+	if *pubkeyHexOnly {
+		fmt.Println(hex.EncodeToString(pkBytes))
+		return
+	}
 	pk, err := avabls.PublicKeyFromCompressedBytes(pkBytes)
 	if err != nil {
 		die("avalanchego rejected the signer's public key: %v", err)

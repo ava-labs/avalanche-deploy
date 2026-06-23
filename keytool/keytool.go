@@ -9,8 +9,8 @@
 //
 // Usage:
 //
-//	avalanche-kms-signer keytool generate --backend aws-kms [flags]
-//	avalanche-kms-signer keytool migrate  --backend aws-kms --input ~/.avalanchego/staking/signer.key
+//	avalanche-remote-signer keytool generate --backend aws-kms [flags]
+//	avalanche-remote-signer keytool migrate  --backend aws-kms --input ~/.avalanchego/staking/signer.key
 package keytool
 
 import (

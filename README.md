@@ -222,6 +222,22 @@ All config fields can be set via environment variables:
 
 ---
 
+## Documentation
+
+| Topic | Guide |
+|---|---|
+| Architecture | [docs/architecture.md](docs/architecture.md) — package layout, key lifecycle, testing pyramid |
+| AWS KMS | [docs/aws-kms.md](docs/aws-kms.md) |
+| GCP Cloud KMS | [docs/gcp-kms.md](docs/gcp-kms.md) |
+| Azure Key Vault | [docs/azure-kv.md](docs/azure-kv.md) |
+| HashiCorp Vault | [docs/vault.md](docs/vault.md) |
+| AWS Nitro Enclave | [docs/aws-nitro.md](docs/aws-nitro.md) |
+| AWS end-to-end test | [docs/e2e.md](docs/e2e.md) — `./scripts/e2e-aws.sh` |
+
+Annotated config reference: [`config/config.example.yaml`](config/config.example.yaml).
+
+---
+
 ## Backends
 
 ### `memory` — development only
@@ -348,22 +364,43 @@ CGO_ENABLED=1 go test ./...
 
 Unit tests run entirely with mock KMS clients — no cloud credentials required.
 
-Integration tests talk to real KMS keys and are skipped unless the relevant environment variables are set:
+**BLS compatibility** (separate module — round-trips signatures through avalanchego):
+
+```bash
+cd tests && CGO_ENABLED=1 go test ./...
+```
+
+**Integration tests** talk to real KMS keys and are skipped unless the relevant
+environment variables are set. Paths like `AWS_ENCRYPTED_BLS_KEY_PATH` are read
+relative to the **test package directory** (`api/awskms/`, etc.), not the repo
+root — use an absolute path or a path relative to that package (e.g.
+`../../bls.key.enc`):
 
 ```bash
 # AWS integration test
-AWS_KMS_KEY_ID=arn:... AWS_REGION=us-east-1 AWS_ENCRYPTED_BLS_KEY_PATH=./bls.key.enc \
+export AWS_PROFILE=my-sso-profile   # if using SSO
+AWS_KMS_KEY_ID=arn:... AWS_REGION=us-east-1 \
+AWS_ENCRYPTED_BLS_KEY_PATH=/absolute/path/to/bls.key.enc \
   CGO_ENABLED=1 go test ./api/awskms/ -run TestIntegration
 
 # GCP integration test
 GCP_PROJECT=my-project GCP_LOCATION=us-central1 GCP_KEY_RING=avalanche GCP_KEY_NAME=bls-signer \
-GCP_ENCRYPTED_BLS_KEY_PATH=./bls.key.enc \
+GCP_ENCRYPTED_BLS_KEY_PATH=/absolute/path/to/bls.key.enc \
   CGO_ENABLED=1 go test ./api/gcpkms/ -run TestIntegration
 
 # Azure integration test
 AZURE_VAULT_URL=https://my-vault.vault.azure.net AZURE_KEY_NAME=bls-signer \
-AZURE_ENCRYPTED_BLS_KEY_PATH=./bls.key.enc \
+AZURE_ENCRYPTED_BLS_KEY_PATH=/absolute/path/to/bls.key.enc \
   CGO_ENABLED=1 go test ./api/azurekv/ -run TestIntegration
+```
+
+**End-to-end (AWS)** — provisions real EC2 + KMS infrastructure (or reuses
+existing resources) and validates warp + proof-of-possession signing through a
+live AvalancheGo node. See **[docs/e2e.md](docs/e2e.md)**.
+
+```bash
+export AWS_PROFILE=my-sso-profile
+AWS_REGION=us-east-2 ./scripts/e2e-aws.sh
 ```
 
 ### Regenerate protobuf bindings
@@ -404,7 +441,8 @@ Add this to `~/.zprofile` to make it permanent.
 │   └── awsnitro/      AWS Nitro Enclave backend (host side)
 ├── mockapi/           In-memory backend (dev/test)
 ├── enclave/           Code that runs INSIDE the Nitro enclave (separate module)
-├── tests/             BLS compatibility tests against avalanchego (separate module)
+├── tests/             BLS compatibility tests + E2E validator binary (separate module)
+│   └── e2e/           Live E2E validator (used by scripts/e2e-aws.sh)
 ├── vault-plugin/      Custom Vault secrets plugin (separate binary)
 │   ├── main.go        Plugin entry point
 │   └── backend/       Plugin implementation (generate, sign, public-key)
@@ -417,8 +455,9 @@ Add this to `~/.zprofile` to make it permanent.
 │   ├── signer/        signer.proto source
 │   └── pb/signer/     Generated Go bindings
 ├── scripts/
-│   └── gen-proto.sh   Protobuf codegen script
-└── docs/              Per-backend setup guides
+│   ├── gen-proto.sh   Protobuf codegen script
+│   └── e2e-aws.sh     AWS end-to-end test orchestrator
+└── docs/              Architecture, per-backend setup guides, E2E testing
 ```
 
 ---
