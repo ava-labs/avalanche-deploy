@@ -238,6 +238,22 @@ WantedBy=multi-user.target
 
 ---
 
+## End-to-end test
+
+After an Azure VM has managed identity and Key Vault access (`encrypt` + `decrypt`),
+run from your laptop:
+
+```bash
+E2E_HOST=<vm-ip> E2E_SSH_KEY=~/.ssh/key.pem \
+AZURE_VAULT_URL=https://my-vault.vault.azure.net \
+AZURE_KEY_NAME=bls-signer \
+  ./scripts/e2e-azure.sh
+```
+
+See [e2e.md](e2e.md#azure-key-vault-azure-kv) for full prerequisites.
+
+---
+
 ## Troubleshooting
 
 | Error | Likely cause |

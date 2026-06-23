@@ -64,7 +64,7 @@ All modules target **Go 1.25.8** (root `go.mod`, `tests/go.mod`, `enclave/`, `va
 | `enclave/` | Code that runs INSIDE the Nitro enclave (separate module) |
 | `vault-plugin/` | Custom Vault secrets plugin (separate binary) |
 | `tests/` | BLS compat tests (`compat_test.go`) + live gRPC validator (`e2e/`) |
-| `scripts/` | `gen-proto.sh`, `e2e-aws.sh`, `e2e/remote-setup.sh` |
+| `scripts/` | `gen-proto.sh`, `e2e-aws.sh`, `e2e-gcp.sh`, `e2e-azure.sh`, `e2e-vault.sh`, `e2e-aws-nitro.sh`, `e2e/` shared helpers |
 | `docs/` | Setup guides (AWS KMS, GCP, Azure, Vault, Nitro), architecture, [e2e.md](docs/e2e.md) |
 
 ## Build & test
@@ -86,6 +86,8 @@ AWS_KMS_KEY_ID=arn:... AWS_REGION=... AWS_ENCRYPTED_BLS_KEY_PATH=/abs/path/bls.k
 
 # full AWS E2E (EC2 + KMS + AvalancheGo — costs money)
 ./scripts/e2e-aws.sh
+# GCP / Azure / Vault / Nitro — reuse an existing VM (see docs/e2e.md)
+E2E_HOST=... E2E_SSH_KEY=... ./scripts/e2e-gcp.sh
 ```
 
 See [README.md](README.md#documentation) for the documentation index and

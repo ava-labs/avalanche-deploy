@@ -221,6 +221,23 @@ WantedBy=multi-user.target
 
 ---
 
+## End-to-end test
+
+After a GCE VM has the service account attached and a KMS key exists, run from your
+laptop:
+
+```bash
+E2E_HOST=<gce-ip> E2E_SSH_KEY=~/.ssh/key.pem \
+GCP_PROJECT=... GCP_LOCATION=us-central1 \
+GCP_KEY_RING=avalanche GCP_KEY_NAME=bls-signer \
+  ./scripts/e2e-gcp.sh
+```
+
+See [e2e.md](e2e.md#gcp-cloud-kms-gcp-kms) for prerequisites (`cryptoKeyEncrypterDecrypter`
+required — E2E runs `keytool generate`).
+
+---
+
 ## Troubleshooting
 
 | Error | Likely cause |

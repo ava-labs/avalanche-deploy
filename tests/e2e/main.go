@@ -1,8 +1,7 @@
 // Command e2e-verify is the end-to-end validator: it drives the LIVE remote
 // signer over gRPC and verifies its output with avalanchego's own bls package,
-// proving warp + proof-of-possession signing works end to end against the
-// AWS-KMS-backed key. It is invoked on the EC2 instance by
-// scripts/e2e/remote-setup.sh.
+// proving warp + proof-of-possession signing works end to end. Invoked on remote
+// hosts by scripts/e2e/remote-setup.sh (all backends).
 //
 // Run: go run ./e2e --signer 127.0.0.1:50051 --node-pubkey 0x.. --node-pop 0x..
 package main
@@ -110,7 +109,7 @@ func main() {
 		}
 	}
 
-	fmt.Println("\nALL CHECKS PASSED — warp signing works end to end via the AWS-KMS-backed remote signer.")
+	fmt.Println("\nALL CHECKS PASSED — warp signing works end to end via the remote signer.")
 }
 
 func mustHex(s string) []byte {

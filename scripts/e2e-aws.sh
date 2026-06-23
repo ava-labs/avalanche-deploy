@@ -226,7 +226,7 @@ $SSH "$SSH_USER@$HOST" 'mkdir -p ~/remote-signer && tar -xzf /tmp/repo.tgz -C ~/
 # ── 3. Run + validate (all node-side logic lives in remote-setup.sh) ─────────────
 log "running setup + validation on the instance …"
 if $SSH "$SSH_USER@$HOST" \
-     "cd ~/remote-signer && AWS_REGION=$REGION KMS_KEY_ARN=$KEY_ARN NETWORK_ID=$NETWORK_ID AVALANCHEGO_VERSION=$AVALANCHEGO_VERSION E2E_RUN_ID=$RUN_ID bash scripts/e2e/remote-setup.sh"
+     "cd ~/remote-signer && E2E_BACKEND=aws-kms AWS_REGION=$REGION KMS_KEY_ARN=$KEY_ARN NETWORK_ID=$NETWORK_ID AVALANCHEGO_VERSION=$AVALANCHEGO_VERSION E2E_RUN_ID=$RUN_ID bash scripts/e2e/remote-setup.sh"
 then
   log "✅ E2E PASSED — warp + proof-of-possession signing verified end to end."
 else

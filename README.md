@@ -268,7 +268,7 @@ All config fields can be set via environment variables:
 | Azure Key Vault | [docs/azure-kv.md](docs/azure-kv.md) |
 | HashiCorp Vault | [docs/vault.md](docs/vault.md) |
 | AWS Nitro Enclave | [docs/aws-nitro.md](docs/aws-nitro.md) |
-| AWS end-to-end test | [docs/e2e.md](docs/e2e.md) — `./scripts/e2e-aws.sh` |
+| End-to-end tests | [docs/e2e.md](docs/e2e.md) — `./scripts/e2e-aws.sh`, `e2e-gcp.sh`, `e2e-azure.sh`, `e2e-vault.sh`, `e2e-aws-nitro.sh` |
 
 Annotated config reference: [`config/config.example.yaml`](config/config.example.yaml).
 
@@ -430,13 +430,19 @@ AZURE_ENCRYPTED_BLS_KEY_PATH=/absolute/path/to/bls.key.enc \
   CGO_ENABLED=1 go test ./api/azurekv/ -run TestIntegration
 ```
 
-**End-to-end (AWS)** — provisions real EC2 + KMS infrastructure (or reuses
-existing resources) and validates warp + proof-of-possession signing through a
-live AvalancheGo node. See **[docs/e2e.md](docs/e2e.md)**.
+**End-to-end (cloud)** — provisions or reuses a remote host, deploys signer +
+AvalancheGo, validates signing. See **[docs/e2e.md](docs/e2e.md)**.
 
 ```bash
+# AWS KMS (full provision or reuse — see docs/e2e.md)
 export AWS_PROFILE=my-sso-profile
 AWS_REGION=us-east-2 ./scripts/e2e-aws.sh
+
+# GCP / Azure / Vault / Nitro — reuse an existing VM (E2E_HOST + E2E_SSH_KEY)
+E2E_HOST=10.0.0.5 E2E_SSH_KEY=~/.ssh/key.pem GCP_PROJECT=... ./scripts/e2e-gcp.sh
+
+# Vault — one-time host setup first (on EC2):
+#   bash scripts/setup-vault-host.sh   → prints VAULT_TOKEN for e2e-vault.sh
 ```
 
 ### Regenerate protobuf bindings

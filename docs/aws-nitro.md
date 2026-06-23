@@ -377,7 +377,7 @@ public key stays the same.
 
 | Error | Likely cause |
 |---|---|
-| `exit status 39` | Enclave already running — `nitro-cli terminate-enclave --enclave-id <id>` |
+| `exit status 39` on `run-enclave` | Another enclave is still running (only one per host). E2E stops `remote-signer`/`avalanchego` systemd units and terminates all enclaves; manually: `nitro-cli describe-enclaves` then `nitro-cli terminate-enclave --enclave-id <id>` |
 | `connection timed out` on init port (briefly) | Enclave still booting — signer retries automatically for 30s |
 | `enclave init: timed out after 30s` **and** `nitro-cli describe-enclaves` shows nothing | Enclave binary cannot exec — almost always a glibc-dynamic build on the Alpine/musl image. Check `file enclave-bin` (must say *statically linked*) and run the `docker run --rm remote-signer-enclave /enclave-bin` smoke test |
 | `IncorrectKeyException` | KMS key ID has trailing whitespace or wrong key |

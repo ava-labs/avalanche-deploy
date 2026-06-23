@@ -19,7 +19,7 @@ Two test surfaces:
 | Path | Purpose |
 |---|---|
 | `compat_test.go` | Asserts DSTs match avalanchego; round-trips signatures through `bls.Verify` / `bls.VerifyProofOfPossession`. |
-| `e2e/main.go` | Drives a live signer over gRPC; used locally and by `scripts/e2e/remote-setup.sh` on EC2. |
+| `e2e/main.go` | Drives a live signer over gRPC; used locally and by `scripts/e2e/remote-setup.sh` on remote hosts (all backends). |
 | `go.mod` / `go.sum` | Module definition; pins `avalanchego` and replaces the root module with `../`. |
 
 ## `compat_test.go`
@@ -45,7 +45,7 @@ go run ./e2e --signer 127.0.0.1:50051 --pubkey-hex-only
 # full sign + verify (no avalanchego node required)
 go run ./e2e --signer 127.0.0.1:50051
 
-# full stack on EC2 (node identity from info.getNodeID)
+# full stack on a remote host (node identity from info.getNodeID)
 go run ./e2e --signer 127.0.0.1:50051 --node-pubkey 0x... --node-pop 0x...
 ```
 
@@ -59,5 +59,6 @@ go run ./e2e --signer 127.0.0.1:50051 --node-pubkey 0x... --node-pop 0x...
 ## Related
 
 - [`../internal/blstutil/`](../internal/blstutil/) — signing core and DST constants.
-- [`../docs/e2e.md`](../docs/e2e.md) — full AWS infrastructure E2E harness.
-- [`../scripts/e2e-aws.sh`](../scripts/e2e-aws.sh) — orchestrator that runs `e2e` on EC2.
+- [`../docs/e2e.md`](../docs/e2e.md) — E2E harness for all backends (AWS, GCP, Azure, Vault, Nitro).
+- [`../scripts/e2e-aws.sh`](../scripts/e2e-aws.sh) — AWS KMS orchestrator (provision or reuse).
+- [`../scripts/e2e-gcp.sh`](../scripts/e2e-gcp.sh), [`e2e-azure.sh`](../scripts/e2e-azure.sh), [`e2e-vault.sh`](../scripts/e2e-vault.sh), [`e2e-aws-nitro.sh`](../scripts/e2e-aws-nitro.sh) — reuse-host orchestrators.

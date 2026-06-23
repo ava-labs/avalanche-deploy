@@ -1,169 +1,151 @@
 #!/usr/bin/env bash
 # scripts/e2e/remote-setup.sh
 #
-# Runs ON the EC2 instance, invoked over SSH by scripts/e2e-aws.sh. It:
-#   1. installs build deps + Go
-#   2. builds the signer and generates a KMS-encrypted BLS key (aws-kms backend,
-#      using the instance profile's kms:Encrypt — no static credentials)
-#   3. starts the signer, then starts avalanchego with
-#      --staking-rpc-signer-endpoint pointed at it
-#   4. reads the node's BLS identity (info.getNodeID) and runs the tests/e2e
-#      validator to verify warp + proof-of-possession signing end to end
+# Runs ON a remote Linux host (SSH). Builds the signer, provisions a key for the
+# selected backend, starts the signer + avalanchego, and runs tests/e2e.
 #
-# Inputs (env): AWS_REGION, KMS_KEY_ARN  (required); NETWORK_ID,
-# AVALANCHEGO_VERSION, GO_VERSION (optional). Exits non-zero on any failure.
+# Required env:
+#   E2E_BACKEND — aws-kms | gcp-kms | azure-kv | vault
+#
+# Backend-specific (see docs/e2e.md):
+#   aws-kms:   AWS_REGION, KMS_KEY_ARN (or E2E_KMS_KEY_ARN)
+#   gcp-kms:   GCP_PROJECT, GCP_LOCATION, GCP_KEY_RING, GCP_KEY_NAME
+#   azure-kv:  AZURE_VAULT_URL, AZURE_KEY_NAME
+#   vault:     VAULT_ADDR, VAULT_TOKEN, VAULT_KEY_NAME; optional VAULT_MOUNT_PATH
 set -o errexit
 set -o nounset
 set -o pipefail
 
-: "${AWS_REGION:?AWS_REGION required}"
-: "${KMS_KEY_ARN:?KMS_KEY_ARN required}"
-NETWORK_ID="${NETWORK_ID:-fuji}"
-AVALANCHEGO_VERSION="${AVALANCHEGO_VERSION:-v1.14.0}"
-GO_VERSION="${GO_VERSION:-1.25.8}"   # matches tests/go.mod; override if unavailable
-RUN_ID="${E2E_RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
+E2E_BACKEND="${E2E_BACKEND:-aws-kms}"
+REPO="${REPO:-$HOME/remote-signer}"
 SIGNER_ADDR="127.0.0.1:50051"
-NODE_API="127.0.0.1:9650"
-AGODATA="/tmp/agodata-${RUN_ID}"
-REPO="$HOME/remote-signer"
+SIGNER_BIN="/tmp/avalanche-remote-signer"
+BLOB_PATH="/tmp/bls.key.enc"
 
-log() { printf '\n\033[1;36m=== %s ===\033[0m\n' "$*"; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
 
-# Kill whatever is listening on a TCP port (needed on reused EC2 hosts).
-kill_listeners_on_port() {
-  local port=$1
-  local pids pid
-  pids=$(sudo ss -H -ltnp "sport = :${port}" 2>/dev/null \
-    | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u)
-  [[ -z "$pids" ]] && return 0
-  while read -r pid; do
-    [[ -n "$pid" ]] && sudo kill "$pid" 2>/dev/null || true
-  done <<< "$pids"
-  sleep 1
-}
-
-wait_port_free() {
-  local port=$1
-  local i
-  for i in $(seq 1 15); do
-    sudo ss -H -ltnp "sport = :${port}" 2>/dev/null | grep -q . || return 0
-    sleep 1
-  done
-  echo "port ${port} still in use after stopping prior processes:" >&2
-  sudo ss -ltnp "sport = :${port}" >&2 || true
-  exit 1
-}
-
-install_build_deps() {
-  if command -v apt-get >/dev/null; then
-    sudo apt-get update -qq
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential git jq curl >/dev/null
-  elif command -v dnf >/dev/null; then
-    local pkgs=(gcc gcc-c++ make git jq)
-    # AL2023 ships curl-minimal; installing curl conflicts with it.
-    command -v curl >/dev/null || pkgs+=(curl)
-    sudo dnf install -y "${pkgs[@]}"
-  elif command -v yum >/dev/null; then
-    local pkgs=(gcc gcc-c++ make git jq)
-    command -v curl >/dev/null || pkgs+=(curl)
-    sudo yum install -y "${pkgs[@]}"
-  else
-    echo "unsupported OS: need apt-get, dnf, or yum to install build dependencies" >&2
+case "$E2E_BACKEND" in
+  aws-kms)
+    AWS_REGION="${AWS_REGION:?AWS_REGION required}"
+    KMS_KEY_ARN="${KMS_KEY_ARN:-${E2E_KMS_KEY_ARN:?KMS_KEY_ARN or E2E_KMS_KEY_ARN required}}"
+    ;;
+  gcp-kms)
+    GCP_PROJECT="${GCP_PROJECT:?GCP_PROJECT required}"
+    GCP_LOCATION="${GCP_LOCATION:?GCP_LOCATION required}"
+    GCP_KEY_RING="${GCP_KEY_RING:?GCP_KEY_RING required}"
+    GCP_KEY_NAME="${GCP_KEY_NAME:?GCP_KEY_NAME required}"
+    ;;
+  azure-kv)
+    AZURE_VAULT_URL="${AZURE_VAULT_URL:?AZURE_VAULT_URL required}"
+    AZURE_KEY_NAME="${AZURE_KEY_NAME:?AZURE_KEY_NAME required}"
+    ;;
+  vault)
+    VAULT_ADDR="${VAULT_ADDR:?VAULT_ADDR required}"
+    VAULT_TOKEN="${VAULT_TOKEN:?VAULT_TOKEN required}"
+    VAULT_KEY_NAME="${VAULT_KEY_NAME:?VAULT_KEY_NAME required}"
+    VAULT_MOUNT_PATH="${VAULT_MOUNT_PATH:-bls}"
+    ;;
+  *)
+    echo "unsupported E2E_BACKEND=$E2E_BACKEND (use aws-kms, gcp-kms, azure-kv, or vault; aws-nitro uses remote-setup-nitro.sh)" >&2
     exit 1
-  fi
-}
+    ;;
+esac
 
-log "installing dependencies"
+e2e_setup_log "installing dependencies"
 install_build_deps
-if ! command -v go >/dev/null 2>&1 || ! go version | grep -q "go${GO_VERSION}"; then
-  curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz
-  sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tgz
-fi
-export PATH="/usr/local/go/bin:$PATH"
-export GOTOOLCHAIN=auto CGO_ENABLED=1   # CGO required (blst); auto-fetch toolchain if a module needs newer
-go version
+install_go
 
-log "building the signer"
+e2e_setup_log "building the signer"
 cd "$REPO"
-go build -o /tmp/remote-signer ./main/
+go build -o "$SIGNER_BIN" ./main/
 
-log "generating a KMS-encrypted BLS key (keytool generate, aws-kms)"
-/tmp/remote-signer keytool generate \
-  --backend aws-kms --aws-region "$AWS_REGION" --aws-kms-key-id "$KMS_KEY_ARN" \
-  --output /tmp/bls.key.enc | tee /tmp/keytool.out
+e2e_setup_log "generating BLS key (keytool generate, ${E2E_BACKEND})"
+KEYTOOL_ARGS=(keytool generate --backend "$E2E_BACKEND")
+case "$E2E_BACKEND" in
+  aws-kms)
+    KEYTOOL_ARGS+=(--aws-region "$AWS_REGION" --aws-kms-key-id "$KMS_KEY_ARN" --output "$BLOB_PATH")
+    ;;
+  gcp-kms)
+    KEYTOOL_ARGS+=(--gcp-project "$GCP_PROJECT" --gcp-location "$GCP_LOCATION" \
+      --gcp-key-ring "$GCP_KEY_RING" --gcp-key-name "$GCP_KEY_NAME" --output "$BLOB_PATH")
+    ;;
+  azure-kv)
+    KEYTOOL_ARGS+=(--azure-vault-url "$AZURE_VAULT_URL" --azure-key-name "$AZURE_KEY_NAME" --output "$BLOB_PATH")
+    ;;
+  vault)
+    KEYTOOL_ARGS+=(--vault-addr "$VAULT_ADDR" --vault-token "$VAULT_TOKEN" \
+      --vault-mount-path "$VAULT_MOUNT_PATH" --vault-key-name "$VAULT_KEY_NAME")
+    ;;
+esac
+
+"$SIGNER_BIN" "${KEYTOOL_ARGS[@]}" | tee /tmp/keytool.out
 KEYTOOL_PUB_HEX="$(grep -F 'BLS public key (hex):' /tmp/keytool.out | awk '{print $NF}')"
 [[ -n "$KEYTOOL_PUB_HEX" ]] || { echo "could not parse keytool public key from output"; exit 1; }
 
-log "stopping any prior signer / node (${SIGNER_ADDR}, ${NODE_API})"
-kill_listeners_on_port 50051
-kill_listeners_on_port 9650
-wait_port_free 50051
-wait_port_free 9650
+stop_prior_signer_node
 
-log "starting the signer"
-cat > /tmp/signer.yaml <<YAML
+e2e_setup_log "starting the signer (${E2E_BACKEND})"
+case "$E2E_BACKEND" in
+  aws-kms)
+    cat > /tmp/signer.yaml <<YAML
 backend: aws-kms
 listen:  127.0.0.1
 port:    50051
 aws:
   region:                 ${AWS_REGION}
   kms_key_id:             ${KMS_KEY_ARN}
-  encrypted_bls_key_path: /tmp/bls.key.enc
+  encrypted_bls_key_path: ${BLOB_PATH}
 YAML
-/tmp/remote-signer serve --config-file /tmp/signer.yaml >/tmp/signer.log 2>&1 &
+    ;;
+  gcp-kms)
+    cat > /tmp/signer.yaml <<YAML
+backend: gcp-kms
+listen:  127.0.0.1
+port:    50051
+gcp:
+  project:                ${GCP_PROJECT}
+  location:               ${GCP_LOCATION}
+  key_ring:               ${GCP_KEY_RING}
+  key_name:               ${GCP_KEY_NAME}
+  encrypted_bls_key_path: ${BLOB_PATH}
+YAML
+    ;;
+  azure-kv)
+    cat > /tmp/signer.yaml <<YAML
+backend: azure-kv
+listen:  127.0.0.1
+port:    50051
+azure:
+  vault_url:              ${AZURE_VAULT_URL}
+  key_name:               ${AZURE_KEY_NAME}
+  encrypted_bls_key_path: ${BLOB_PATH}
+YAML
+    ;;
+  vault)
+    cat > /tmp/signer.yaml <<YAML
+backend: vault
+listen:  127.0.0.1
+port:    50051
+vault:
+  address:     ${VAULT_ADDR}
+  mount_path:  ${VAULT_MOUNT_PATH}
+  key_name:    ${VAULT_KEY_NAME}
+  auth_method: token
+  token:       ${VAULT_TOKEN}
+YAML
+    ;;
+esac
+
+"$SIGNER_BIN" serve --config-file /tmp/signer.yaml >/tmp/signer.log 2>&1 &
 SIGNER_PID=$!
-for i in $(seq 1 30); do
-  (exec 3<>/dev/tcp/127.0.0.1/50051) 2>/dev/null && { exec 3>&- 3<&-; break; }
-  sleep 1
-  [[ $i -eq 30 ]] && { echo "signer never listened on 50051:"; cat /tmp/signer.log; exit 1; }
-done
-kill -0 "$SIGNER_PID" 2>/dev/null || { echo "signer process exited:"; cat /tmp/signer.log; exit 1; }
+wait_signer_listening "$SIGNER_PID"
 echo "signer listening (pid $SIGNER_PID)"
 
-log "verifying signer loaded the keytool-generated key"
-SIGNER_PUB_HEX="$(cd "$REPO/tests" && go run ./e2e --signer "$SIGNER_ADDR" --pubkey-hex-only)"
-if [[ "$(echo "$KEYTOOL_PUB_HEX" | tr '[:upper:]' '[:lower:]')" != "$(echo "$SIGNER_PUB_HEX" | tr '[:upper:]' '[:lower:]')" ]]; then
-  echo "signer public key (0x${SIGNER_PUB_HEX}) != keytool output (${KEYTOOL_PUB_HEX})" >&2
-  echo "see /tmp/signer.log:" >&2
-  cat /tmp/signer.log >&2
-  exit 1
-fi
-echo "signer public key matches keytool output (0x${SIGNER_PUB_HEX})"
+verify_signer_pubkey_matches_keytool "$REPO" "$KEYTOOL_PUB_HEX" "$SIGNER_ADDR"
+run_avalanchego_and_validate "$REPO" "$SIGNER_ADDR"
 
-log "downloading avalanchego ${AVALANCHEGO_VERSION}"
-curl -fsSL "https://github.com/ava-labs/avalanchego/releases/download/${AVALANCHEGO_VERSION}/avalanchego-linux-amd64-${AVALANCHEGO_VERSION}.tar.gz" -o /tmp/ago.tgz
-mkdir -p /tmp/ago && tar -xzf /tmp/ago.tgz -C /tmp/ago --strip-components=1
-
-log "starting avalanchego with --staking-rpc-signer-endpoint=${SIGNER_ADDR}"
-/tmp/ago/avalanchego \
-  --network-id="$NETWORK_ID" \
-  --staking-rpc-signer-endpoint="$SIGNER_ADDR" \
-  --http-host=127.0.0.1 \
-  --data-dir="$AGODATA" \
-  --log-level=info >/tmp/agonode.log 2>&1 &
-NODE_PID=$!
-
-log "waiting for the node API + its BLS identity (info.getNodeID)"
-NODE_JSON=""
-for i in $(seq 1 60); do
-  NODE_JSON="$(curl -fsS -X POST --data '{"jsonrpc":"2.0","id":1,"method":"info.getNodeID"}' \
-    -H 'content-type:application/json' "http://${NODE_API}/ext/info" 2>/dev/null || true)"
-  echo "$NODE_JSON" | jq -e '.result.nodePOP.publicKey' >/dev/null 2>&1 && break
-  sleep 5
-  [[ $i -eq 60 ]] && { echo "node API/getNodeID never came up:"; tail -n 60 /tmp/agonode.log; exit 1; }
-done
-NODE_ID="$(echo "$NODE_JSON"  | jq -r '.result.nodeID')"
-NODE_PUB="$(echo "$NODE_JSON" | jq -r '.result.nodePOP.publicKey')"
-NODE_POP="$(echo "$NODE_JSON" | jq -r '.result.nodePOP.proofOfPossession')"
-echo "node ${NODE_ID} is up; BLS pubkey ${NODE_PUB}"
-
-log "validating warp + proof-of-possession signing (tests/e2e validator)"
-cd "$REPO/tests"
-go run ./e2e --signer "$SIGNER_ADDR" --node-pubkey "$NODE_PUB" --node-pop "$NODE_POP"
-
-log "cleaning up node + signer processes"
-kill "$NODE_PID" "$SIGNER_PID" 2>/dev/null || true
+kill "$SIGNER_PID" 2>/dev/null || true
 kill_listeners_on_port 50051
-kill_listeners_on_port 9650
-rm -rf "$AGODATA"
-echo "remote-setup OK"
+echo "remote-setup OK (${E2E_BACKEND})"

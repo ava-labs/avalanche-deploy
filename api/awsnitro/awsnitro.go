@@ -18,7 +18,6 @@ import (
 	"log/slog"
 	"net"
 	"os/exec"
-	"strings"
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -53,18 +52,8 @@ func New(cfg signerconfig.AWSNitroConfig, log *slog.Logger) (*Backend, error) {
 	// enclave kept running — we reconnect instead of launching a new one.
 	if enclaveRunning(cfg.EnclaveCID) {
 		log.Info("enclave already running, reconnecting", "cid", cfg.EnclaveCID)
-	} else {
-		cmd := exec.Command("nitro-cli", "run-enclave",
-			"--eif-path", cfg.EIFPath,
-			"--cpu-count", fmt.Sprintf("%d", cfg.CPUCount),
-			"--memory", fmt.Sprintf("%d", cfg.MemoryMiB),
-			"--enclave-cid", fmt.Sprintf("%d", cfg.EnclaveCID),
-		)
-		out, err := cmd.Output()
-		if err != nil {
-			return nil, fmt.Errorf("nitro-cli run-enclave: %w\noutput: %s", err, out)
-		}
-		log.Info("enclave started", "cid", cfg.EnclaveCID)
+	} else if err := runEnclave(cfg, log); err != nil {
+		return nil, err
 	}
 
 	b := &Backend{enclaveCID: cfg.EnclaveCID, log: log}
@@ -136,11 +125,41 @@ func isEnclaveReady(cid uint32) bool {
 
 // enclaveRunning returns true if an enclave with the given CID is already running.
 func enclaveRunning(cid uint32) bool {
-	out, err := exec.Command("nitro-cli", "describe-enclaves").Output()
-	if err != nil {
-		return false
+	_, err := enclaveIDForCID(cid)
+	return err == nil
+}
+
+func runEnclave(cfg signerconfig.AWSNitroConfig, log *slog.Logger) error {
+	tryRun := func() ([]byte, error) {
+		cmd := exec.Command("nitro-cli", "run-enclave",
+			"--eif-path", cfg.EIFPath,
+			"--cpu-count", fmt.Sprintf("%d", cfg.CPUCount),
+			"--memory", fmt.Sprintf("%d", cfg.MemoryMiB),
+			"--enclave-cid", fmt.Sprintf("%d", cfg.EnclaveCID),
+		)
+		return cmd.CombinedOutput()
 	}
-	return strings.Contains(string(out), fmt.Sprintf(`"EnclaveCID": %d`, cid))
+
+	out, err := tryRun()
+	if err == nil {
+		log.Info("enclave started", "cid", cfg.EnclaveCID)
+		return nil
+	}
+
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 39 {
+		log.Warn("nitro-cli run-enclave: enclave slot busy (exit 39), terminating all enclaves and retrying")
+		if terr := terminateAllEnclaves(log); terr != nil {
+			return fmt.Errorf("nitro-cli run-enclave: %w (cleanup: %v)\noutput: %s", err, terr, out)
+		}
+		time.Sleep(3 * time.Second)
+		out, err = tryRun()
+		if err == nil {
+			log.Info("enclave started", "cid", cfg.EnclaveCID)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("nitro-cli run-enclave: %w\noutput: %s", err, out)
 }
 
 // sendInitWithRetry retries sendInit until it succeeds or the timeout expires.
@@ -266,13 +285,77 @@ func (b *Backend) SignProofOfPossession(_ context.Context, msg []byte) ([]byte, 
 // Close terminates the enclave process.
 func (b *Backend) Close() error {
 	b.log.Info("terminating enclave")
+	enclaveID, err := enclaveIDForCID(b.enclaveCID)
+	if err != nil {
+		return err
+	}
 	out, err := exec.Command("nitro-cli", "terminate-enclave",
-		"--enclave-cid", fmt.Sprintf("%d", b.enclaveCID),
+		"--enclave-id", enclaveID,
 	).Output()
 	if err != nil {
 		return fmt.Errorf("nitro-cli terminate-enclave: %w\noutput: %s", err, out)
 	}
 	return nil
+}
+
+type enclaveDesc struct {
+	EnclaveID  string `json:"EnclaveID"`
+	EnclaveCID int    `json:"EnclaveCID"`
+}
+
+func listEnclaves() ([]enclaveDesc, error) {
+	out, err := exec.Command("nitro-cli", "describe-enclaves").Output()
+	if err != nil {
+		return nil, fmt.Errorf("nitro-cli describe-enclaves: %w", err)
+	}
+	var descs []enclaveDesc
+	if err := json.Unmarshal(out, &descs); err != nil {
+		return nil, fmt.Errorf("parsing describe-enclaves: %w", err)
+	}
+	return descs, nil
+}
+
+func enclaveIDForCID(cid uint32) (string, error) {
+	descs, err := listEnclaves()
+	if err != nil {
+		return "", err
+	}
+	for _, d := range descs {
+		if uint32(d.EnclaveCID) == cid {
+			return d.EnclaveID, nil
+		}
+	}
+	return "", fmt.Errorf("no enclave with cid %d", cid)
+}
+
+func terminateAllEnclaves(log *slog.Logger) error {
+	descs, err := listEnclaves()
+	if err != nil {
+		return err
+	}
+	for _, d := range descs {
+		if log != nil {
+			log.Info("terminating enclave", "id", d.EnclaveID, "cid", d.EnclaveCID)
+		}
+		out, err := exec.Command("nitro-cli", "terminate-enclave",
+			"--enclave-id", d.EnclaveID,
+		).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("nitro-cli terminate-enclave %s: %w\noutput: %s", d.EnclaveID, err, out)
+		}
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		descs, err := listEnclaves()
+		if err != nil {
+			return err
+		}
+		if len(descs) == 0 {
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
+	return fmt.Errorf("enclave still listed after terminate")
 }
 
 func hexDecode(s string) ([]byte, error) {

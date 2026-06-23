@@ -41,29 +41,62 @@ The plugin exposes four endpoints under its mount path (default: `bls/`):
 
 ## Step 1 — Install Vault
 
+**macOS (dev):**
+
 ```bash
 brew tap hashicorp/tap
 brew install hashicorp/tap/vault
 ```
 
+**Amazon Linux 2023 (EC2):**
+
+```bash
+sudo dnf install -y yum-utils
+sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
+sudo dnf install -y vault gcc gcc-c++ make
+```
+
 Or download from [developer.hashicorp.com/vault/downloads](https://developer.hashicorp.com/vault/downloads).
+
+> **E2E shortcut:** on a Linux host, run [`scripts/setup-vault-host.sh`](../scripts/setup-vault-host.sh)
+> after shipping the repo — it automates install, init, plugin build/register, and prints
+> a token for [`scripts/e2e-vault.sh`](../scripts/e2e-vault.sh). See [e2e.md](e2e.md#hashicorp-vault-vault).
 
 ---
 
 ## Step 2 — Build the plugin
 
 ```bash
-cd ~/avalanche-remote-signer/vault-plugin
-CGO_ENABLED=1 go build -o /etc/vault/plugins/vault-plugin-bls .
+cd vault-plugin
+CGO_ENABLED=1 go build -trimpath -o vault-plugin-bls .
 ```
 
-The plugin binary must be placed in Vault's configured plugin directory. In this guide we use `/etc/vault/plugins/`.
+Copy the binary into Vault's `plugin_directory` (see Step 3). The filename must
+match the registered plugin name: `vault-plugin-bls`.
+
+**Linux:**
+
+```bash
+mkdir -p ~/vault-e2e/plugins
+cp vault-plugin-bls ~/vault-e2e/plugins/
+```
+
+**macOS (dev):**
+
+```bash
+mkdir -p ~/.vault/plugins
+cp vault-plugin-bls ~/.vault/plugins/
+```
+
+> Do **not** use `~/.vault/` as the server data directory on Linux — the Vault CLI
+> uses that path for its token helper. E2E and `setup-vault-host.sh` use `~/vault-e2e/`
+> instead.
 
 ---
 
 ## Step 3 — Configure Vault
 
-Create `/etc/vault/config.hcl`:
+**Production** (`/etc/vault/`, often run as the `vault` system user from the RPM):
 
 ```hcl
 storage "file" {
@@ -79,20 +112,40 @@ plugin_directory = "/etc/vault/plugins"
 api_addr         = "http://127.0.0.1:8200"
 ```
 
+**E2E / single-user EC2** (`~/vault-e2e/`, run as `ec2-user` — avoids permission
+errors when the RPM owns `/var/lib/vault`):
+
+```hcl
+storage "file" {
+  path = "/home/ec2-user/vault-e2e/data"
+}
+listener "tcp" {
+  address     = "127.0.0.1:8200"
+  tls_disable = true
+}
+plugin_directory = "/home/ec2-user/vault-e2e/plugins"
+api_addr         = "http://127.0.0.1:8200"
+disable_mlock    = true
+```
+
 Start Vault:
 
 ```bash
-vault server -config=/etc/vault/config.hcl
+export VAULT_ADDR=http://127.0.0.1:8200
+vault server -config=/path/to/config.hcl
 ```
 
 Initialize and unseal (first time only):
 
 ```bash
-export VAULT_ADDR=http://127.0.0.1:8200
-vault operator init -key-shares=1 -key-threshold=1
-vault operator unseal <unseal-key>
-vault login <root-token>
+vault operator init -key-shares=1 -key-threshold=1 | tee /tmp/vault-init.txt
+vault operator unseal '<unseal-key-from-output>'
+vault login '<root-token-from-output>'
 ```
+
+Copy the unseal key and root token from the init output manually (do not rely on
+shell parsing — Vault 2.x formats vary). Re-run `vault operator unseal` after
+every host restart until `vault status` shows `Sealed: false`.
 
 > In production use 5 key shares with a threshold of 3, and store shares separately.
 
@@ -101,13 +154,14 @@ vault login <root-token>
 ## Step 4 — Register and enable the plugin
 
 ```bash
-# Get the SHA256 of the plugin binary
-SHA=$(shasum -a 256 /etc/vault/plugins/vault-plugin-bls | cut -d' ' -f1)
+export VAULT_ADDR=http://127.0.0.1:8200
 
-# Register the plugin
-vault plugin register -sha256=$SHA secret vault-plugin-bls
+# Linux
+SHA=$(sha256sum ~/vault-e2e/plugins/vault-plugin-bls | awk '{print $1}')
+# macOS
+# SHA=$(shasum -a 256 ~/.vault/plugins/vault-plugin-bls | awk '{print $1}')
 
-# Enable it at the bls/ mount path
+vault plugin register -sha256="$SHA" secret vault-plugin-bls
 vault secrets enable -path=bls vault-plugin-bls
 ```
 
@@ -378,6 +432,10 @@ Every `sign` and `sign-pop` call will be recorded with timestamp, caller identit
 
 | Error | Likely cause |
 |---|---|
+| `permission denied` on `/var/lib/vault/data` | RPM owns that path — use `~/vault-e2e/` and run as `ec2-user`, or use `setup-vault-host.sh` |
+| `failed to get token helper: ~/.vault is a directory` | Server data was placed in `~/.vault` — move to `~/vault-e2e/` |
+| `Vault is sealed` / `503` | Run `vault operator unseal` after restart |
+| `lstat .../vault-plugin-bls: no such file` | Build plugin into `plugin_directory` before `vault plugin register` |
 | `plugin is shut down` | Plugin binary crashed — check Vault server logs |
 | `permission denied` | Vault token/role lacks policy for the requested path |
 | `key "validator" not found` | Key not generated yet — run `vault write -force bls/keys/validator/generate` |

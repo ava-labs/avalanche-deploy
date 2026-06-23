@@ -12,8 +12,16 @@ the signer binary at runtime.
 | Script | Purpose |
 |---|---|
 | `gen-proto.sh` | Regenerate `spec/pb/signer/*.pb.go` from `spec/signer/signer.proto`. |
-| `e2e-aws.sh` | Orchestrate a full AWS E2E test: provision (or reuse) EC2 + KMS, deploy the signer, start AvalancheGo, validate signing. See [../docs/e2e.md](../docs/e2e.md). |
-| `e2e/remote-setup.sh` | Runs **on the EC2 instance** over SSH (called by `e2e-aws.sh`). Builds the signer, generates a KMS key, starts avalanchego, runs `tests/e2e`. Do not run this locally on macOS. |
+| `e2e-aws.sh` | AWS KMS E2E — optional EC2/KMS provision via AWS CLI, or reuse existing host. |
+| `e2e-gcp.sh` | GCP KMS E2E on a reused VM (`E2E_HOST`). |
+| `e2e-azure.sh` | Azure Key Vault E2E on a reused VM. |
+| `e2e-vault.sh` | HashiCorp Vault E2E on a host with Vault + BLS plugin. |
+| `e2e-aws-nitro.sh` | AWS Nitro Enclave E2E on a reused Nitro EC2 host. |
+| `setup-vault-host.sh` | One-time Vault + BLS plugin setup on Linux (EC2); prints E2E token. |
+| `setup-vault-dev-macos.sh` | Local macOS Vault dev smoke test (not for remote E2E). |
+| `e2e/remote-setup.sh` | Backend-agnostic node setup (`E2E_BACKEND=aws-kms\|gcp-kms\|azure-kv\|vault`). |
+| `e2e/remote-setup-nitro.sh` | Nitro-specific node setup. |
+| `e2e/common.sh`, `e2e/lib.sh` | Shared helpers (sourced by orchestrators). |
 
 ## `gen-proto.sh`
 

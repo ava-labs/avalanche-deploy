@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# scripts/e2e/remote-setup-nitro.sh
+#
+# Runs ON a Nitro-enabled Amazon Linux host. Builds signer + enclave EIF (optional),
+# starts aws-nitro backend, avalanchego, and tests/e2e.
+#
+# Required: AWS_REGION, KMS_KEY_ARN (or E2E_KMS_KEY_ARN)
+# Optional: E2E_EIF_PATH (default ~/remote-signer.eif), E2E_SKIP_EIF_REBUILD=1 to reuse EIF
+set -o errexit
+set -o nounset
+set -o pipefail
+
+AWS_REGION="${AWS_REGION:?AWS_REGION required}"
+KMS_KEY_ARN="${KMS_KEY_ARN:-${E2E_KMS_KEY_ARN:?KMS_KEY_ARN or E2E_KMS_KEY_ARN required}}"
+REPO="${REPO:-$HOME/remote-signer}"
+SIGNER_ADDR="127.0.0.1:50051"
+SIGNER_BIN="/tmp/avalanche-remote-signer"
+BLOB_PATH="/tmp/bls.key.enc"
+EIF_PATH="${E2E_EIF_PATH:-$HOME/remote-signer.eif}"
+ENCLAVE_CID="${E2E_ENCLAVE_CID:-16}"
+CPU_COUNT="${E2E_NITRO_CPU_COUNT:-2}"
+MEMORY_MIB="${E2E_NITRO_MEMORY_MIB:-512}"
+KMS_REGION="${AWS_REGION}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+if ! command -v nitro-cli >/dev/null; then
+  echo "nitro-cli not found — use Amazon Linux 2023 with Nitro Enclaves enabled (see docs/aws-nitro.md)" >&2
+  exit 1
+fi
+
+e2e_setup_log "installing dependencies"
+install_build_deps
+install_go
+
+# vsock-proxy for enclave → KMS (idempotent)
+if ! pgrep -f 'vsock-proxy 8443' >/dev/null 2>&1; then
+  e2e_setup_log "starting vsock-proxy for KMS"
+  nohup vsock-proxy 8443 "kms.${KMS_REGION}.amazonaws.com" 443 >/tmp/vsock-proxy.log 2>&1 &
+  sleep 2
+fi
+
+e2e_setup_log "building the signer"
+cd "$REPO"
+go build -o "$SIGNER_BIN" ./main/
+
+# Stop any prior signer/node, production services, and stale enclaves.
+stop_prod_nitro_services
+stop_prior_signer_node
+terminate_all_nitro_enclaves
+
+e2e_setup_log "generating KMS-encrypted BLS key for the enclave"
+"$SIGNER_BIN" keytool generate \
+  --backend aws-kms --aws-region "$AWS_REGION" --aws-kms-key-id "$KMS_KEY_ARN" \
+  --output "$BLOB_PATH" | tee /tmp/keytool.out
+KEYTOOL_PUB_HEX="$(grep -F 'BLS public key (hex):' /tmp/keytool.out | awk '{print $NF}')"
+[[ -n "$KEYTOOL_PUB_HEX" ]] || { echo "could not parse keytool public key"; exit 1; }
+
+if [[ "${E2E_SKIP_EIF_REBUILD:-0}" != "1" ]]; then
+  e2e_setup_log "building enclave EIF at ${EIF_PATH} (slow — set E2E_SKIP_EIF_REBUILD=1 to reuse existing EIF)"
+  command -v docker >/dev/null || { echo "docker required to build EIF"; exit 1; }
+  sudo dnf install -y glibc-static aws-nitro-enclaves-cli-devel 2>/dev/null || \
+    sudo yum install -y glibc-static aws-nitro-enclaves-cli-devel
+  cd "$REPO/enclave"
+  CGO_ENABLED=1 go build -ldflags="-linkmode external -extldflags '-static'" -o enclave-bin .
+  cp "$BLOB_PATH" ./bls.key.enc
+  docker build \
+    --build-arg KEY_PATH=bls.key.enc \
+    --build-arg KMS_KEY_ID="$KMS_KEY_ARN" \
+    -t remote-signer-enclave .
+  nitro-cli build-enclave --docker-uri remote-signer-enclave --output-file "$EIF_PATH"
+fi
+[[ -f "$EIF_PATH" ]] || { echo "EIF not found at $EIF_PATH — unset E2E_SKIP_EIF_REBUILD or build manually"; exit 1; }
+
+stop_prod_nitro_services
+stop_prior_signer_node
+terminate_all_nitro_enclaves
+sleep 3
+
+e2e_setup_log "starting signer (aws-nitro)"
+cat > /tmp/signer.yaml <<YAML
+backend: aws-nitro
+listen:  127.0.0.1
+port:    50051
+nitro:
+  region:                 ${AWS_REGION}
+  eif_path:               ${EIF_PATH}
+  kms_key_id:             ${KMS_KEY_ARN}
+  encrypted_bls_key_path: ${BLOB_PATH}
+  cpu_count:              ${CPU_COUNT}
+  memory_mib:             ${MEMORY_MIB}
+  enclave_cid:            ${ENCLAVE_CID}
+YAML
+
+"$SIGNER_BIN" serve --config-file /tmp/signer.yaml >/tmp/signer.log 2>&1 &
+SIGNER_PID=$!
+wait_signer_listening "$SIGNER_PID"
+echo "signer listening (pid $SIGNER_PID)"
+
+verify_signer_pubkey_matches_keytool "$REPO" "$KEYTOOL_PUB_HEX" "$SIGNER_ADDR"
+run_avalanchego_and_validate "$REPO" "$SIGNER_ADDR"
+
+kill "$SIGNER_PID" 2>/dev/null || true
+kill_listeners_on_port 50051
+terminate_all_nitro_enclaves
+echo "remote-setup-nitro OK"
