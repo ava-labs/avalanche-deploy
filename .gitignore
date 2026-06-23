@@ -4,6 +4,7 @@
 # Compiled binaries / build artifacts.
 # These are built from source via `go build` and the Dockerfiles —
 # never commit them.
+/avalanche-remote-signer
 /avalanche-kms-signer
 /avalanche-kms-signer-bin
 /vault-plugin-bls

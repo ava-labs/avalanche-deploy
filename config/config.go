@@ -1,7 +1,7 @@
 // Copyright (C) 2024, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-// Package config defines the top-level configuration for avalanche-kms-signer.
+// Package config defines the top-level configuration for avalanche-remote-signer.
 //
 // Precedence (highest to lowest):
 //  1. CLI flags
@@ -34,11 +34,11 @@ type BackendType string
 
 const (
 	BackendMemory   BackendType = "memory"    // in-process, dev/test only
-	BackendAWSKMS   BackendType = "aws-kms"   // Phase 1
-	BackendGCPKMS   BackendType = "gcp-kms"   // Phase 1
-	BackendAzureKV  BackendType = "azure-kv"  // Phase 1
-	BackendVault    BackendType = "vault"      // Phase 3
-	BackendAWSNitro BackendType = "aws-nitro"  // Phase 2
+	BackendAWSKMS   BackendType = "aws-kms"   // KMS-encrypted blob; decrypt at startup
+	BackendGCPKMS   BackendType = "gcp-kms"   // KMS-encrypted blob; decrypt at startup
+	BackendAzureKV  BackendType = "azure-kv"  // KMS-encrypted blob; decrypt at startup
+	BackendVault    BackendType = "vault"     // signing inside Vault plugin
+	BackendAWSNitro BackendType = "aws-nitro" // signing inside Nitro Enclave
 )
 
 // Config is the root configuration object.

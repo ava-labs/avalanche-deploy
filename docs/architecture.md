@@ -67,9 +67,9 @@ A thin wrapper over [blst](https://github.com/supranational/blst) v0.3.14's offi
 
 blst v0.3.14 fixed a CGO type alias incompatibility that affected earlier versions on Go 1.22+. Dependencies — including blst's C headers and sources, which CGO compiles directly — are fetched from the Go module cache at build time; the project uses standard module-mode builds, not vendoring.
 
-### `backend`
+### `api`
 
-Defines the `Backend` interface:
+Package [`api/`](../api/) defines the `Backend` interface:
 
 ```go
 type Backend interface {
@@ -80,7 +80,19 @@ type Backend interface {
 }
 ```
 
-Each backend implementation (`memory`, `awskms`, `gcpkms`, `azurekv`) satisfies this interface. Adding a new cloud provider means implementing this interface and adding a case to `buildBackend` in `main.go` — nothing else changes.
+Each backend implementation satisfies this interface:
+
+| Package | Backend name | Notes |
+|---|---|---|
+| [`mockapi/`](../mockapi/) | `memory` | In-process key; dev/test only |
+| [`api/awskms/`](../api/awskms/) | `aws-kms` | KMS encrypt/decrypt blob |
+| [`api/gcpkms/`](../api/gcpkms/) | `gcp-kms` | Cloud KMS encrypt/decrypt blob |
+| [`api/azurekv/`](../api/azurekv/) | `azure-kv` | Key Vault encrypt/decrypt blob |
+| [`api/vault/`](../api/vault/) | `vault` | Signing inside Vault plugin |
+| [`api/awsnitro/`](../api/awsnitro/) | `aws-nitro` | Host orchestrates Nitro enclave |
+
+Adding a new cloud provider means implementing `api.Backend` and adding a case to
+`buildBackend` in `main/main.go` — nothing else changes.
 
 ### `signerserver`
 
@@ -152,17 +164,49 @@ This is intentionally minimal: the KMS key ID is stored in config, not in the bl
 
 ## Testing approach
 
-Each backend has two test types:
+Tests are layered from fast/local to full infrastructure:
 
-**Unit tests** (always run, no cloud credentials needed):
+```
+unit tests (mock KMS)  →  integration tests (real KMS)  →  E2E (AWS EC2 + AvalancheGo)
+     go test ./...              go test ./api/...              ./scripts/e2e-aws.sh
+```
+
+### Unit tests
+
+Always run; no cloud credentials needed:
 
 - Use an XOR mock that simulates encrypt/decrypt
 - Test the full round-trip: key generation → mock encrypt → mock decrypt → sign → public key check
-- Run with `CGO_ENABLED=1 go test ./api/...`
+- Run with `CGO_ENABLED=1 go test ./...`
 
-**Integration tests** (skipped unless env vars are set):
+### BLS compatibility tests
+
+The separate [`tests/`](../tests/) module pins domain separation tags to
+avalanchego's ciphersuites and round-trips real signatures through
+`bls.Verify` / `bls.VerifyProofOfPossession`:
+
+```bash
+cd tests && CGO_ENABLED=1 go test ./...
+```
+
+### Integration tests
+
+Skipped unless env vars are set:
 
 - Talk to a real cloud KMS key
 - Test that the signer can decrypt a blob produced by keytool and sign a message
 - Triggered by setting `AWS_KMS_KEY_ID` / `GCP_PROJECT` / `AZURE_VAULT_URL` etc.
+- Encrypted blob paths (`AWS_ENCRYPTED_BLS_KEY_PATH`, etc.) are resolved relative
+  to the test package directory — use absolute paths when running
+  `go test ./api/awskms/`
+
+### End-to-end tests (AWS)
+
+[`scripts/e2e-aws.sh`](../scripts/e2e-aws.sh) provisions (or reuses) real AWS
+infrastructure, deploys the signer on EC2, starts AvalancheGo with
+`--staking-rpc-signer-endpoint`, and runs the [`tests/e2e`](../tests/e2e)
+validator to confirm warp and proof-of-possession signing end to end.
+
+See **[docs/e2e.md](e2e.md)** for prerequisites, reuse modes (org SCP
+restrictions), and troubleshooting.
 

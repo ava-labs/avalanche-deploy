@@ -1,0 +1,45 @@
+name: E2E (AWS)
+
+# Manual only — this provisions real AWS infrastructure (EC2 + KMS) and costs money.
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: AWS region
+        default: us-east-1
+        required: false
+      instance_type:
+        description: EC2 instance type
+        default: t3.xlarge
+        required: false
+      avalanchego_version:
+        description: avalanchego release tag (must support --staking-rpc-signer-endpoint)
+        default: v1.14.0
+        required: false
+
+permissions:
+  id-token: write   # for AWS OIDC
+  contents: read
+
+jobs:
+  e2e-aws:
+    name: e2e-aws
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.E2E_AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.region }}
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Run AWS E2E
+        env:
+          AWS_REGION: ${{ inputs.region }}
+          E2E_INSTANCE_TYPE: ${{ inputs.instance_type }}
+          AVALANCHEGO_VERSION: ${{ inputs.avalanchego_version }}
+        run: ./scripts/e2e-aws.sh

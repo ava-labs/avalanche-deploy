@@ -1,7 +1,7 @@
 // Copyright (C) 2024, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-// avalanche-kms-signer is an open-source BLS signing sidecar for AvalancheGo.
+// avalanche-remote-signer is an open-source BLS signing sidecar for AvalancheGo.
 //
 // Subcommands:
 //
@@ -47,7 +47,7 @@ func main() {
 // rootCmd builds the top-level cobra command.
 func rootCmd(log *slog.Logger) *cobra.Command {
 	root := &cobra.Command{
-		Use:   "avalanche-kms-signer",
+		Use:   "avalanche-remote-signer",
 		Short: "BLS signing sidecar for AvalancheGo backed by cloud KMS",
 	}
 	root.AddCommand(serveCmd(log))
@@ -87,7 +87,7 @@ func serveCmd(log *slog.Logger) *cobra.Command {
 				cfg.AWS.EndpointURL = awsEndpoint
 			}
 
-			log.Info("starting avalanche-kms-signer",
+			log.Info("starting avalanche-remote-signer",
 				"backend", cfg.Backend,
 				"addr", cfg.Addr(),
 			)
@@ -111,7 +111,7 @@ func serveCmd(log *slog.Logger) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&configFile, "config-file", "", "path to YAML config file")
-	cmd.Flags().StringVar(&backendFlag, "backend", "", "signing backend: memory|aws-kms|gcp-kms|azure-kv")
+	cmd.Flags().StringVar(&backendFlag, "backend", "", "signing backend: memory|aws-kms|gcp-kms|azure-kv|vault|aws-nitro")
 	cmd.Flags().IntVar(&port, "port", 0, "gRPC listen port (overrides config file)")
 	cmd.Flags().StringVar(&listen, "listen", "", "gRPC listen address (overrides config file)")
 	cmd.Flags().StringVar(&awsEndpoint, "aws-endpoint-url", "", "override AWS KMS endpoint (e.g. http://localhost:4566 for LocalStack)")
@@ -234,14 +234,14 @@ func keytoolGenerateCmd() *cobra.Command {
 		Use:   "generate",
 		Short: "Generate a new BLS key and encrypt it with the chosen KMS backend",
 		Example: `  # AWS KMS
-  avalanche-kms-signer keytool generate \
+  avalanche-remote-signer keytool generate \
     --backend aws-kms \
     --aws-region us-east-1 \
     --aws-kms-key-id arn:aws:kms:us-east-1:123456789:key/abc-def \
     --output /etc/avalanche/bls.key.enc
 
   # HashiCorp Vault (key stays inside Vault — no output file)
-  avalanche-kms-signer keytool generate \
+  avalanche-remote-signer keytool generate \
     --backend vault \
     --vault-addr http://127.0.0.1:8200 \
     --vault-token root \
@@ -304,7 +304,7 @@ func keytoolMigrateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Encrypt an existing plaintext signer.key with the chosen KMS backend",
-		Example: `  avalanche-kms-signer keytool migrate \
+		Example: `  avalanche-remote-signer keytool migrate \
     --backend aws-kms \
     --aws-region us-east-1 \
     --aws-kms-key-id arn:aws:kms:us-east-1:123456789:key/abc-def \
@@ -382,6 +382,6 @@ func buildBackend(cfg config.Config, log *slog.Logger) (api.Backend, error) {
 	case config.BackendAWSNitro:
 		return awsnitro.New(cfg.Nitro, log)
 	default:
-		return nil, fmt.Errorf("unknown backend %q — valid options: memory, aws-kms, gcp-kms, azure-kv", cfg.Backend)
+		return nil, fmt.Errorf("unknown backend %q — valid options: memory, aws-kms, gcp-kms, azure-kv, vault, aws-nitro", cfg.Backend)
 	}
 }

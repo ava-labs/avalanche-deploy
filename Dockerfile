@@ -17,7 +17,7 @@ COPY . .
 # -trimpath removes local file paths from the binary.
 RUN CGO_ENABLED=1 GOOS=linux \
     go build -trimpath \
-    -o /avalanche-kms-signer ./main/
+    -o /avalanche-remote-signer ./main/
 
 # ── Stage 2: minimal runtime image ────────────────────────────────────────────
 FROM alpine:3.21
@@ -27,7 +27,7 @@ RUN apk add --no-cache ca-certificates tzdata && \
     addgroup -S avalanche && \
     adduser  -S avalanche -G avalanche
 
-COPY --from=builder /avalanche-kms-signer /usr/local/bin/avalanche-kms-signer
+COPY --from=builder /avalanche-remote-signer /usr/local/bin/avalanche-remote-signer
 
 # Run as non-root.
 USER avalanche
@@ -39,5 +39,5 @@ EXPOSE 50051
 # Examples:
 #   docker run image serve --config-file /etc/avalanche/config.yaml
 #   docker run image keytool generate --backend aws-kms ...
-ENTRYPOINT ["avalanche-kms-signer"]
+ENTRYPOINT ["avalanche-remote-signer"]
 CMD ["serve"]

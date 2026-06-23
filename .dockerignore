@@ -3,7 +3,7 @@
 .github/
 
 # Build artifacts — don't copy local binaries into the image
-avalanche-kms-signer
+avalanche-remote-signer
 vault-plugin-bls
 vault-plugin/vault-plugin-bls
 

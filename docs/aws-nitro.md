@@ -112,7 +112,7 @@ Attach this inline policy to the instance's IAM role:
 ```bash
 git clone https://github.com/ava-labs/avalanche-remote-signer.git
 cd avalanche-remote-signer
-CGO_ENABLED=1 go build -o ~/avalanche-kms-signer-bin ./main/
+CGO_ENABLED=1 go build -o ~/avalanche-remote-signer ./main/
 ```
 
 ---
@@ -120,7 +120,7 @@ CGO_ENABLED=1 go build -o ~/avalanche-kms-signer-bin ./main/
 ## Step 6 — Generate the encrypted BLS key
 
 ```bash
-~/avalanche-kms-signer-bin keytool generate \
+~/avalanche-remote-signer keytool generate \
   --backend aws-kms \
   --aws-region us-east-2 \
   --aws-kms-key-id arn:aws:kms:us-east-2:YOUR-ACCOUNT:key/YOUR-KEY-ID \
@@ -233,7 +233,7 @@ Go to **AWS Console → KMS → your key → Key policy → Edit** and set:
 ## Step 9 — Run the signer
 
 ```bash
-~/avalanche-kms-signer-bin serve \
+~/avalanche-remote-signer serve \
   --backend aws-nitro \
   --config-file /etc/avalanche/config.yaml
 ```
@@ -295,7 +295,7 @@ Wants=network-online.target vsock-proxy.service
 
 [Service]
 User=ec2-user
-ExecStart=/home/ec2-user/avalanche-kms-signer-bin serve --config-file /etc/avalanche/config.yaml
+ExecStart=/home/ec2-user/avalanche-remote-signer serve --config-file /etc/avalanche/config.yaml
 Restart=always
 RestartSec=5
 TimeoutStopSec=30

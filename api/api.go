@@ -1,7 +1,7 @@
 // Copyright (C) 2024, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-// Package backend defines the Backend interface that every signing backend
+// Package api defines the Backend interface that every signing backend
 // must implement.  The signerserver delegates all cryptographic operations
 // here, so adding a new KMS provider means implementing this interface and
 // registering it in main — no other code changes required.
