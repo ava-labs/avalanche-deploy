@@ -1,6 +1,6 @@
 module github.com/ava-labs/avalanche-remote-signer/enclave
 
-go 1.22
+go 1.25.8
 
 require (
 	github.com/ava-labs/avalanche-remote-signer v0.0.0

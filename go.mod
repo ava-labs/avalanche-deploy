@@ -1,6 +1,6 @@
 module github.com/ava-labs/avalanche-remote-signer
 
-go 1.22
+go 1.25.8
 
 require (
 	cloud.google.com/go/kms v1.18.4

@@ -37,9 +37,10 @@ Adding a provider = implement that interface + register it in `main/`.
 | **root** | `.` | the server, CLI, and all KMS backends |
 | **enclave** | `enclave/` | builds a statically-linked binary that runs *inside* a Nitro enclave |
 | **vault-plugin** | `vault-plugin/` | a standalone HashiCorp Vault secrets-plugin binary |
-| **tests** | `tests/` | isolates the heavy `avalanchego` dependency used only for cross-checks |
+| **tests** | `tests/` | isolates the heavy `avalanchego` dependency; BLS compat tests + live `e2e` validator |
 
 `enclave/` and `tests/` use `replace => ../` to build against the root module.
+All modules target **Go 1.25.8** (root `go.mod`, `tests/go.mod`, `enclave/`, `vault-plugin/`).
 
 ## Folder map
 
@@ -62,20 +63,33 @@ Adding a provider = implement that interface + register it in `main/`.
 | `internal/enclaveproto/` | Host ↔ enclave wire protocol (vsock JSON) |
 | `enclave/` | Code that runs INSIDE the Nitro enclave (separate module) |
 | `vault-plugin/` | Custom Vault secrets plugin (separate binary) |
-| `tests/` | BLS signature cross-check against avalanchego (separate module) |
-| `scripts/` | `gen-proto.sh` (regenerate gRPC bindings) |
-| `docs/` | Per-backend setup guides (AWS KMS, GCP, Azure, Nitro, Vault) + architecture |
+| `tests/` | BLS compat tests (`compat_test.go`) + live gRPC validator (`e2e/`) |
+| `scripts/` | `gen-proto.sh`, `e2e-aws.sh`, `e2e/remote-setup.sh` |
+| `docs/` | Setup guides (AWS KMS, GCP, Azure, Vault, Nitro), architecture, [e2e.md](docs/e2e.md) |
 
 ## Build & test
 
 ```bash
 export CGO_ENABLED=1               # REQUIRED everywhere — blst uses cgo
 go build ./...                     # root module
-go test ./...                      # root module (integration tests skip without creds)
-( cd tests && go test ./... )      # BLS cross-check vs avalanchego
+go test ./...                      # root unit tests (integration tests skip without creds)
+( cd tests && go test ./... )      # BLS DST cross-check vs avalanchego
 ( cd enclave && go build ./... )   # separate module
 ( cd vault-plugin && go build ./... )
+
+# live signer smoke test (signer must be running in another terminal)
+( cd tests && go run ./e2e --signer 127.0.0.1:50051 )
+
+# AWS integration test (example — needs real KMS key + encrypted blob)
+AWS_KMS_KEY_ID=arn:... AWS_REGION=... AWS_ENCRYPTED_BLS_KEY_PATH=/abs/path/bls.key.enc \
+  go test ./api/awskms/ -run TestIntegration
+
+# full AWS E2E (EC2 + KMS + AvalancheGo — costs money)
+./scripts/e2e-aws.sh
 ```
+
+See [README.md](README.md#documentation) for the documentation index and
+[docs/e2e.md](docs/e2e.md) for reuse mode when org SCPs block resource creation.
 
 ## Troubleshooting — where to start
 

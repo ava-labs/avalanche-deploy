@@ -272,7 +272,10 @@ func encryptForBackend(
 		return azurekv.Encrypt(ctx, client, azureCfg.KeyName, plaintext)
 
 	default:
-		return nil, fmt.Errorf("unsupported backend %q — valid options: aws-kms, gcp-kms, azure-kv", backend)
+		return nil, fmt.Errorf(
+			"unsupported backend %q for blob encryption — valid options: aws-kms, gcp-kms, azure-kv; use --backend vault for Vault (no local blob)",
+			backend,
+		)
 	}
 }
 

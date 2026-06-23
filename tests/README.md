@@ -1,38 +1,63 @@
 # tests/
 
-> Cross-checks this signer's BLS output against AvalancheGo's own `bls` package so on-network signatures are guaranteed to verify.
+> Cross-checks this signer's BLS output against AvalancheGo's own `bls` package, plus a live gRPC E2E validator.
 
 ## What this is
-A separate Go module (`github.com/ava-labs/avalanche-remote-signer/tests`, own `go.mod` with `replace ... => ../`). It is isolated into its own module so the heavy `github.com/ava-labs/avalanchego` dependency stays out of the root module and the shipped binaries — it's pulled in only when running these compatibility tests. This module was formerly named `compat/`. It exists because a real bug shipped: `Sign()` used the IETF basic-scheme DST (`...RO_NUL_`) instead of AvalancheGo's proof-of-possession scheme DST (`...RO_POP_`), so proofs of possession (and validator registration) worked while every warp/ICM signature was silently rejected on-network.
+
+A separate Go module (`github.com/ava-labs/avalanche-remote-signer/tests`, own
+`go.mod` with `replace ... => ../`, Go 1.25.8). It isolates the heavy
+`github.com/ava-labs/avalanchego` dependency from the root module and shipped
+binaries.
+
+Two test surfaces:
+
+1. **`compat_test.go`** — unit-style BLS DST and signature cross-checks (no network).
+2. **`e2e/`** — live gRPC validator against a running signer (and optionally a node's pubkey/PoP).
 
 ## Contents
-- `compat_test.go` — the cross-verification tests against `avalanchego/utils/crypto/bls`.
-- `go.mod` / `go.sum` — module definition; requires `avalanchego` and replaces the root module with `../`.
 
-## How it works
-The tests exercise `internal/blstutil` (this signer's signing core) and verify with the real `avalanchego` `bls` package:
-- `TestDSTsMatchAvalancheGo` — asserts `blstutil.DSTSign` equals `avabls.CiphersuiteSignature` and `blstutil.DSTPoP` equals `avabls.CiphersuiteProofOfPossession`, byte-for-byte. This is the direct regression guard for the `RO_NUL_` vs `RO_POP_` bug.
-- `TestSignaturesVerifyUnderAvalancheGo` — generates a key with `blstutil.KeyGen`, then checks both directions:
-  - a `DSTSign` signature verifies under `avabls.Verify` (warp/ICM) and is rejected by `avabls.VerifyProofOfPossession`;
-  - a `DSTPoP` signature verifies under `avabls.VerifyProofOfPossession` (registration) and is rejected by `avabls.Verify`.
-  The cross-negative assertions catch the case where the two DSTs are accidentally swapped.
+| Path | Purpose |
+|---|---|
+| `compat_test.go` | Asserts DSTs match avalanchego; round-trips signatures through `bls.Verify` / `bls.VerifyProofOfPossession`. |
+| `e2e/main.go` | Drives a live signer over gRPC; used locally and by `scripts/e2e/remote-setup.sh` on EC2. |
+| `go.mod` / `go.sum` | Module definition; pins `avalanchego` and replaces the root module with `../`. |
 
-## Build & run
-This is a separate module, so `cd` in first; CGO is required because `blstutil` links `blst`.
-```sh
+## `compat_test.go`
+
+Regression guard for the `RO_NUL_` vs `RO_POP_` DST bug: proofs of possession can
+work while every warp/ICM signature is silently rejected.
+
+```bash
 cd tests
 CGO_ENABLED=1 go test ./...
-# verbose:
-CGO_ENABLED=1 go test -v ./...
+```
+
+## `e2e/` validator
+
+With the signer running (e.g. `./avalanche-remote-signer serve`):
+
+```bash
+cd tests
+
+# pubkey only
+go run ./e2e --signer 127.0.0.1:50051 --pubkey-hex-only
+
+# full sign + verify (no avalanchego node required)
+go run ./e2e --signer 127.0.0.1:50051
+
+# full stack on EC2 (node identity from info.getNodeID)
+go run ./e2e --signer 127.0.0.1:50051 --node-pubkey 0x... --node-pop 0x...
 ```
 
 ## Troubleshooting
-- **`DSTSign = ... avalanchego CiphersuiteSignature = ...` mismatch** → someone changed a DST constant in `internal/blstutil` (e.g. back to `...RO_NUL_`). → Restore the `...RO_POP_` ciphersuite values; never edit DSTs without re-running this test.
-- **`Sign output does NOT verify as an avalanchego message signature`** → the message-signing path regressed (wrong DST or wrong hash-to-curve). → Fix `blstutil.Sign`; this is the exact "PoP works but warp signatures rejected" failure.
-- **`undefined: blst...` / linker errors** → built with `CGO_ENABLED=0`. → Re-run with `CGO_ENABLED=1` and a working C toolchain.
-- **`avalanchego` version drift after `go get -u`** → ciphersuite strings could change upstream. → Keep the `avalanchego` version pinned in `go.mod` and bump deliberately.
+
+- **DST mismatch** → fix `internal/blstutil` DST constants; re-run `go test ./...`.
+- **`Sign output does NOT verify`** → message-signing path regressed; same fix as above.
+- **CGO / linker errors** → `CGO_ENABLED=1` and a C toolchain required.
+- **`connection refused` on e2e** → start the signer first (`serve` listening on `127.0.0.1:50051`).
 
 ## Related
-- [`../internal/blstutil/`](../internal/blstutil/) — the signing core and DST constants under test.
-- [`../docs/architecture.md`](../docs/architecture.md) — package structure and key lifecycle.
-- [`../enclave/`](../enclave/) — duplicates the same DSTs inline; keep in sync with `blstutil`.
+
+- [`../internal/blstutil/`](../internal/blstutil/) — signing core and DST constants.
+- [`../docs/e2e.md`](../docs/e2e.md) — full AWS infrastructure E2E harness.
+- [`../scripts/e2e-aws.sh`](../scripts/e2e-aws.sh) — orchestrator that runs `e2e` on EC2.

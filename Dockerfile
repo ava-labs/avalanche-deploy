@@ -1,5 +1,5 @@
 # ── Stage 1: build ────────────────────────────────────────────────────────────
-FROM golang:1.22-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # blst requires a C compiler (CGO) and git for module tooling.
 RUN apk add --no-cache gcc musl-dev git

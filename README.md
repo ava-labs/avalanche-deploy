@@ -1,6 +1,6 @@
 # avalanche-remote-signer
 
-An open-source, self-hosted BLS signing sidecar for [AvalancheGo](https://github.com/ava-labs/avalanchego) validators. (Formerly `avalanche-kms-signer`.)
+An open-source, self-hosted BLS signing sidecar for [AvalancheGo](https://github.com/ava-labs/avalanchego) validators.
 
 It implements the [`signer.proto`](https://github.com/ava-labs/avalanchego/blob/master/proto/signer/signer.proto) gRPC interface with **pluggable cloud KMS backends**, so validators can keep their BLS keys hardware-protected without depending on any proprietary service.
 
@@ -67,7 +67,7 @@ cd tests && go test ./...
 
 ## Prerequisites
 
-- Go 1.22+ with CGO enabled (`CGO_ENABLED=1`)
+- Go 1.25+ with CGO enabled (`CGO_ENABLED=1`) — the `tests/` module pins Go 1.25.8
 - A C compiler (Xcode CLT on macOS: `xcode-select --install`)
 - An AWS, GCP, or Azure account with a KMS key created
 - `protoc` only needed if you modify `signer.proto` (pre-generated files are checked in)
@@ -141,6 +141,40 @@ avalanchego \
 
 ---
 
+## Local development (macOS / laptop)
+
+Production examples use Linux paths such as `/etc/avalanche/config.yaml`. On a
+developer machine, build in the repo and use paths under your home directory:
+
+```bash
+CGO_ENABLED=1 go build -o avalanche-remote-signer ./main/
+
+# smoke test — no KMS or config file
+./avalanche-remote-signer serve --backend memory
+
+# AWS KMS locally (SSO profile + paths under ~/avalanche-local/)
+mkdir -p ~/avalanche-local
+export AWS_PROFILE=my-sso-profile
+./avalanche-remote-signer keytool generate \
+  --backend aws-kms --aws-region us-east-2 \
+  --aws-kms-key-id arn:aws:kms:...:key/... \
+  --output ~/avalanche-local/bls.key.enc
+
+# config.yaml with encrypted_bls_key_path: /Users/you/avalanche-local/bls.key.enc
+./avalanche-remote-signer serve --config-file ~/avalanche-local/config.yaml
+
+# verify gRPC signing (signer must be running)
+cd tests && go run ./e2e --signer 127.0.0.1:50051
+```
+
+Install to `/usr/local/bin` only when you want the binary on your `PATH`:
+
+```bash
+sudo install -m 755 avalanche-remote-signer /usr/local/bin/avalanche-remote-signer
+```
+
+---
+
 ## Configuration
 
 Settings are applied in this order of precedence (highest wins):
@@ -190,11 +224,13 @@ vault:
 
 # AWS Nitro Enclave (backend: aws-nitro) — see docs/aws-nitro.md
 nitro:
-  region:      us-east-2
-  eif_path:    /home/ec2-user/remote-signer.eif
-  cpu_count:   2
-  memory_mib:  512
-  enclave_cid: 16
+  region:                 us-east-2
+  eif_path:               /home/ec2-user/remote-signer.eif
+  kms_key_id:             arn:aws:kms:us-east-2:123456789012:key/abc-def
+  encrypted_bls_key_path: /etc/avalanche/bls.key.enc
+  cpu_count:              2
+  memory_mib:             512
+  enclave_cid:            16
 ```
 
 See [`config/config.example.yaml`](config/config.example.yaml) for a full annotated example.

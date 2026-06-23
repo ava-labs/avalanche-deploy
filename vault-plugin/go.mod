@@ -1,6 +1,6 @@
 module github.com/ava-labs/avalanche-remote-signer/vault-plugin
 
-go 1.22
+go 1.25.8
 
 require (
 	github.com/hashicorp/vault/sdk v0.11.0
