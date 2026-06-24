@@ -47,7 +47,7 @@ variable "primary_validator_count" {
 variable "primary_validator_instance_type" {
   description = "EC2 instance type for Primary Network validators (must have NVMe)"
   type        = string
-  default     = "i4i.xlarge" # 4 vCPU, 32GB RAM, 937GB NVMe
+  default     = "i7i.xlarge" # 4 vCPU, 32GB RAM, 937GB NVMe
 }
 
 variable "primary_validator_root_disk_gb" {

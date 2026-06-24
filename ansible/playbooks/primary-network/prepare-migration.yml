@@ -18,7 +18,7 @@
 #   2. Run primary-network/migrate-validator.yml to transfer keys and switch over
 #
 # Requirements:
-#   - New instance already provisioned (i4i.xlarge recommended)
+#   - New instance already provisioned (i7i.xlarge recommended)
 #   - Added to inventory with ansible_host set
 #   - For snapshot restore: snapshot must exist in S3
 

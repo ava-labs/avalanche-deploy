@@ -16,8 +16,8 @@ flowchart TB
     subgraph AWS["AWS Cloud"]
         subgraph VPC["VPC (10.0.0.0/16)"]
             subgraph PrimaryValidatorsSG["primary-validators-sg"]
-                PV1[Primary Validator<br/>i4i.xlarge<br/>937GB NVMe<br/>:9651 P2P]
-                PV2[Primary Validator 2<br/>i4i.xlarge<br/>937GB NVMe<br/>:9651 P2P]
+                PV1[Primary Validator<br/>i7i.xlarge<br/>937GB NVMe<br/>:9651 P2P]
+                PV2[Primary Validator 2<br/>i7i.xlarge<br/>937GB NVMe<br/>:9651 P2P]
             end
 
             subgraph MonitoringSG["monitoring-sg"]
@@ -49,7 +49,7 @@ flowchart TB
 
 ## Features
 
-- **High-performance storage**: i4i.xlarge instances with 937GB NVMe
+- **High-performance storage**: i7i.xlarge instances with 937GB NVMe
 - **Staking key backup**: Automatic S3 backup with KMS encryption
 - **Near-zero downtime migration**: Transfer validators to new instances
 - **Database snapshots**: Fast bootstrapping for new nodes
@@ -181,10 +181,10 @@ make migrate-validator CLOUD=aws SOURCE=primary-validator-1 TARGET=migration-tar
 
 | Component | Instance | Storage | Monthly (us-east-1) |
 |-----------|----------|---------|---------------------|
-| Primary Validator | i4i.xlarge | 937GB NVMe | ~$310 |
+| Primary Validator | i7i.xlarge | 937GB NVMe | ~$276 |
 | S3 + KMS | - | ~1GB | ~$1 |
 | Monitoring | t3.small | 50GB | ~$15 |
-| **Total per validator** | | | **~$326/mo** |
+| **Total per validator** | | | **~$292/mo** |
 
 ## Terraform Configuration
 

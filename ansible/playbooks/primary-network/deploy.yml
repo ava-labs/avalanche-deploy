@@ -5,7 +5,7 @@
 # Unlike L1 validators, these nodes:
 #   - Sync full P/X/C chains (no partial-sync)
 #   - Use state-sync for faster initial sync
-#   - Require substantial storage (937GB NVMe on i4i.xlarge)
+#   - Require substantial storage (937GB NVMe on i7i.xlarge)
 #
 # Usage:
 #   ansible-playbook playbooks/primary-network/deploy.yml
