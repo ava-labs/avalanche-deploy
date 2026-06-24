@@ -247,7 +247,7 @@ resource "aws_instance" "primary_validators" {
     encrypted   = true
   }
 
-  # NVMe is ephemeral and attached automatically with i4i instances
+  # NVMe is ephemeral and attached automatically with i7i instances
 
   tags = merge(local.common_tags, {
     Name     = "${var.name_prefix}-primary-validator-${count.index + 1}"
