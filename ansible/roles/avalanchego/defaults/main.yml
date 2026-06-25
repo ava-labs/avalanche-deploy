@@ -63,3 +63,9 @@ avalanchego_partial_sync_primary_network: true
 # Index settings - RPC nodes need indexing for queries, validators don't
 # This is automatically set based on avalanchego_node_type, but can be overridden
 avalanchego_index_enabled: "{{ true if avalanchego_node_type == 'rpc' else false }}"
+
+# Custom VM plugin support
+# Set custom_vm_id to install a custom VM plugin alongside SubnetEVM.
+# The binary must be provided at custom_vm_binary_path on the Ansible controller.
+custom_vm_id: ""
+custom_vm_binary_path: ""
