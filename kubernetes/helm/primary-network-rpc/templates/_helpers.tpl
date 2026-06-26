@@ -66,3 +66,22 @@ Get network ID based on network name
 {{- define "primary-network-rpc.networkId" -}}
 {{- if eq .Values.network "mainnet" }}1{{- else }}5{{- end }}
 {{- end }}
+
+{{/*
+HTTP allowed hosts (--http-allowed-hosts).
+AvalancheGo only accepts API requests whose Host header is an IP address,
+matches this list exactly (case-insensitive), or when the list contains the
+global wildcard "*" — suffix wildcards are NOT supported. Its built-in
+default ("localhost") 403-rejects every in-cluster client that reaches the
+node via service DNS. Default here: localhost plus this release's service
+DNS variants.
+*/}}
+{{- define "primary-network-rpc.httpAllowedHosts" -}}
+{{- if .Values.primary_rpc_config.httpAllowedHosts -}}
+{{- join "," .Values.primary_rpc_config.httpAllowedHosts -}}
+{{- else -}}
+{{- $svc := include "primary-network-rpc.fullname" . -}}
+{{- $ns := .Release.Namespace -}}
+{{- printf "localhost,%s,%s.%s,%s.%s.svc,%s.%s.svc.cluster.local" $svc $svc $ns $svc $ns $svc $ns -}}
+{{- end -}}
+{{- end }}

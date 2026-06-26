@@ -51,11 +51,15 @@ func DeployValidatorManagerWithForge(
 
 	// Determine the contracts path
 	if icmContractsPath == "" {
-		// Try common locations
+		// Try common locations. ICM_CONTRACTS_PATH is the canonical env var;
+		// ICM_SERVICES_PATH is deprecated and checked only for backwards
+		// compatibility with older setups.
 		possiblePaths := []string{
-			"../../../icm-services",
-			"../../icm-services",
-			os.Getenv("ICM_SERVICES_PATH"),
+			os.Getenv("ICM_CONTRACTS_PATH"),
+			os.Getenv("ICM_SERVICES_PATH"), // Deprecated: use ICM_CONTRACTS_PATH instead
+			filepath.Join(os.Getenv("HOME"), "code/icm-contracts"),
+			"../../../icm-contracts",
+			"../../icm-contracts",
 		}
 		for _, p := range possiblePaths {
 			if p != "" {
@@ -67,7 +71,7 @@ func DeployValidatorManagerWithForge(
 			}
 		}
 		if icmContractsPath == "" {
-			return nil, fmt.Errorf("icm-services path not found. Set ICM_SERVICES_PATH or provide --contracts-path")
+			return nil, fmt.Errorf("icm-contracts path not found. Set ICM_CONTRACTS_PATH or provide --contracts-path")
 		}
 	}
 

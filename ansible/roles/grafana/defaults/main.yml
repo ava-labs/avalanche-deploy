@@ -12,7 +12,11 @@ grafana_port: 3000
 # Authentication
 grafana_anonymous_enabled: true
 grafana_admin_user: admin
-grafana_admin_password: admin  # Override this in production! Default is insecure.
+# Admin password: leave empty to auto-generate once on first run and persist it
+# to grafana_admin_password_file (0600) on the monitoring host. Set this
+# explicitly (e.g. -e grafana_admin_password=...) to manage the credential externally.
+grafana_admin_password: ""
+grafana_admin_password_file: "{{ grafana_config_dir }}/.admin_password"
 
 # Prometheus datasource
 grafana_prometheus_url: "http://localhost:9090"

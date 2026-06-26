@@ -1,0 +1,206 @@
+---
+# Idempotent, checksum-verified avalanchego install/upgrade.
+#
+# - Skips the download entirely when the installed binary already reports the
+#   requested version (and the bundled subnet-evm plugin is present).
+# - Verifies the release tarball SHA256 before install and hard-fails on
+#   mismatch. avalanchego releases publish no checksum manifest (only GPG
+#   .sig files), so known-good values are pinned in defaults/main.yml;
+#   override with -e avalanchego_checksum_sha256=<sha256-or-url> for other
+#   versions.
+# - Replaces the binary atomically (ansible.builtin.copy writes a temp file
+#   and renames it into place) and notifies "Restart avalanchego" only when
+#   the installed file actually changes.
+#
+# Used by tasks/main.yml (fresh deploy) and by
+# playbooks/shared/upgrade-nodes.yml (zero-downtime rolling upgrade via
+# include_role tasks_from=install). The service is never stopped here: the
+# download and verification happen while the node keeps running, and the
+# restart handler swaps to the new binary afterwards.
+
+- name: Normalize requested avalanchego version (accept 1.14.1 or v1.14.1)
+  ansible.builtin.set_fact:
+    avalanchego_version_tag: "v{{ avalanchego_version | string | regex_replace('^v', '') }}"
+
+- name: Resolve release asset name for this architecture
+  ansible.builtin.set_fact:
+    avalanchego_release_arch: "{{ 'arm64' if ansible_architecture in ['aarch64', 'arm64'] else 'amd64' }}"
+
+- name: Resolve release tarball name
+  ansible.builtin.set_fact:
+    avalanchego_tarball_name: "avalanchego-linux-{{ avalanchego_release_arch }}-{{ avalanchego_version_tag }}.tar.gz"
+
+- name: Check installed avalanchego version
+  ansible.builtin.command: "{{ avalanchego_binary_path }} --version"
+  register: avalanchego_installed_version_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Check for installed subnet-evm plugin
+  ansible.builtin.stat:
+    path: "{{ avalanchego_plugin_dir }}/{{ avalanchego_subnet_evm_vm_id }}"
+  register: avalanchego_installed_plugin
+
+- name: Parse installed avalanchego version
+  ansible.builtin.set_fact:
+    avalanchego_installed_version: >-
+      {{ (avalanchego_installed_version_cmd.stdout | default(''))
+         | regex_search('[0-9]+\.[0-9]+\.[0-9]+')
+         | default('', true) }}
+
+- name: Determine whether download/install is needed
+  ansible.builtin.set_fact:
+    avalanchego_install_needed: >-
+      {{ avalanchego_installed_version != (avalanchego_version_tag | regex_replace('^v', ''))
+         or not avalanchego_installed_plugin.stat.exists }}
+
+- name: Report up-to-date installation
+  ansible.builtin.debug:
+    msg: >-
+      avalanchego {{ avalanchego_installed_version }} already installed at
+      {{ avalanchego_binary_path }} with subnet-evm plugin present - skipping download
+  when: not (avalanchego_install_needed | bool)
+
+- name: Download, verify, and install avalanchego {{ avalanchego_version_tag }}
+  when: avalanchego_install_needed | bool
+  block:
+    - name: Resolve expected SHA256 checksum
+      ansible.builtin.set_fact:
+        avalanchego_expected_checksum: >-
+          {{ avalanchego_checksum_sha256
+             if (avalanchego_checksum_sha256 | default('') | length > 0)
+             else (avalanchego_checksums | default({})).get(avalanchego_version_tag, {}).get(avalanchego_release_arch, '') }}
+
+    - name: Fail when no checksum is known for this version
+      ansible.builtin.fail:
+        msg: >-
+          No SHA256 checksum known for {{ avalanchego_tarball_name }}.
+          avalanchego releases do not publish a checksum manifest, so this role
+          pins known-good values in roles/avalanchego/defaults/main.yml
+          (avalanchego_checksums). Compute one on a trusted machine:
+          curl -fsSL https://github.com/ava-labs/avalanchego/releases/download/{{ avalanchego_version_tag }}/{{ avalanchego_tarball_name }}
+          | shasum -a 256
+          then add it to avalanchego_checksums or pass
+          -e avalanchego_checksum_sha256=<value>. Set
+          -e avalanchego_allow_unverified_download=true only as a last resort.
+      when:
+        - avalanchego_expected_checksum | length == 0
+        - not (avalanchego_allow_unverified_download | bool)
+
+    - name: Download avalanchego release tarball (SHA256-verified)
+      ansible.builtin.get_url:
+        url: "https://github.com/ava-labs/avalanchego/releases/download/{{ avalanchego_version_tag }}/{{ avalanchego_tarball_name }}"
+        dest: "/tmp/{{ avalanchego_tarball_name }}"
+        mode: "0644"
+        checksum: "{{ ('sha256:' ~ avalanchego_expected_checksum) if avalanchego_expected_checksum | length > 0 else omit }}"
+
+    - name: Remove stale extraction directory
+      ansible.builtin.file:
+        path: /tmp/avalanchego-install
+        state: absent
+
+    - name: Create extraction directory
+      ansible.builtin.file:
+        path: /tmp/avalanchego-install
+        state: directory
+        mode: "0755"
+
+    - name: Extract avalanchego
+      ansible.builtin.unarchive:
+        src: "/tmp/{{ avalanchego_tarball_name }}"
+        dest: /tmp/avalanchego-install
+        remote_src: true
+
+    - name: Install avalanchego binary (atomic replace, restart only on change)
+      ansible.builtin.copy:
+        src: "/tmp/avalanchego-install/avalanchego-{{ avalanchego_version_tag }}/avalanchego"
+        dest: "{{ avalanchego_binary_path }}"
+        owner: root
+        group: root
+        mode: "0755"
+        remote_src: true
+      notify: Restart avalanchego
+
+    - name: Ensure plugin directory exists
+      ansible.builtin.file:
+        path: "{{ avalanchego_plugin_dir }}"
+        state: directory
+        owner: "{{ avalanchego_user }}"
+        group: "{{ avalanchego_group }}"
+        mode: "0755"
+
+    # NOTE: subnet-evm is bundled only in the avalanchego DOCKER images, not
+    # in the release tarballs (verified against v1.14.1: the tarball contains
+    # just the avalanchego binary). Check anyway in case future tarballs
+    # bundle it; otherwise install the standalone release, verified against
+    # the checksums.txt that subnet-evm releases DO publish.
+    - name: Check if bundled subnet-evm exists in release
+      ansible.builtin.stat:
+        path: "/tmp/avalanchego-install/avalanchego-{{ avalanchego_version_tag }}/plugins/{{ avalanchego_subnet_evm_vm_id }}"
+      register: avalanchego_bundled_subnet_evm
+
+    - name: Install bundled subnet-evm plugin (restart only on change)
+      ansible.builtin.copy:
+        src: "/tmp/avalanchego-install/avalanchego-{{ avalanchego_version_tag }}/plugins/{{ avalanchego_subnet_evm_vm_id }}"
+        dest: "{{ avalanchego_plugin_dir }}/{{ avalanchego_subnet_evm_vm_id }}"
+        owner: "{{ avalanchego_user }}"
+        group: "{{ avalanchego_group }}"
+        mode: "0755"
+        remote_src: true
+      when: avalanchego_bundled_subnet_evm.stat.exists
+      notify: Restart avalanchego
+
+    - name: Download, verify, and install standalone subnet-evm plugin
+      when:
+        - not avalanchego_bundled_subnet_evm.stat.exists
+        - avalanchego_subnet_evm_version is defined
+      vars:
+        subnet_evm_base: "https://github.com/ava-labs/subnet-evm/releases/download/{{ avalanchego_subnet_evm_version }}"
+        subnet_evm_bare_version: "{{ avalanchego_subnet_evm_version | regex_replace('^v', '') }}"
+        subnet_evm_file: "subnet-evm_{{ subnet_evm_bare_version }}_linux_{{ avalanchego_release_arch }}.tar.gz"
+      block:
+        # dest filename must match the entry in checksums.txt for get_url's
+        # checksum-by-URL lookup to find the right line
+        - name: Download subnet-evm release tarball (SHA256-verified via checksums.txt)
+          ansible.builtin.get_url:
+            url: "{{ subnet_evm_base }}/{{ subnet_evm_file }}"
+            dest: "/tmp/{{ subnet_evm_file }}"
+            mode: "0644"
+            checksum: "sha256:{{ subnet_evm_base }}/subnet-evm_{{ subnet_evm_bare_version }}_checksums.txt"
+
+        - name: Create subnet-evm extraction directory
+          ansible.builtin.file:
+            path: /tmp/subnet-evm-install
+            state: directory
+            mode: "0755"
+
+        - name: Extract subnet-evm
+          ansible.builtin.unarchive:
+            src: "/tmp/{{ subnet_evm_file }}"
+            dest: /tmp/subnet-evm-install
+            remote_src: true
+
+        - name: Install subnet-evm plugin (restart only on change)
+          ansible.builtin.copy:
+            src: /tmp/subnet-evm-install/subnet-evm
+            dest: "{{ avalanchego_plugin_dir }}/{{ avalanchego_subnet_evm_vm_id }}"
+            owner: "{{ avalanchego_user }}"
+            group: "{{ avalanchego_group }}"
+            mode: "0755"
+            remote_src: true
+          notify: Restart avalanchego
+
+  always:
+    - name: Find downloaded subnet-evm tarballs
+      ansible.builtin.find:
+        paths: /tmp
+        patterns: "subnet-evm_*.tar.gz"
+        file_type: file
+      register: avalanchego_subnet_evm_downloads
+
+    - name: Clean up download artifacts
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ ['/tmp/' + avalanchego_tarball_name, '/tmp/avalanchego-install', '/tmp/subnet-evm-install']
+                + (avalanchego_subnet_evm_downloads.files | map(attribute='path') | list) }}"

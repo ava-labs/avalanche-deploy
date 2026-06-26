@@ -29,4 +29,12 @@
   post_tasks:
     - name: Display Grafana URL
       ansible.builtin.debug:
-        msg: "Grafana available at: http://{{ ansible_host }}:{{ grafana_port }}"
+        msg: |
+          Grafana available at: http://{{ ansible_host }}:{{ grafana_port }}
+
+          Login: {{ grafana_admin_user }} / auto-generated password stored on the
+          monitoring host at {{ grafana_admin_password_file }} (mode 0600).
+          Retrieve it with:
+            ssh ubuntu@{{ ansible_host }} sudo cat {{ grafana_admin_password_file }}
+          To manage the credential externally, deploy with:
+            -e grafana_admin_password=...

@@ -5,6 +5,46 @@
 avalanchego_version: "v1.14.1"
 avalanchego_subnet_evm_version: "v0.8.0"
 
+# Install location of the avalanchego binary
+avalanchego_binary_path: /usr/local/bin/avalanchego
+
+# VM ID of the bundled subnet-evm plugin
+avalanchego_subnet_evm_vm_id: srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy
+
+# SHA256 checksums of avalanchego-linux-<arch>-<version>.tar.gz release assets.
+# avalanchego GitHub releases publish GPG .sig files but NO checksum manifest,
+# so known-good values are pinned here (computed from the official release
+# assets). Add new versions here when upgrading, or pass
+# -e avalanchego_checksum_sha256=<sha256> for a one-off version.
+avalanchego_checksums:
+  v1.14.1:
+    amd64: "9b94689364a1317fbd561919fd3c9a1dbbe92d2526dabe461b6fc41efe5cdfc3"
+    arm64: "335829c8a5f73f3f4de21ab2fb5e6d66eeeca0016151c93f538acaf99e8df7c5"
+  v1.14.2:
+    amd64: "daf7f2739f0790c033ad728af6ee29bcd2660baf5265844079eb60f22d101e46"
+    arm64: "0c4563c55659fd9923bd1ea9d3dbcd0a85668325091ffc4a259d0a137033ad0b"
+
+# Checksum override for versions not pinned in avalanchego_checksums.
+# Accepts a literal sha256 value or a URL to a checksum file
+# (anything ansible.builtin.get_url's checksum parameter understands).
+avalanchego_checksum_sha256: ""
+
+# Last-resort escape hatch: allow downloading a version with no known
+# checksum. Strongly discouraged - compute and pin a checksum instead.
+avalanchego_allow_unverified_download: false
+
+# Readiness behavior after (re)start:
+# - false (default): assert the service is running and the API responds;
+#   report bootstrap progress as a notice (fresh nodes are still syncing).
+# - true: additionally block until the P-Chain reports bootstrapped and fail
+#   if it never does (use for nodes that must be fully synced before
+#   continuing, e.g. primary-network validators).
+avalanchego_wait_for_bootstrap: false
+avalanchego_api_wait_retries: 30
+avalanchego_api_wait_delay: 10
+avalanchego_bootstrap_retries: 60
+avalanchego_bootstrap_delay: 10
+
 # Network: fuji or mainnet
 avalanchego_network: "fuji"
 

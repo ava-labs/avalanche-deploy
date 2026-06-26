@@ -13,7 +13,6 @@
 #
 # Optional variables:
 #   erpc_port: HTTP port (default: 4000)
-#   erpc_admin_port: Admin/metrics port (default: 4001)
 
 - name: Install Docker dependencies
   ansible.builtin.apt:
@@ -86,6 +85,7 @@
     owner: erpc
     group: erpc
     mode: '0644'
+  notify: Restart erpc
 
 - name: Create systemd service
   ansible.builtin.template:
@@ -101,13 +101,18 @@
     enabled: true
     daemon_reload: true
 
+# Apply any pending config/compose changes now (systemd stop/start = compose
+# down + up, which re-reads env files) so the readiness check below validates
+# the configuration we just rendered, not a stale running stack
+- name: Apply pending eRPC restarts
+  ansible.builtin.meta: flush_handlers
+
 - name: Wait for eRPC to be ready
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ erpc_admin_port | default(4001) }}/healthcheck"
+    url: "http://127.0.0.1:{{ erpc_port | default(4000) }}/healthcheck"
     method: GET
     status_code: 200
   register: erpc_health
   until: erpc_health.status == 200
   retries: 30
   delay: 5
-  ignore_errors: true

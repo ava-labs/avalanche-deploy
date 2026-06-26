@@ -43,6 +43,7 @@ spec:
           args:
             - --network-id={{ include "l1-validator.networkId" . }}
             - --http-host=0.0.0.0
+            - --http-allowed-hosts={{ include "l1-validator.httpAllowedHosts" . }}
             - --http-port={{ .Values.l1_validator_config.httpPort }}
             - --staking-port={{ .Values.l1_validator_config.stakingPort }}
             - --log-level={{ .Values.l1_validator_config.logLevel }}

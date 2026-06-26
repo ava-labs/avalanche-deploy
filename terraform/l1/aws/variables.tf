@@ -148,6 +148,12 @@ variable "enable_public_blockscout" {
   default     = true
 }
 
+variable "enable_public_faucet" {
+  description = "Allow public access to the faucet UI/API (port 8010 on RPC nodes)"
+  type        = bool
+  default     = false
+}
+
 variable "enable_public_safe" {
   description = "Allow public access to Safe multisig UI"
   type        = bool
@@ -174,4 +180,10 @@ variable "enable_staking_key_backup" {
   description = "Enable S3 backup for validator staking keys"
   type        = bool
   default     = true
+}
+
+variable "owner_tag" {
+  description = "Value for an Owner tag applied to all resources via provider default_tags. Required by some org SCPs; leave empty to skip."
+  type        = string
+  default     = ""
 }

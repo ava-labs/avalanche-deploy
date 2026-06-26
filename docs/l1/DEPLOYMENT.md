@@ -109,6 +109,34 @@ ssh_private_key_file = "~/.ssh/avalanche-deploy"
 enable_staking_key_backup = true
 ```
 
+#### Remote State (optional, recommended for teams)
+
+By default Terraform keeps state in a local `terraform.tfstate` — fine for a
+solo trial run, but it has no locking, isn't shared, and goes stale (we have
+been bitten by applying against months-old local state from a destroyed
+deployment). To switch this root to a shared S3 backend:
+
+```bash
+cd terraform/l1/aws
+cp backend.tf.example backend.tf   # edit bucket/region/locking inside
+terraform init -migrate-state      # copies existing local state into S3
+```
+
+Notes:
+
+- **The S3 bucket must already exist.** Terraform must never create its own
+  state bucket (some of our accounts deny `s3:CreateBucket` via SCP). Create
+  it out-of-band with versioning + encryption, or reuse a shared one.
+- **State locking:** on Terraform >= 1.10 use `use_lockfile = true` (S3-native,
+  no extra infra). On older Terraform (this repo pins only `>= 1.5`) use a
+  pre-existing DynamoDB table via `dynamodb_table`. The example file documents
+  both.
+- **Distinct `key` per root:** `l1/aws` and `primary-network/aws` must never
+  share a state key. The example files already use distinct keys.
+- **All operators must switch together.** Commit `backend.tf` once migrated;
+  one operator on local state and another on S3 will clobber each other.
+- Local state remains the default — without a `backend.tf`, nothing changes.
+
 ### 3. Create Infrastructure
 
 ```bash
@@ -123,6 +151,18 @@ make status   # Wait for "P:OK" on all nodes
 ```
 
 ### 5. Create Your L1
+
+> **Prerequisites:** the `platform` CLI is not installed by `make setup`. Install it with:
+>
+> ```bash
+> go install github.com/ava-labs/platform-cli@latest
+> ```
+>
+> (`go install` names the binary `platform-cli`; alias it to `platform`, or build from source with `go build -o platform .` as shown in the [platform-cli README](https://github.com/ava-labs/platform-cli).)
+>
+> **No extra tool needed:** you can skip platform-cli entirely and export your key directly — `export AVALANCHE_PRIVATE_KEY=0x...`. The tools accept raw hex or `PrivateKey-` CB58. Key precedence: `--key-name` > `AVALANCHE_PRIVATE_KEY` > keystore default.
+>
+> **Funding:** you need ~1.5+ AVAX on the Fuji P-Chain (1 AVAX per validator balance + fees) — fund via <https://core.app/tools/testnet-faucet> (C-Chain) then transfer C→P, or ask in the thread.
 
 ```bash
 # Recommended key flow (platform-cli keystore)
@@ -155,7 +195,7 @@ Your L1 is now running:
 
 - **Direct RPC**: `http://<rpc-ip>:9650/ext/bc/<chain-id>/rpc`
 - **eRPC (recommended)**: `http://<monitoring-ip>:4000` — load balanced, cached, automatic failover
-- **eRPC Health**: `http://<monitoring-ip>:4001/healthcheck`
+- **eRPC Health**: `http://<monitoring-ip>:4000/healthcheck`
 
 ## Optional: Initialize Validator Manager
 
@@ -177,6 +217,24 @@ make initialize-validator-manager \
   PROXY_ADDRESS=0x... \
   EVM_CHAIN_ID=$EVM_CHAIN_ID
 ```
+
+### Warp signature for `initializeValidatorSet`
+
+The final step (`initializeValidatorSet`) needs a BLS-aggregated `SubnetToL1Conversion` warp
+message. Two ways to obtain it:
+
+- **Glacier (public testnet/mainnet L1s):** default. Needs `GLACIER_API_KEY`.
+- **Local signature aggregator (private/custom L1s):** run an `ava-labs/icm-services`
+  `signature-aggregator` peered to your validators (`signing-subnet-id` = your L1 subnet), then
+  pass `-e use_local_sig_agg=true` (and `-e sig_agg_url=...`) to the playbook, or run the tool
+  directly with `--local-sig-agg`. For private L1s, SubnetEVM verifies the conversion message
+  against the **L1's own validator set**, so the signatures must come from your validators, not
+  the Primary Network.
+
+  Also pass the real **conversion ID** with `--conversion-id` (cb58 or `0x`-hex). This is the hash
+  of the conversion *data* and is **not** the `ConvertSubnetToL1Tx` hash (`$CONVERSION_TX`). If a
+  validator rejects the request, its error reports the expected value
+  (`provided conversionID X != expected Y`).
 
 ## Genesis Configuration
 
@@ -201,7 +259,7 @@ Key settings:
 
 ## Kubernetes Alternative
 
-This guide covers the Terraform + Ansible path. To deploy L1 infrastructure on an existing Kubernetes cluster instead, see the [Kubernetes deployment guide](../kubernetes/README.md).
+This guide covers the Terraform + Ansible path. To deploy L1 infrastructure on an existing Kubernetes cluster instead, see the [Kubernetes deployment guide](../../kubernetes/README.md).
 
 ## Next Steps
 

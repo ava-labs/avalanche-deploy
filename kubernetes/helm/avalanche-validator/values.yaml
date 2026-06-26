@@ -44,6 +44,15 @@ l1_validator_config:
   # Partial sync for L1 - faster bootstrap, less storage.
   # AvalancheGo expects a boolean for this flag.
   partialSyncPrimaryNetwork: true
+  # Host headers accepted by the HTTP API (--http-allowed-hosts).
+  # AvalancheGo's built-in default is "localhost" only, which 403-rejects
+  # in-cluster clients that reach the node via service DNS. Empty list =
+  # chart default: localhost, this release's service DNS names (<svc>,
+  # <svc>.<ns>, <svc>.<ns>.svc, <svc>.<ns>.svc.cluster.local) and the
+  # per-pod StatefulSet DNS names (<pod>.<svc>...) for each replica.
+  # Matching is exact (no suffix wildcards); use ["*"] to accept any host
+  # header. IP host headers are always accepted.
+  httpAllowedHosts: []
 
 # Service configuration
 l1_validator_service:

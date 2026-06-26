@@ -94,6 +94,12 @@
   hosts: validators
   become: true
   gather_facts: false
+  vars:
+    # avalanchego runs with HOME=/home/<user> and node.json does not set
+    # staking-tls paths, so keys are auto-generated under ~/.avalanchego/staking.
+    # /var/lib/avalanchego/staking is created by the role but normally unused.
+    staking_dir_home: "/home/{{ avalanchego_user | default('avalanche') }}/.avalanchego/staking"
+    staking_dir_data: /var/lib/avalanchego/staking
   tasks:
     - name: Check if S3 backup is configured
       ansible.builtin.set_fact:
@@ -102,14 +108,44 @@
     - name: Backup staking keys to S3
       when: s3_backup_enabled | bool
       block:
+        - name: Check for staking key in home directory (default location)
+          ansible.builtin.stat:
+            path: "{{ staking_dir_home }}/staker.key"
+          register: staker_key_home
+
+        - name: Check for staking key in data directory (legacy location)
+          ansible.builtin.stat:
+            path: "{{ staking_dir_data }}/staker.key"
+          register: staker_key_data
+
+        - name: Fail if no staking key found in either location
+          ansible.builtin.fail:
+            msg: |
+              No staker.key found in {{ staking_dir_home }} or {{ staking_dir_data }}.
+              The node may not be initialized yet, or the staking key location has changed.
+              Refusing to create an empty backup.
+          when: not staker_key_home.stat.exists and not staker_key_data.stat.exists
+
+        - name: Set staking directory to the location that contains staker.key
+          ansible.builtin.set_fact:
+            staking_dir: "{{ staking_dir_home if staker_key_home.stat.exists else staking_dir_data }}"
+
         - name: Create backup archive
           ansible.builtin.shell: |
             set -euo pipefail
-            tar -czf /tmp/staking-keys-{{ inventory_hostname }}.tar.gz -C /var/lib/avalanchego/staking .
-            chmod 600 /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
+            umask 077
+            tar -czf /tmp/staking-keys-{{ inventory_hostname }}.tar.gz -C {{ staking_dir }} .
           args:
             executable: /bin/bash
           changed_when: true
+
+        - name: Verify backup archive contains staker.key
+          ansible.builtin.shell: |
+            set -euo pipefail
+            tar -tzf /tmp/staking-keys-{{ inventory_hostname }}.tar.gz | grep -q staker.key
+          args:
+            executable: /bin/bash
+          changed_when: false
 
         - name: Upload to S3
           ansible.builtin.command: >

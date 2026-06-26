@@ -39,6 +39,14 @@ primary_rpc_config:
   apiInfoEnabled: true
   apiHealthEnabled: true
   indexEnabled: true  # Enable indexing for RPC queries
+  # Host headers accepted by the HTTP API (--http-allowed-hosts).
+  # AvalancheGo's built-in default is "localhost" only, which 403-rejects
+  # in-cluster clients that reach the node via service DNS (e.g.
+  # http://primary-rpc:9650). Empty list = chart default: localhost plus
+  # this release's service DNS names (<svc>, <svc>.<ns>, <svc>.<ns>.svc,
+  # <svc>.<ns>.svc.cluster.local). Matching is exact (no suffix wildcards);
+  # use ["*"] to accept any host header. IP host headers are always accepted.
+  httpAllowedHosts: []
 
 # Service configuration - LoadBalancer for external access
 primary_rpc_service:

@@ -76,6 +76,11 @@
     state: started
     daemon_reload: true
 
+# Apply any pending config/service changes now so the readiness check below
+# validates the configuration we just rendered, not a stale running instance
+- name: Apply pending Prometheus restarts
+  ansible.builtin.meta: flush_handlers
+
 - name: Wait for Prometheus to be ready
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ prometheus_port }}/-/ready"

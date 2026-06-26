@@ -47,70 +47,11 @@
     - "{{ avalanchego_plugin_dir }}"
     - "{{ avalanchego_config_dir }}/chains"
 
-- name: Download avalanchego
-  ansible.builtin.get_url:
-    url: "https://github.com/ava-labs/avalanchego/releases/download/{{ avalanchego_version }}/avalanchego-linux-amd64-{{ avalanchego_version }}.tar.gz"
-    dest: /tmp/avalanchego.tar.gz
-    mode: "0644"
-
-- name: Extract avalanchego
-  ansible.builtin.unarchive:
-    src: /tmp/avalanchego.tar.gz
-    dest: /tmp/
-    remote_src: true
-
-- name: Install avalanchego binary
-  ansible.builtin.copy:
-    src: "/tmp/avalanchego-{{ avalanchego_version }}/avalanchego"
-    dest: /usr/local/bin/avalanchego
-    owner: root
-    group: root
-    mode: "0755"
-    remote_src: true
-
-# subnet-evm is bundled with avalanchego as of v1.12.0+
-- name: Check if bundled subnet-evm exists in release
-  ansible.builtin.stat:
-    path: "/tmp/avalanchego-{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
-  register: avalanchego_bundled_subnet_evm
-
-- name: Install bundled subnet-evm plugin
-  ansible.builtin.copy:
-    src: "/tmp/avalanchego-{{ avalanchego_version }}/plugins/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
-    dest: "{{ avalanchego_plugin_dir }}/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
-    owner: "{{ avalanchego_user }}"
-    group: "{{ avalanchego_group }}"
-    mode: "0755"
-    remote_src: true
-  when: avalanchego_bundled_subnet_evm.stat.exists
-
-# Fallback for older avalanchego versions that don't bundle subnet-evm
-- name: Download subnet-evm plugin (fallback for older versions)
-  vars:
-    subnet_evm_base: "https://github.com/ava-labs/subnet-evm/releases/download"
-    subnet_evm_file: "subnet-evm_{{ avalanchego_subnet_evm_version | regex_replace('^v', '') }}_linux_amd64.tar.gz"
-  ansible.builtin.get_url:
-    url: "{{ subnet_evm_base }}/{{ avalanchego_subnet_evm_version }}/{{ subnet_evm_file }}"
-    dest: /tmp/subnet-evm.tar.gz
-    mode: "0644"
-  when: not avalanchego_bundled_subnet_evm.stat.exists and avalanchego_subnet_evm_version is defined
-
-- name: Extract subnet-evm (fallback)
-  ansible.builtin.unarchive:
-    src: /tmp/subnet-evm.tar.gz
-    dest: /tmp/
-    remote_src: true
-  when: not avalanchego_bundled_subnet_evm.stat.exists and avalanchego_subnet_evm_version is defined
-
-- name: Install subnet-evm plugin (fallback)
-  ansible.builtin.copy:
-    src: /tmp/subnet-evm
-    dest: "{{ avalanchego_plugin_dir }}/srEXiWaHuhNyGwPUi444Tu47ZEDwxTWrbQiuD7FmgSAQ6X7Dy"
-    owner: "{{ avalanchego_user }}"
-    group: "{{ avalanchego_group }}"
-    mode: "0755"
-    remote_src: true
-  when: not avalanchego_bundled_subnet_evm.stat.exists and avalanchego_subnet_evm_version is defined
+# Idempotent, SHA256-verified binary + plugin install. Skips the download when
+# the installed binary already reports the requested version, and notifies
+# "Restart avalanchego" only when installed files actually change.
+- name: Install avalanchego binary and bundled subnet-evm plugin
+  ansible.builtin.include_tasks: install.yml
 
 - name: Resolve custom node config path
   ansible.builtin.set_fact:
@@ -192,7 +133,62 @@
     state: started
     daemon_reload: true
 
-- name: Wait for P-Chain to bootstrap
+# Apply any pending restart now (binary, plugin, config, or unit changes) so
+# the readiness checks below verify the process that will actually keep
+# running - not a stale process that diverges from what is on disk.
+- name: Apply pending avalanchego restarts before readiness checks
+  ansible.builtin.meta: flush_handlers
+
+# Readiness: a fresh node that is still bootstrapping is fine; a dead service
+# or unreachable API is not.
+- name: Wait for avalanchego API to respond
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ avalanchego_http_port }}/ext/info"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      id: 1
+      method: "info.getNodeVersion"
+    return_content: true
+  register: avalanchego_api_check
+  until: avalanchego_api_check.status == 200
+  retries: "{{ avalanchego_api_wait_retries }}"
+  delay: "{{ avalanchego_api_wait_delay }}"
+
+- name: Read avalanchego service state
+  ansible.builtin.systemd:
+    name: avalanchego
+  register: avalanchego_service_state
+
+- name: Assert avalanchego service is running
+  ansible.builtin.assert:
+    that:
+      - avalanchego_service_state.status.ActiveState == 'active'
+    fail_msg: >-
+      avalanchego service is {{ avalanchego_service_state.status.ActiveState | default('unknown') }}
+      on {{ inventory_hostname }} - check 'journalctl -u avalanchego'
+    success_msg: "avalanchego service is active on {{ inventory_hostname }}"
+
+- name: Wait for P-Chain to bootstrap (strict mode)
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ avalanchego_http_port }}/ext/info"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      id: 1
+      method: "info.isBootstrapped"
+      params:
+        chain: "P"
+    return_content: true
+  register: avalanchego_bootstrap_wait
+  until: avalanchego_bootstrap_wait.status == 200 and (avalanchego_bootstrap_wait.json.result.isBootstrapped | default(false))
+  retries: "{{ avalanchego_bootstrap_retries }}"
+  delay: "{{ avalanchego_bootstrap_delay }}"
+  when: avalanchego_wait_for_bootstrap | bool
+
+- name: Check P-Chain bootstrap progress
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ avalanchego_http_port }}/ext/info"
     method: POST
@@ -205,17 +201,13 @@
         chain: "P"
     return_content: true
   register: avalanchego_bootstrap_check
-  until: avalanchego_bootstrap_check.status == 200 and (avalanchego_bootstrap_check.json.result.isBootstrapped | default(false))
-  retries: 60
-  delay: 10
+  when: not (avalanchego_wait_for_bootstrap | bool)
 
-- name: Clean up temp files
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /tmp/avalanchego.tar.gz
-    - "/tmp/avalanchego-{{ avalanchego_version }}"
-    - /tmp/subnet-evm.tar.gz
-    - /tmp/subnet-evm
-  failed_when: false
+- name: Report bootstrap status
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}:
+      {{ 'P-Chain bootstrapped'
+         if (avalanchego_bootstrap_check.json.result.isBootstrapped | default(false))
+         else 'P-Chain still bootstrapping - normal for a fresh node; the service is up and the API is responding' }}
+  when: not (avalanchego_wait_for_bootstrap | bool)

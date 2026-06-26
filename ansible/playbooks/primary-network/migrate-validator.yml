@@ -20,8 +20,14 @@
 #   3. Download staking keys from S3 to target
 #   4. Stop source validator (brief downtime starts)
 #   5. Start target with staking keys (downtime ends)
-#   6. Verify target is healthy
-#   7. Optionally clean up source
+#   6. Verify target is healthy and NodeIDs match
+#   7. DE-KEY the source: disable avalanchego and quarantine its staking keys so
+#      a reboot/auto-recovery can never resurrect a duplicate NodeID
+#
+# Failure-ordering guarantee: the source is always stopped BEFORE the target is
+# started with the migrated keys, so no failure mode leaves both nodes running
+# with the same NodeID. Rescue messages state which node holds the authoritative
+# keys at every stage.
 
 - name: Validate Migration Parameters
   hosts: localhost
@@ -49,6 +55,12 @@
         that:
           - target_host in groups['all']
         fail_msg: "Target host '{{ target_host }}' not found in inventory"
+
+    - name: Verify source and target are different hosts
+      ansible.builtin.assert:
+        that:
+          - source_host != target_host
+        fail_msg: "source_host and target_host must be different hosts (got '{{ source_host }}' for both)"
 
 - name: Verify Target Node is Ready
   hosts: "{{ target_host | default('localhost') }}"
@@ -141,30 +153,48 @@
       ansible.builtin.set_fact:
         source_staking_dir: "{{ '/var/lib/avalanchego/staking' if staker_crt_configured.stat.exists else '/home/avalanche/.avalanchego/staking' }}"
 
+    # Key material is staged in a private (0700) temp directory and the archive
+    # is created under umask 077, so it is never world-readable, even briefly.
     - name: Backup keys if not in S3
       when: s3_check.rc != 0
       block:
+        - name: Create private staging directory
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: staking-migrate-
+          register: source_staging
+
         - name: Create backup archive
           ansible.builtin.shell: |
             set -euo pipefail
-            tar -czf /tmp/staking-keys-{{ source_host }}.tar.gz -C {{ source_staking_dir }} .
-            chmod 600 /tmp/staking-keys-{{ source_host }}.tar.gz
+            umask 077
+            tar -czf {{ source_staging.path }}/staking-keys-{{ source_host }}.tar.gz -C {{ source_staking_dir }} .
           args:
             executable: /bin/bash
           changed_when: true
 
+        - name: Verify backup archive contains staking key material
+          ansible.builtin.shell: |
+            set -euo pipefail
+            tar -tzf {{ source_staging.path }}/staking-keys-{{ source_host }}.tar.gz | grep -qE '(^|/)staker\.key$'
+            tar -tzf {{ source_staging.path }}/staking-keys-{{ source_host }}.tar.gz | grep -qE '(^|/)staker\.crt$'
+          args:
+            executable: /bin/bash
+          changed_when: false
+
         - name: Upload to S3
           ansible.builtin.command: >
-            aws s3 cp /tmp/staking-keys-{{ source_host }}.tar.gz
+            aws s3 cp {{ source_staging.path }}/staking-keys-{{ source_host }}.tar.gz
             s3://{{ staking_keys_bucket }}/{{ source_host }}/staking-keys.tar.gz
             --sse aws:kms
             --sse-kms-key-id {{ staking_keys_kms_arn }}
           changed_when: true
-
-        - name: Clean up temp file
+      always:
+        - name: Clean up staging directory
           ansible.builtin.file:
-            path: /tmp/staking-keys-{{ source_host }}.tar.gz
+            path: "{{ source_staging.path }}"
             state: absent
+          when: source_staging.path is defined
 
     - name: Get source Node ID
       ansible.builtin.uri:
@@ -191,111 +221,189 @@
   become: true
   gather_facts: false
   tasks:
-    - name: Stop avalanchego on target
-      ansible.builtin.systemd:
-        name: avalanchego
-        state: stopped
+    - name: Install migrated keys on stopped target
+      block:
+        - name: Stop avalanchego on target
+          ansible.builtin.systemd:
+            name: avalanchego
+            state: stopped
 
-    - name: Check for existing staking keys in configured path
-      ansible.builtin.stat:
-        path: /var/lib/avalanchego/staking/staker.crt
-      register: target_crt_configured
+        - name: Check for existing staking keys in configured path
+          ansible.builtin.stat:
+            path: /var/lib/avalanchego/staking/staker.crt
+          register: target_crt_configured
 
-    - name: Check for existing staking keys in default path
-      ansible.builtin.stat:
-        path: /home/avalanche/.avalanchego/staking/staker.crt
-      register: target_crt_default
+        - name: Check for existing staking keys in default path
+          ansible.builtin.stat:
+            path: /home/avalanche/.avalanchego/staking/staker.crt
+          register: target_crt_default
 
-    - name: Set target staking directory
-      ansible.builtin.set_fact:
-        target_staking_dir: "{{ '/var/lib/avalanchego/staking' if target_crt_configured.stat.exists else '/home/avalanche/.avalanchego/staking' }}"
+        - name: Set target staking directory
+          ansible.builtin.set_fact:
+            target_staking_dir: "{{ '/var/lib/avalanchego/staking' if target_crt_configured.stat.exists else '/home/avalanche/.avalanchego/staking' }}"
 
-    - name: Clear existing staking keys on target
-      ansible.builtin.file:
-        path: "{{ target_staking_dir }}/"
-        state: absent
+        - name: Clear existing staking keys on target
+          ansible.builtin.file:
+            path: "{{ target_staking_dir }}/"
+            state: absent
 
-    - name: Recreate staking directory
-      ansible.builtin.file:
-        path: "{{ target_staking_dir }}/"
-        state: directory
-        owner: avalanche
-        group: avalanche
-        mode: '0700'
+        - name: Recreate staking directory
+          ansible.builtin.file:
+            path: "{{ target_staking_dir }}/"
+            state: directory
+            owner: avalanche
+            group: avalanche
+            mode: '0700'
 
-    - name: Download staking keys from S3
-      ansible.builtin.command: >
-        aws s3 cp s3://{{ staking_keys_bucket }}/{{ source_host }}/staking-keys.tar.gz
-        /tmp/staking-keys.tar.gz
-      register: s3_download
-      changed_when: s3_download.rc == 0
+        # Download into a private (0700) temp dir — never shared /tmp — so the
+        # key archive is not world-readable while it sits on disk.
+        - name: Create private staging directory
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: staking-install-
+          register: target_staging
 
-    - name: Extract staking keys
-      ansible.builtin.unarchive:
-        src: /tmp/staking-keys.tar.gz
-        dest: "{{ target_staking_dir }}/"
-        remote_src: true
-        owner: avalanche
-        group: avalanche
+        - name: Download staking keys from S3
+          ansible.builtin.command: >
+            aws s3 cp s3://{{ staking_keys_bucket }}/{{ source_host }}/staking-keys.tar.gz
+            {{ target_staging.path }}/staking-keys.tar.gz
+          register: s3_download
+          changed_when: s3_download.rc == 0
 
-    - name: Clean up downloaded archive
-      ansible.builtin.file:
-        path: /tmp/staking-keys.tar.gz
-        state: absent
+        - name: Extract staking keys
+          ansible.builtin.unarchive:
+            src: "{{ target_staging.path }}/staking-keys.tar.gz"
+            dest: "{{ target_staking_dir }}/"
+            remote_src: true
+            owner: avalanche
+            group: avalanche
 
-    - name: Display preparation status
-      ansible.builtin.debug:
-        msg: "Target node prepared with staking keys from {{ source_host }}"
+        - name: Display preparation status
+          ansible.builtin.debug:
+            msg: "Target node prepared with staking keys from {{ source_host }}"
+      rescue:
+        - name: Target preparation failed — migration aborted before cutover
+          ansible.builtin.debug:
+            msg: |
+              MIGRATION ABORTED during target preparation on {{ inventory_hostname }}.
+
+              Authoritative keys: SOURCE ({{ source_host }}) — it is still running
+              and still validating. No downtime has occurred.
+
+              Target ({{ target_host }}) has been left STOPPED and may contain a
+              partial copy of the source's staking keys. Do NOT start avalanchego
+              on the target while the source is running, or the network will see
+              a duplicate NodeID.
+
+              Fix the error below and re-run this playbook.
+
+        - name: Re-raise target preparation failure
+          ansible.builtin.fail:
+            msg: "Target preparation failed at '{{ ansible_failed_task.name }}': {{ ansible_failed_result.msg | default(ansible_failed_result) }}"
+      always:
+        - name: Clean up staging directory
+          ansible.builtin.file:
+            path: "{{ target_staging.path }}"
+            state: absent
+          when: target_staging is defined and target_staging.path is defined
 
 - name: Execute Migration (DOWNTIME BEGINS)
   hosts: "{{ source_host | default('localhost') }}"
   become: true
   gather_facts: false
   tasks:
-    - name: "MIGRATION: Stopping source validator (downtime begins)"
-      ansible.builtin.systemd:
-        name: avalanchego
-        state: stopped
+    - name: Stop source validator
+      block:
+        - name: "MIGRATION: Stopping source validator (downtime begins)"
+          ansible.builtin.systemd:
+            name: avalanchego
+            state: stopped
 
-    - name: Record migration timestamp
-      ansible.builtin.debug:
-        msg: "Source validator stopped at {{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ')) }}"
+        - name: Record migration timestamp
+          ansible.builtin.debug:
+            msg: "Source validator stopped at {{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ')) }}"
+      rescue:
+        - name: Source stop failed — cutover NOT performed
+          ansible.builtin.debug:
+            msg: |
+              FAILED to stop avalanchego on the source ({{ source_host }}).
+
+              Authoritative keys: SOURCE ({{ source_host }}) — assume it is still
+              running. The target ({{ target_host }}) is stopped but already holds
+              a copy of the staking keys.
+
+              Do NOT start avalanchego on the target until you have confirmed the
+              source is stopped (sudo systemctl status avalanchego on the source).
+              Then either re-run this playbook or start the target manually.
+
+        - name: Re-raise source stop failure
+          ansible.builtin.fail:
+            msg: "Failed to stop source validator: {{ ansible_failed_result.msg | default(ansible_failed_result) }}"
 
 - name: Start Target Validator (DOWNTIME ENDS)
   hosts: "{{ target_host | default('localhost') }}"
   become: true
   gather_facts: false
   tasks:
-    - name: "MIGRATION: Starting target validator (downtime ends)"
-      ansible.builtin.systemd:
-        name: avalanchego
-        state: started
+    - name: Start target with migrated keys
+      block:
+        - name: "MIGRATION: Starting target validator (downtime ends)"
+          ansible.builtin.systemd:
+            name: avalanchego
+            state: started
 
-    - name: Wait for target to be healthy
-      ansible.builtin.uri:
-        url: "http://127.0.0.1:9650/ext/health"
-        method: GET
-        return_content: true
-      register: health_check
-      until: health_check.status == 200 and (health_check.json.healthy | default(false))
-      retries: 30
-      delay: 10
+        - name: Wait for target to be healthy
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:9650/ext/health"
+            method: GET
+            return_content: true
+          register: health_check
+          until: health_check.status == 200 and (health_check.json.healthy | default(false))
+          retries: 30
+          delay: 10
 
-    - name: Get target Node ID
-      ansible.builtin.uri:
-        url: "http://127.0.0.1:9650/ext/info"
-        method: POST
-        body_format: json
-        body:
-          jsonrpc: "2.0"
-          id: 1
-          method: "info.getNodeID"
-        return_content: true
-      register: target_node_info
+        - name: Get target Node ID
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:9650/ext/info"
+            method: POST
+            body_format: json
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: "info.getNodeID"
+            return_content: true
+          register: target_node_info
 
-    - name: Display target Node ID
-      ansible.builtin.debug:
-        msg: "Target Node ID: {{ target_node_info.json.result.nodeID }}"
+        - name: Display target Node ID
+          ansible.builtin.debug:
+            msg: "Target Node ID: {{ target_node_info.json.result.nodeID }}"
+      rescue:
+        - name: Target start/health-check failed after cutover
+          ansible.builtin.debug:
+            msg: |
+              TARGET ({{ target_host }}) failed to start or pass health checks
+              AFTER the source was stopped.
+
+              Authoritative keys: TARGET ({{ target_host }}) — the source
+              ({{ source_host }}) is STOPPED and must stay stopped. The validator
+              is currently DOWN (uptime is accruing against you).
+
+              Next steps:
+                1. Investigate on the target:
+                     sudo systemctl status avalanchego
+                     sudo journalctl -u avalanchego -n 200
+                2. If the target can be fixed, fix and start it — do nothing on
+                   the source.
+                3. ROLLBACK (only if the target is unrecoverable): first confirm
+                   the target is fully stopped
+                   (sudo systemctl disable --now avalanchego on {{ target_host }}),
+                   then start the source
+                   (sudo systemctl start avalanchego on {{ source_host }}).
+                   Never run both at once — duplicate NodeID.
+
+        - name: Re-raise target start failure
+          ansible.builtin.fail:
+            msg: "Target failed to start/become healthy: {{ ansible_failed_result.msg | default(ansible_failed_result) }}"
 
 - name: Verify Migration Success
   hosts: localhost
@@ -314,8 +422,187 @@
           Node ID mismatch! Migration may have failed.
           Source: {{ source_id }}
           Target: {{ target_id }}
+
+          The source ({{ source_host }}) is stopped and the target
+          ({{ target_host }}) is running with a DIFFERENT NodeID. The source's
+          keys were NOT de-keyed. Investigate before starting anything.
         success_msg: "Node ID verified: {{ source_id }}"
 
+- name: De-Key Source Validator (Prevents Duplicate NodeID)
+  hosts: "{{ source_host | default('localhost') }}"
+  become: true
+  # Facts needed for ansible_date_time (quarantine directory timestamp)
+  gather_facts: true
+  tasks:
+    - name: De-key source so a reboot can never resurrect the migrated NodeID
+      block:
+        - name: Stop and disable avalanchego on source
+          ansible.builtin.systemd:
+            name: avalanchego
+            state: stopped
+            enabled: false
+
+        - name: Check for staking keys in configured path
+          ansible.builtin.stat:
+            path: /var/lib/avalanchego/staking/staker.crt
+          register: dekey_crt_configured
+
+        - name: Check for staking keys in default path
+          ansible.builtin.stat:
+            path: /home/avalanche/.avalanchego/staking/staker.crt
+          register: dekey_crt_default
+
+        - name: Determine live staking directory
+          ansible.builtin.set_fact:
+            dekey_staking_dir: "{{ '/var/lib/avalanchego/staking' if dekey_crt_configured.stat.exists else '/home/avalanche/.avalanchego/staking' }}"
+            dekey_keys_present: "{{ dekey_crt_configured.stat.exists or dekey_crt_default.stat.exists }}"
+
+        - name: Set quarantine path
+          ansible.builtin.set_fact:
+            quarantine_dir: "{{ dekey_staking_dir }}.migrated-{{ ansible_date_time.iso8601_basic_short }}"
+
+        - name: Quarantine staking keys (preserved for rollback)
+          ansible.builtin.command: mv {{ dekey_staking_dir }} {{ quarantine_dir }}
+          args:
+            removes: "{{ dekey_staking_dir }}"
+          when: dekey_keys_present | bool
+          changed_when: true
+
+        - name: Restrict quarantine directory permissions
+          ansible.builtin.file:
+            path: "{{ quarantine_dir }}"
+            state: directory
+            owner: avalanche
+            group: avalanche
+            mode: '0700'
+          when: dekey_keys_present | bool
+
+        - name: Find quarantined key files
+          ansible.builtin.find:
+            paths: "{{ quarantine_dir }}"
+            file_type: file
+            recurse: true
+          register: quarantined_files
+          when: dekey_keys_present | bool
+
+        - name: Restrict quarantined key file permissions
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            owner: avalanche
+            group: avalanche
+            mode: '0600'
+          loop: "{{ quarantined_files.files | default([]) }}"
+          loop_control:
+            label: "{{ item.path }}"
+          when: dekey_keys_present | bool
+
+        # ----- Post-conditions: assert, don't just print -----
+        # Deliberately query systemctl directly instead of trusting the systemd
+        # module call above to verify its own work.
+        - name: Check avalanchego unit active state
+          ansible.builtin.command: systemctl is-active avalanchego # noqa: command-instead-of-module
+          register: dekey_unit_active
+          failed_when: false
+          changed_when: false
+
+        - name: Check avalanchego unit enabled state
+          ansible.builtin.command: systemctl is-enabled avalanchego # noqa: command-instead-of-module
+          register: dekey_unit_enabled
+          failed_when: false
+          changed_when: false
+
+        - name: Check for running avalanchego process
+          ansible.builtin.command: pgrep -x avalanchego
+          register: dekey_process
+          failed_when: false
+          changed_when: false
+
+        # Stat the key files rather than the directories: an empty
+        # /var/lib/avalanchego/staking dir legitimately exists on nodes whose
+        # keys live in the home path. The safety property is that NO key
+        # material remains at any live path.
+        - name: Check live staking paths hold no key material
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          register: dekey_live_paths
+          loop:
+            - /var/lib/avalanchego/staking/staker.key
+            - /var/lib/avalanchego/staking/staker.crt
+            - /home/avalanche/.avalanchego/staking/staker.key
+            - /home/avalanche/.avalanchego/staking/staker.crt
+
+        - name: Check quarantine directory exists
+          ansible.builtin.stat:
+            path: "{{ quarantine_dir }}"
+          register: dekey_quarantine_stat
+
+        - name: Assert source is fully de-keyed
+          ansible.builtin.assert:
+            that:
+              - dekey_unit_active.stdout | trim in ['inactive', 'failed']
+              - dekey_unit_enabled.stdout | trim in ['disabled', 'masked']
+              - dekey_process.rc != 0
+              - dekey_live_paths.results | selectattr('stat.exists') | list | length == 0
+              - (not (dekey_keys_present | bool)) or dekey_quarantine_stat.stat.exists
+            fail_msg: |
+              Source de-keying post-conditions FAILED on {{ inventory_hostname }}:
+                unit active state: {{ dekey_unit_active.stdout | trim }} (expected inactive)
+                unit enabled state: {{ dekey_unit_enabled.stdout | trim }} (expected disabled)
+                avalanchego process running: {{ dekey_process.rc == 0 }} (expected false)
+                key material still at live paths: {{ dekey_live_paths.results | selectattr('stat.exists') | map(attribute='item') | list }}
+                quarantine present: {{ dekey_quarantine_stat.stat.exists }}
+              The source may still be able to come back with the migrated NodeID.
+              Fix this manually before walking away.
+            success_msg: "Source {{ inventory_hostname }} is de-keyed: unit stopped+disabled, no process, keys quarantined."
+
+        - name: "SOURCE DE-KEYED — operator notice"
+          ansible.builtin.debug:
+            msg: |
+
+              ============================================
+              SOURCE NODE DE-KEYED: {{ inventory_hostname }}
+              ============================================
+
+              - avalanchego is STOPPED and DISABLED: a reboot or instance
+                auto-recovery will NOT bring the old validator back.
+              - Staking keys are preserved in quarantine:
+                  {{ quarantine_dir }}
+              - If avalanchego is ever started on this node again, it will
+                generate a fresh NodeID and cannot collide with the live
+                validator on {{ target_host }}.
+
+              ROLLBACK (only if you must move the validator back here):
+                1. STOP the target first:
+                     ssh {{ target_host }} sudo systemctl disable --now avalanchego
+                2. On this node:
+                     sudo mv {{ quarantine_dir }} {{ dekey_staking_dir }}
+                     sudo systemctl enable --now avalanchego
+                NEVER run both nodes with these keys at the same time.
+              ============================================
+      rescue:
+        - name: De-keying failed — manual action REQUIRED on source
+          ansible.builtin.debug:
+            msg: |
+              DE-KEYING of the source ({{ inventory_hostname }}) FAILED partway.
+
+              The migration itself succeeded: the target ({{ target_host }}) is
+              LIVE and holds the authoritative keys. But the source may still be
+              able to restart with the same NodeID after a reboot — that would
+              put a duplicate NodeID on the network.
+
+              Manually verify on {{ inventory_hostname }} before walking away:
+                sudo systemctl disable --now avalanchego
+                sudo mv /var/lib/avalanchego/staking /var/lib/avalanchego/staking.migrated-$(date -u +%Y%m%dT%H%M%S)
+                # (or ~avalanche/.avalanchego/staking if that is the live path)
+
+        - name: Re-raise de-keying failure
+          ansible.builtin.fail:
+            msg: "De-keying failed at '{{ ansible_failed_task.name }}': {{ ansible_failed_result.msg | default(ansible_failed_result) }}"
+
+- name: Migration Summary
+  hosts: localhost
+  gather_facts: false
+  tasks:
     - name: Display migration summary
       ansible.builtin.debug:
         msg: |
@@ -324,10 +611,13 @@
           MIGRATION COMPLETE
           ============================================
 
-          Node ID: {{ source_id }}
+          Node ID: {{ hostvars[source_host]['source_node_id'] }}
           From: {{ source_host }} -> {{ target_host }}
 
           The validator is now running on {{ target_host }}.
+          The source ({{ source_host }}) has been DE-KEYED:
+            - avalanchego stopped AND disabled (reboot-safe)
+            - keys quarantined at {{ hostvars[source_host]['quarantine_dir'] | default('(no live keys found)') }}
 
           Post-migration tasks:
           1. Monitor new validator health:

@@ -66,3 +66,27 @@ Network ID based on network name
 {{- define "l1-validator.networkId" -}}
 {{- if eq .Values.network "mainnet" }}1{{- else }}5{{- end }}
 {{- end }}
+
+{{/*
+HTTP allowed hosts (--http-allowed-hosts).
+AvalancheGo only accepts API requests whose Host header is an IP address,
+matches this list exactly (case-insensitive), or when the list contains the
+global wildcard "*" — suffix wildcards are NOT supported. Its built-in
+default ("localhost") 403-rejects every in-cluster client that reaches the
+node via service DNS. Default here: localhost, this release's (headless)
+service DNS variants, and the per-pod StatefulSet DNS names for each replica.
+*/}}
+{{- define "l1-validator.httpAllowedHosts" -}}
+{{- if .Values.l1_validator_config.httpAllowedHosts -}}
+{{- join "," .Values.l1_validator_config.httpAllowedHosts -}}
+{{- else -}}
+{{- $svc := include "l1-validator.fullname" . -}}
+{{- $ns := .Release.Namespace -}}
+{{- $hosts := list "localhost" $svc (printf "%s.%s" $svc $ns) (printf "%s.%s.svc" $svc $ns) (printf "%s.%s.svc.cluster.local" $svc $ns) -}}
+{{- range $i := until (int .Values.l1_validator_replicas) -}}
+{{- $pod := printf "%s-%d" $svc $i -}}
+{{- $hosts = concat $hosts (list (printf "%s.%s" $pod $svc) (printf "%s.%s.%s" $pod $svc $ns) (printf "%s.%s.%s.svc" $pod $svc $ns) (printf "%s.%s.%s.svc.cluster.local" $pod $svc $ns)) -}}
+{{- end -}}
+{{- join "," $hosts -}}
+{{- end -}}
+{{- end }}

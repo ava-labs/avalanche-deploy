@@ -1,0 +1,62 @@
+diff --git a/client/src/components/ReCaptcha.ts b/client/src/components/ReCaptcha.ts
+index 44bf290..49293bc 100644
+--- a/client/src/components/ReCaptcha.ts
++++ b/client/src/components/ReCaptcha.ts
+@@ -20,6 +20,9 @@ export default class ReCaptcha {
+     }
+ 
+     async getToken(isV2 = true, widgetID: any, index: number = 0): Promise<{token?: string, v2Token?: string}> {
++        if (!this.v2siteKey && !this.siteKey) {
++            return { token: '', v2Token: '' }
++        }
+         let token = "", v2Token = ""
+         !isV2 && await window.grecaptcha.execute(this.siteKey, {action: this.action})
+             .then((res: string) => {
+@@ -44,6 +47,9 @@ export default class ReCaptcha {
+     }
+ 
+     loadV2Captcha = (v2siteKey: string, widgetID: any, index: number = 0, reload: boolean = false) => {
++        if (!v2siteKey) {
++            return true
++        }
+         this.resetV2Captcha(widgetID, index)
+         const v2CaptchaContainer = document.getElementsByClassName('v2-recaptcha')[index] as HTMLElement
+         if((widgetID.get(index) || widgetID.get(index) == "0") && !reload) {
+@@ -65,6 +71,9 @@ export default class ReCaptcha {
+     }
+ 
+     loadReCaptcha = (siteKey: string): boolean => {
++        if (!siteKey) {
++            return true
++        }
+         const script = document.createElement('script')
+         script.src = `https://www.recaptcha.net/recaptcha/api.js?render=${siteKey}`
+ 
+diff --git a/middlewares/verifyCaptcha.ts b/middlewares/verifyCaptcha.ts
+index 0f24693..2f57707 100644
+--- a/middlewares/verifyCaptcha.ts
++++ b/middlewares/verifyCaptcha.ts
+@@ -70,6 +70,10 @@ export class VerifyCaptcha {
+     }
+ 
+     async shouldAllow(token: string, v2Token: string): Promise<boolean> {
++        // Captcha explicitly disabled for private/internal faucet deployments
++        if (this.secret === 'DISABLED') {
++            return true
++        }
+         // temporarily turn-off recaptcha v3 verifications
+         if(false && await this.verifyV3Token(token)) {
+             return true
+diff --git a/server.ts b/server.ts
+index e157c7e..3c21582 100644
+--- a/server.ts
++++ b/server.ts
+@@ -130,7 +130,7 @@ erc20tokens.forEach((token: any, i: number): void => {
+         token = populateConfig(token, getChainByID(evmchains, token.HOSTID))
+     }
+ 
+-    erc20tokens[i] = token
++    ;(erc20tokens as any[])[i] = token
+     const evm: EVMInstanceAndConfig = evms.get(getChainByID(evmchains, token.HOSTID)?.ID!)!
+ 
+     evm?.instance.addERC20Contract(token)
