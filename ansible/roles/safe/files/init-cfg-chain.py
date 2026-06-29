@@ -22,6 +22,7 @@ django.setup()
 
 from django.core.files.base import ContentFile
 from chains.models import Chain, Feature, Wallet, GasPrice
+from safe_apps.models import SafeApp
 
 
 def create_placeholder_image(color: str = "#E84142") -> ContentFile:
@@ -100,6 +101,9 @@ def main():
         if updated:
             chain.save()
             print("  Updated contract addresses")
+        # Re-seed Safe Apps so existing deployments pick up Tx Builder without
+        # requiring a full chain re-init. idempotent via update_or_create.
+        seed_default_apps(args.chain_id)
         return 0
     except Chain.DoesNotExist:
         pass
@@ -191,8 +195,59 @@ def main():
             print(f"  WARNING: Could not add feature {key}: {e}")
     print(f"  Enabled {added}/{len(default_features)} features")
 
+    # Seed default Safe Apps (Transaction Builder, Drain Account, CSV Airdrop).
+    # The SAFE_APPS feature flag only controls whether the UI renders the Apps tab;
+    # the actual list comes from safe_apps_safeapp rows joined by chain_id.
+    # Without these records the tab is empty and Tx Builder is unreachable.
+    seed_default_apps(args.chain_id)
+
     print("\nDone.")
     return 0
+
+
+def seed_default_apps(chain_id: int) -> None:
+    """Register hosted Safe Apps so they appear in the UI for this chain.
+
+    Apps are hosted on apps-portal.safe.global — we only register URL metadata,
+    no self-hosting required. update_or_create by URL keeps this idempotent and
+    adds the new chain_id to any existing app record.
+    """
+    default_apps = [
+        {
+            'url': 'https://apps-portal.safe.global/tx-builder',
+            'name': 'Transaction Builder',
+            'description': 'Compose custom contract interactions and batch them into a single transaction',
+        },
+        {
+            'url': 'https://apps-portal.safe.global/drain-safe',
+            'name': 'Drain Account',
+            'description': 'Transfer all assets from a Safe to another wallet',
+        },
+        {
+            'url': 'https://apps-portal.safe.global/csv-airdrop',
+            'name': 'CSV Airdrop',
+            'description': 'Send ERC20 or native token transfers to many recipients at once',
+        },
+    ]
+    seeded = 0
+    for spec in default_apps:
+        try:
+            app, created = SafeApp.objects.get_or_create(
+                url=spec['url'],
+                defaults={
+                    'name': spec['name'],
+                    'description': spec['description'],
+                    'chain_ids': [chain_id],
+                    'listed': True,
+                },
+            )
+            if not created and chain_id not in (app.chain_ids or []):
+                app.chain_ids = list(app.chain_ids or []) + [chain_id]
+                app.save(update_fields=['chain_ids'])
+            seeded += 1
+        except Exception as e:
+            print(f"  WARNING: Could not register Safe App {spec['name']}: {e}")
+    print(f"  Registered {seeded}/{len(default_apps)} Safe Apps for chain {chain_id}")
 
 
 if __name__ == '__main__':

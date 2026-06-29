@@ -11,6 +11,12 @@ terraform {
 
 provider "aws" {
   region = var.region
+
+  # Some org SCPs deny resource creation without an Owner tag.
+  # default_tags applies it to every taggable resource, including IAM and S3.
+  default_tags {
+    tags = var.owner_tag != "" ? { Owner = var.owner_tag } : {}
+  }
 }
 
 # Get operator IP automatically
@@ -215,6 +221,15 @@ resource "aws_security_group" "rpc" {
     cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
   }
 
+  # Blockscout HTTPS - configurable (served by the Safe host's nginx on a dedicated 4443 server block)
+  ingress {
+    description = "Blockscout HTTPS via Safe host nginx"
+    from_port   = 4443
+    to_port     = 4443
+    protocol    = "tcp"
+    cidr_blocks = var.enable_public_blockscout ? ["0.0.0.0/0"] : [local.operator_cidr]
+  }
+
   # Safe Multisig UI - configurable (runs on RPC node)
   ingress {
     description = "Safe UI"
@@ -222,6 +237,15 @@ resource "aws_security_group" "rpc" {
     to_port     = 3000
     protocol    = "tcp"
     cidr_blocks = var.enable_public_safe ? ["0.0.0.0/0"] : [local.operator_cidr]
+  }
+
+  # Faucet UI/API - configurable (runs on RPC node)
+  ingress {
+    description = "Faucet"
+    from_port   = 8010
+    to_port     = 8010
+    protocol    = "tcp"
+    cidr_blocks = var.enable_public_faucet ? ["0.0.0.0/0"] : [local.operator_cidr]
   }
 
   # Safe Client Gateway - configurable (runs on RPC node, needed by UI)

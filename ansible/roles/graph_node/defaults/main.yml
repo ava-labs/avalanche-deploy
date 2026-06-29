@@ -1,8 +1,16 @@
 ---
 # Graph Node defaults
 
+# Docker images - pinned so re-running the playbook never silently upgrades a
+# running stack (latest published release tags verified on the registries, 2026-06).
 # Graph Node version (Docker image tag)
-graph_node_version: latest
+graph_node_version: v0.44.0
+
+# IPFS (kubo) image used for subgraph file storage
+graph_node_ipfs_image: ipfs/kubo:v0.42.0
+
+# PostgreSQL image (major-pinned official image)
+graph_node_postgres_image: postgres:15-alpine
 
 # Network name shown in Graph Node logs and subgraph manifests
 graph_node_network_name: avalanche-l1
@@ -25,7 +33,9 @@ graph_node_ipfs_port: 5001
 # PostgreSQL configuration
 graph_node_postgres_user: graph
 graph_node_postgres_db: graph
-# graph_node_postgres_password: auto-generated if not set
+# Auto-generated on first run and persisted to /opt/graph-node/.postgres_password
+# (set as a fact in tasks/main.yml; leave empty to use the persisted value)
+graph_node_postgres_password: ""
 
 # RPC host (defaults to localhost, assuming Graph Node runs on RPC node)
 # graph_node_rpc_host: 127.0.0.1

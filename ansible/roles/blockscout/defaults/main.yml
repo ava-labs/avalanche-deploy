@@ -37,18 +37,29 @@ blockscout_ws_port: 4002
 # PostgreSQL configuration
 blockscout_db_name: blockscout
 blockscout_db_user: blockscout
-blockscout_db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+# Auto-generated on first run and persisted to {{ blockscout_install_dir }}/.db_password
+# (set as a fact in tasks/main.yml; leave empty to use the persisted value)
+blockscout_db_password: ""
 blockscout_db_port: 5432
 
-# Docker images
-blockscout_backend_image: blockscout/blockscout:latest
-blockscout_frontend_image: ghcr.io/blockscout/frontend:latest
+# Phoenix SECRET_KEY_BASE for the backend
+# Auto-generated on first run and persisted to {{ blockscout_install_dir }}/.secret_key_base
+# (set as a fact in tasks/main.yml; leave empty to use the persisted value)
+blockscout_secret_key_base: ""
+
+# Docker images - pinned so re-running the playbook never silently upgrades a
+# running stack (latest published release tags verified on the registries, 2026-06).
+# Note: docker.io/blockscout/blockscout stopped receiving release tags in 2025;
+# current backend releases are published to ghcr.io only.
+# Bump deliberately and re-run with -e force_pull=true to re-pull a moved tag.
+blockscout_backend_image: ghcr.io/blockscout/blockscout:9.0.2
+blockscout_frontend_image: ghcr.io/blockscout/frontend:v2.3.5
 blockscout_postgres_image: postgres:15-alpine
 blockscout_redis_image: redis:7-alpine
-blockscout_sig_provider_image: ghcr.io/blockscout/sig-provider:latest
-blockscout_smart_contract_verifier_image: ghcr.io/blockscout/smart-contract-verifier:latest
-blockscout_visualizer_image: ghcr.io/blockscout/visualizer:latest
-blockscout_stats_image: ghcr.io/blockscout/stats:latest
+blockscout_sig_provider_image: ghcr.io/blockscout/sig-provider:v1.1.1
+blockscout_smart_contract_verifier_image: ghcr.io/blockscout/smart-contract-verifier:v1.10.3
+blockscout_visualizer_image: ghcr.io/blockscout/visualizer:v0.2.1
+blockscout_stats_image: ghcr.io/blockscout/stats:v2.16.0
 
 # Feature flags
 blockscout_disable_exchange_rates: true

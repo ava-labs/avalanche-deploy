@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:15-alpine
+    image: {{ graph_node_postgres_image | default('postgres:15-alpine') }}
     container_name: graph-postgres
     restart: unless-stopped
     environment:
@@ -21,7 +21,7 @@ services:
       - graph-network
 
   ipfs:
-    image: ipfs/kubo:latest
+    image: {{ graph_node_ipfs_image | default('ipfs/kubo:v0.42.0') }}
     container_name: graph-ipfs
     restart: unless-stopped
     environment:
@@ -39,7 +39,7 @@ services:
       - graph-network
 
   graph-node:
-    image: graphprotocol/graph-node:{{ graph_node_version | default('latest') }}
+    image: graphprotocol/graph-node:{{ graph_node_version | default('v0.44.0') }}
     container_name: graph-node
     restart: unless-stopped
     depends_on:

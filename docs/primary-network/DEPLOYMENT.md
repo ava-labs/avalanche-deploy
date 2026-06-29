@@ -117,13 +117,22 @@ make list-snapshots CLOUD=aws
 make restore-snapshot CLOUD=aws TARGET=migration-target
 make restore-snapshot CLOUD=aws TARGET=migration-target SNAPSHOT=mainnet-2025-02
 
-# Restore with integrity verification (slower but safer)
+# Restore with integrity verification (recommended)
 cd ansible && ansible-playbook -i inventory/aws_hosts playbooks/primary-network/restore-snapshot.yml \
-  --limit migration-target \
+  -e target_host=migration-target \
   -e verify_integrity=true
 ```
 
 Snapshots are stored in S3 with KMS encryption and SHA256 checksums. A **pruned mainnet snapshot is ~400GB** and restores in minutes vs hours for state sync.
+
+With `verify_integrity=true`, the snapshot is downloaded and its SHA256 verified **before** the old database is wiped — a missing or mismatched checksum is a hard failure, and the node restarts on its original database. To restore despite a lost checksum file (accepting the corruption risk), you must pass `-e skip_checksum_verification=true` explicitly. The default streaming mode is faster but performs **no** integrity check.
+
+Restore failure semantics:
+
+- **Failure before the database wipe** (download/verification stage): avalanchego is restarted on its original database and the run fails. The node is exactly as it was.
+- **Failure after the wipe** (partial restore): the node is deliberately left **stopped** — it is never silently restarted onto a half-restored database. The failure output states the exact node state and the recovery options (re-run the restore, or wipe `db/` and start avalanchego to state-sync).
+
+`create-snapshot.yml` always restarts avalanchego, even when archiving or upload fails (the run still exits red).
 
 ## Validator Migration
 
@@ -155,6 +164,10 @@ sequenceDiagram
     New-->>New: Start with staking keys
     New->>Network: Validating (same NodeID)
 
+    Note over Old: Phase 5: De-key Source
+    Old-->>Old: Disable avalanchego (reboot-safe)
+    Old-->>Old: Quarantine staking keys
+
     Note over New,Network: Migration Complete
 ```
 
@@ -177,6 +190,25 @@ make prepare-migration CLOUD=aws NODE=migration-target
 make migrate-validator CLOUD=aws SOURCE=primary-validator-1 TARGET=migration-target
 ```
 
+### Source De-keying (automatic)
+
+After the NodeID is verified on the new node, the playbook **de-keys the source** so a reboot or EC2 auto-recovery can never resurrect a duplicate NodeID against the live validator:
+
+- `avalanchego` is stopped **and disabled** on the source.
+- The staking key directory is moved aside to a quarantine path (`staking.migrated-<timestamp>`, mode `0700`, key files `0600`) — preserved for rollback, but an accidental start would generate a brand-new NodeID instead of the migrated one.
+- The end state is asserted (unit inactive + disabled, no avalanchego process, live staking dir absent), not just printed.
+
+**Rollback** (move the validator back to the source): stop and disable avalanchego on the target first, then on the source `mv` the quarantine directory back to the staking path and `systemctl enable --now avalanchego`. Never run both nodes with the same keys simultaneously.
+
+### Migration Failure Semantics
+
+The source is always stopped **before** the target starts with the migrated keys, so no failure mode leaves both nodes running with the same NodeID. On any mid-migration failure, the rescue output states which node holds the authoritative keys and what to do next:
+
+- **Failure while preparing the target** (key download/install): source is still running and authoritative; target is left stopped. Re-run after fixing.
+- **Failure stopping the source**: source is authoritative; do not start the target until the source is confirmed stopped.
+- **Failure starting the target after cutover**: target holds the authoritative keys; the source stays stopped. Fix the target, or roll back only after the target is fully stopped.
+- **Failure during de-keying**: the migration succeeded (target is live); manually verify the source is stopped, disabled, and de-keyed before walking away.
+
 ## Cost Estimate
 
 | Component | Instance | Storage | Monthly (us-east-1) |
@@ -188,7 +220,7 @@ make migrate-validator CLOUD=aws SOURCE=primary-validator-1 TARGET=migration-tar
 
 ## Terraform Configuration
 
-Edit `terraform/l1/aws/terraform.tfvars`:
+Edit `terraform/primary-network/aws/terraform.tfvars`:
 
 ```hcl
 primary_validator_count = 1    # Number of Primary Network validators
@@ -198,9 +230,26 @@ enable_staking_key_backup = true  # S3 backup for staking keys
 Primary validator runtime config is stored at:
 `configs/primary-network/node/primary-validator-node-config.json`
 
+### Remote State (optional, recommended for teams)
+
+Local `terraform.tfstate` is the default. For shared/locking state, this root
+ships an opt-in S3 backend example:
+
+```bash
+cd terraform/primary-network/aws
+cp backend.tf.example backend.tf   # edit bucket/region/locking inside
+terraform init -migrate-state
+```
+
+The bucket must pre-exist (never created by Terraform — some accounts deny
+`s3:CreateBucket` via SCP), the `key` is distinct from the `l1/aws` root, and
+all operators of a deployment must migrate together (commit `backend.tf`).
+See the "Remote State" section in [docs/l1/DEPLOYMENT.md](../l1/DEPLOYMENT.md)
+for full details, including the state-locking options per Terraform version.
+
 ## Kubernetes Alternative
 
-This guide covers the Terraform + Ansible path (AWS). To deploy Primary Network nodes on an existing Kubernetes cluster instead, see the [Kubernetes deployment guide](../kubernetes/README.md).
+This guide covers the Terraform + Ansible path (AWS). To deploy Primary Network nodes on an existing Kubernetes cluster instead, see the [Kubernetes deployment guide](../../kubernetes/README.md).
 
 ## Next Steps
 

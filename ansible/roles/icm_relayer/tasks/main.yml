@@ -89,6 +89,7 @@
     owner: icmrelayer
     group: icmrelayer
     mode: '0644'
+  notify: Restart icm-relayer
 
 - name: Create systemd service
   ansible.builtin.template:
@@ -104,6 +105,12 @@
     enabled: true
     daemon_reload: true
 
+# Apply any pending config/compose changes now (systemd stop/start = compose
+# down + up, which re-reads env files) so the readiness check below validates
+# the configuration we just rendered, not a stale running stack
+- name: Apply pending ICM Relayer restarts
+  ansible.builtin.meta: flush_handlers
+
 - name: Wait for ICM Relayer to be ready
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ icm_relayer_api_port | default(8080) }}/health"
@@ -113,4 +120,3 @@
   until: icm_relayer_health.status == 200
   retries: 30
   delay: 5
-  ignore_errors: true

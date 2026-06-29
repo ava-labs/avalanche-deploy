@@ -1,57 +1,119 @@
 ---
 # Reset L1 - Wipe chain data and prepare for new L1 creation
-# Use this when you need to redeploy with a new genesis
+# Use this when you need to redeploy with a new genesis.
+#
+# Contract: wipes chain data, KEEPS staking keys (NodeIDs are preserved).
+#
+# Real node layout (see ansible/roles/avalanchego/defaults/main.yml):
+#   data:         /var/lib/avalanchego (db at /var/lib/avalanchego/db)
+#   config:       /etc/avalanchego/node.json (+ chain configs in /etc/avalanchego/chains/)
+#   staking keys: /home/avalanche/.avalanchego/staking (NEVER touched here)
+#   chain data:   /home/avalanche/.avalanchego/chainData (VM-managed L1 chain data)
+#   service:      avalanchego
+#
+# Note: avalanchego stores all chains (Primary Network + tracked L1s) in a single
+# shared LevelDB under /var/lib/avalanchego/db, so the L1 chain database cannot be
+# wiped in isolation. The whole db dir is removed and the node re-bootstraps the
+# primary network (fast with partial-sync-primary-network).
 #
 # Usage: ansible-playbook ansible/playbooks/l1/reset.yml
 
 - name: Reset L1 chain data
-  hosts: all
+  hosts: validators:rpc
   become: true
+  gather_facts: false
+
   vars:
-    avalanche_home: /opt/avalanche
+    avalanchego_data_dir: /var/lib/avalanchego
+    avalanchego_config_dir: /etc/avalanchego
+    avalanchego_user: avalanche
+    avalanchego_group: avalanche
+    avalanchego_db_dir: "{{ avalanchego_data_dir }}/db"
+    avalanchego_chain_data_dir: "/home/{{ avalanchego_user }}/.avalanchego/chainData"
+    l1_tracking_keys:
+      - track-subnets
+      - bootstrap-ids
+      - bootstrap-ips
 
   tasks:
+    - name: Check database directory exists
+      ansible.builtin.stat:
+        path: "{{ avalanchego_db_dir }}"
+      register: db_dir_stat
+
+    - name: Check node configuration exists
+      ansible.builtin.stat:
+        path: "{{ avalanchego_config_dir }}/node.json"
+      register: node_json_stat
+
+    - name: Assert expected node layout exists before wiping anything
+      ansible.builtin.assert:
+        that:
+          - db_dir_stat.stat.exists or node_json_stat.stat.exists
+        fail_msg: |
+          Neither {{ avalanchego_db_dir }} nor {{ avalanchego_config_dir }}/node.json
+          exists on {{ inventory_hostname }}. The avalanchego layout may have changed,
+          or this host was never deployed. Refusing to continue (nothing to reset).
+
     - name: Stop avalanchego service
       ansible.builtin.systemd:
         name: avalanchego
         state: stopped
-      failed_when: false
 
-    - name: Wait for process to stop
-      ansible.builtin.wait_for:
-        path: /var/run/avalanchego.pid
-        state: absent
-      timeout: 30
-      failed_when: false
+    - name: Read current node configuration
+      ansible.builtin.slurp:
+        path: "{{ avalanchego_config_dir }}/node.json"
+      register: node_json_raw
+      when: node_json_stat.stat.exists
 
-    - name: Find subnet/L1 chain data directories
+    - name: Remove L1 tracking keys from node configuration (configure.yml re-adds them)
+      vars:
+        node_config: "{{ node_json_raw.content | b64decode | from_json }}"
+        cleaned_config: "{{ node_config | dict2items | rejectattr('key', 'in', l1_tracking_keys) | list | items2dict }}"
+      ansible.builtin.copy:
+        content: "{{ cleaned_config | to_nice_json }}"
+        dest: "{{ avalanchego_config_dir }}/node.json"
+        owner: "{{ avalanchego_user }}"
+        group: "{{ avalanchego_group }}"
+        mode: "0644"
+      when: node_json_stat.stat.exists
+
+    - name: Find L1 chain config directories
       ansible.builtin.find:
-        paths: "{{ avalanche_home }}/data"
+        paths: "{{ avalanchego_config_dir }}/chains"
         file_type: directory
         recurse: false
-        patterns: "*"
         excludes:
-          - "staking"
-      register: chain_dirs
+          - "C"
+          - "X"
+          - "P"
+      register: l1_chain_config_dirs
 
-    - name: Remove L1 chain data (preserving staking keys)
+    - name: Remove L1 chain config directories
       ansible.builtin.file:
         path: "{{ item.path }}"
         state: absent
-      loop: "{{ chain_dirs.files }}"
-      when: item.path != avalanche_home + "/data/staking"
+      loop: "{{ l1_chain_config_dirs.files }}"
+      loop_control:
+        label: "{{ item.path }}"
 
-    - name: Remove subnet tracking config
+    - name: Remove database directory (shared LevelDB - includes primary network state)
       ansible.builtin.file:
-        path: "{{ avalanche_home }}/configs/node.json.d/subnet-tracking.json"
+        path: "{{ avalanchego_db_dir }}"
         state: absent
-      failed_when: false
 
-    - name: Remove old genesis files
+    - name: Recreate empty database directory
       ansible.builtin.file:
-        path: "{{ avalanche_home }}/configs/genesis.json"
+        path: "{{ avalanchego_db_dir }}"
+        state: directory
+        owner: "{{ avalanchego_user }}"
+        group: "{{ avalanchego_group }}"
+        mode: "0755"
+
+    - name: Remove VM chain data directory (staking keys in sibling dir are untouched)
+      ansible.builtin.file:
+        path: "{{ avalanchego_chain_data_dir }}"
         state: absent
-      failed_when: false
 
     - name: Start avalanchego service
       ansible.builtin.systemd:
@@ -59,20 +121,42 @@
         state: started
         enabled: true
 
-    - name: Wait for avalanchego to be healthy
+    - name: Collect service facts
+      ansible.builtin.service_facts:
+
+    - name: Assert avalanchego service came back up
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['avalanchego.service'].state == 'running'
+        fail_msg: "avalanchego failed to start on {{ inventory_hostname }} after reset"
+
+    - name: Wait for avalanchego API to respond
       ansible.builtin.uri:
-        url: "http://localhost:9650/ext/health"
-        method: GET
+        url: "http://127.0.0.1:9650/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: "info.getNodeID"
         return_content: true
-        status_code: 200
-      register: health_check
-      until: health_check.status == 200 and (health_check.json.healthy | default(false))
+      register: node_info
+      until: node_info.status == 200
       retries: 30
       delay: 10
 
-    - name: Display node status
+    - name: Display reset summary
       ansible.builtin.debug:
-        msg: "Node {{ inventory_hostname }} is healthy and ready for new L1 creation"
+        msg: |
+          Node {{ inventory_hostname }} reset complete (NodeID: {{ node_info.json.result.nodeID }}).
+          - Wiped {{ avalanchego_db_dir }} entirely: avalanchego keeps all chains in one
+            shared LevelDB, so the L1 chain db cannot be removed in isolation. The node
+            is re-bootstrapping the primary network (fast with partial sync).
+          - Wiped {{ avalanchego_chain_data_dir }} (L1 VM chain data).
+          - Removed track-subnets / bootstrap-ids / bootstrap-ips from node.json and
+            deleted L1 chain config dirs under {{ avalanchego_config_dir }}/chains.
+          - Staking keys preserved (NodeID unchanged).
+          Next: run create-l1, then playbooks/l1/configure.yml -e subnet_id=<new-id>.
 
 - name: Reset Safe infrastructure on RPC node
   hosts: rpc

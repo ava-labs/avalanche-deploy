@@ -177,7 +177,7 @@
         state: restarted
 
   post_tasks:
-    - name: Wait for node to restart
+    - name: Wait for node API to come back after restart
       ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/info"
         method: POST
@@ -192,7 +192,24 @@
       retries: 30
       delay: 5
 
-    - name: Wait for L1 chain to be ready
+    - name: Read avalanchego service state
+      ansible.builtin.systemd:
+        name: avalanchego
+      register: configure_service_state
+
+    - name: Assert avalanchego came back after restart
+      ansible.builtin.assert:
+        that:
+          - configure_service_state.status.ActiveState == 'active'
+        fail_msg: >-
+          avalanchego is {{ configure_service_state.status.ActiveState | default('unknown') }}
+          on {{ inventory_hostname }} after applying the track-subnets config -
+          check 'journalctl -u avalanchego'
+
+    # Hard requirement: the node must actually be tracking the L1. The chain
+    # RPC only answers once the node tracks the subnet and the chain has
+    # bootstrapped, so this fails red if tracking did not take effect.
+    - name: Wait for L1 chain to be ready (node tracking the subnet)
       ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/bc/{{ chain_id }}/rpc"
         method: POST
@@ -204,11 +221,18 @@
           params: []
         return_content: true
       register: l1_check
-      until: l1_check.status == 200
-      retries: 30
+      until: l1_check.status == 200 and (l1_check.json.result is defined)
+      retries: 60
       delay: 5
       when: chain_id != ""
-      failed_when: false
+
+    - name: Note that tracking cannot be fully verified without chain_id
+      ansible.builtin.debug:
+        msg: >-
+          chain_id was not provided - verified the node restarted and the API
+          is back, but cannot verify the L1 chain RPC. Re-run with
+          -e chain_id=<CHAIN_ID> for a full tracking check.
+      when: chain_id == ""
 
     - name: Display status
       ansible.builtin.debug:
@@ -392,7 +416,7 @@
           eRPC Load Balancer (recommended for dApps):
             http://{{ erpc_host }}:4000
           eRPC Health Check:
-            http://{{ erpc_host }}:4001/healthcheck
+            http://{{ erpc_host }}:4000/healthcheck
           {% endif %}
 
           ============================================

@@ -32,6 +32,20 @@ ssh -i ~/.ssh/avalanche-deploy ubuntu@<node-ip>
 ssh ubuntu@<node-ip> "curl -s localhost:9650/ext/health"
 ```
 
+## Infrastructure Issues
+
+### Stale terraform state / inventory after manual teardown
+
+**Symptom:** `terraform plan` shows resources that no longer exist (e.g., instances terminated manually in the AWS console), or the IPs in `ansible/inventory/<cloud>_hosts` are unreachable.
+
+**Explanation:** Terraform state and the generated Ansible inventory only reflect the last `terraform apply`. Manual changes (console teardown, expired accounts) leave both pointing at dead resources.
+
+**Solutions:**
+1. Reconcile state with reality: `terraform apply -refresh-only` (or `terraform refresh`), then review `terraform plan`
+2. Re-run `terraform apply` to recreate missing resources — this also regenerates the Ansible inventory with the new IPs
+3. If a resource was deleted outside Terraform and you don't want it back, remove it from state: `terraform state rm <address>`
+4. Long-term: use remote state (S3 backend with state locking) so state survives laptops and is shared across operators — each AWS terraform root ships a `backend.tf.example` with setup instructions (see "Remote State" in [docs/l1/DEPLOYMENT.md](l1/DEPLOYMENT.md))
+
 ## L1 Creation Issues
 
 ### "insufficient funds"
@@ -78,14 +92,30 @@ ssh ubuntu@<node-ip> "curl -s localhost:9650/ext/health"
 
 **Symptom:** Chain fails to start with warp activation error
 
-**Solution:** Add Durango timestamp to your genesis file (default: `configs/l1/genesis/genesis.json`):
+**Solution:** Add the network upgrade timestamps to your genesis file (default: `configs/l1/genesis/genesis.json`) using the **actual Fuji activation times**:
 ```json
 {
   "config": {
-    "durangoTimestamp": 0
+    "subnetEVMTimestamp": 0,
+    "durangoTimestamp": 1707840000,
+    "etnaTimestamp": 1732550400
   }
 }
 ```
+
+> **Do not set upgrade timestamps to `0`.** In SubnetEVM, a `0` or missing upgrade timestamp does **not** mean "active at genesis" — it means "use the Primary Network's default activation time for this network." The one legitimate `0` is `subnetEVMTimestamp: 0` (SubnetEVM itself active from genesis). Setting `durangoTimestamp: 0` therefore doesn't activate Durango earlier than the values above, and it hides a related pitfall on fresh chains — see ["invalid opcode: PUSH0"](#invalid-opcode-push0--eth_estimategas-fails-on-a-fresh-l1) below.
+
+### "invalid opcode: PUSH0" / eth_estimateGas fails on a fresh L1
+
+**Symptom:** On a brand-new L1 (no blocks produced yet), `eth_estimateGas` or `eth_call` fails with `invalid opcode: PUSH0` for contracts compiled with Solidity 0.8.20+, even though Durango/Shanghai should be active.
+
+**Explanation:** Upgrade activation is evaluated against the timestamp of the block being simulated on. Block 0 carries the genesis timestamp (commonly `0`), which is before every upgrade's activation time — so simulations on top of block 0 run pre-Shanghai rules where `PUSH0` is an invalid opcode. This persists until the chain produces its first block with a real wall-clock timestamp.
+
+**Solution:** Send any one transaction (e.g., a simple self-transfer) to produce block 1. Once block 1 exists, simulations run against its timestamp and `PUSH0` works:
+```bash
+cast send --rpc-url <rpc-url> --private-key <funded-key> --value 0 <your-own-address>
+```
+Long-term, set a realistic `timestamp` in your genesis instead of `0`.
 
 ## Snapshot Issues
 

@@ -505,6 +505,23 @@
     dest: "{{ safe_install_dir }}/init/init-cfg-chain.py"
     mode: '0755'
 
+- name: Create patches directory
+  ansible.builtin.file:
+    path: "{{ safe_install_dir }}/patches"
+    state: directory
+    mode: '0755'
+
+# Bind-mounted over the upstream module by docker-compose. Fixes upstream
+# issue safe-global/safe-transaction-service#1556: Safe->Safe native sends
+# are indexed twice on event-indexed (L2) networks. Regenerate the patch
+# when bumping safe_txs_version.
+- name: Copy safe-events-indexer dedup patch
+  ansible.builtin.copy:
+    src: patches/safe_events_indexer.py
+    dest: "{{ safe_install_dir }}/patches/safe_events_indexer.py"
+    mode: '0644'
+  notify: Restart safe services
+
 - name: Template systemd service
   ansible.builtin.template:
     src: safe.service.j2
@@ -761,7 +778,16 @@
   failed_when: safe_txs_init.rc != 0
 
 # Setup Celery beat periodic tasks for indexing
-# TXS uses DatabaseScheduler, so periodic tasks must be created in the DB
+# TXS uses DatabaseScheduler, so periodic tasks must be created in the DB.
+#
+# index_internal_txs_task is the trace-based indexer and requires the
+# Parity/OpenEthereum trace_block RPC method, which Avalanche EVMs do not
+# expose. It must only be seeded for non-L2 networks: with ETH_L2_NETWORK=1
+# the SafeL2 events indexer (index_safe_events_task) covers the same data via
+# eth_getLogs. Seeding both double-indexes every transfer (duplicate entries
+# in /transfers/, same tx hash with trace-style and event-style transferIds)
+# and floods the indexer logs with "trace_block does not exist" errors, which
+# also leaves the UI stuck on "indexing..." after executing a transaction.
 - name: Setup indexing periodic tasks
   ansible.builtin.shell:
     cmd: |
@@ -773,8 +799,11 @@
       every_5m, _ = IntervalSchedule.objects.get_or_create(every=5, period=IntervalSchedule.MINUTES)
       every_1h, _ = IntervalSchedule.objects.get_or_create(every=1, period=IntervalSchedule.HOURS)
       tasks = [
+      {% if not safe_use_l2 %}
           ('index_internal_txs', 'safe_transaction_service.history.tasks.index_internal_txs_task', every_10s),
+      {% else %}
           ('index_safe_events', 'safe_transaction_service.history.tasks.index_safe_events_task', every_10s),
+      {% endif %}
           ('index_erc20_events', 'safe_transaction_service.history.tasks.index_erc20_events_task', every_10s),
           ('index_new_proxies', 'safe_transaction_service.history.tasks.index_new_proxies_task', every_30s),
           ('check_reorgs', 'safe_transaction_service.history.tasks.check_reorgs_task', every_60s),
@@ -782,6 +811,12 @@
           ('reindex_master_copies', 'safe_transaction_service.history.tasks.reindex_master_copies_task', every_1h),
           ('check_sync_status', 'safe_transaction_service.history.tasks.check_sync_status_task', every_5m),
       ]
+      {% if safe_use_l2 %}
+      # Remediate deployments that previously seeded the trace-based task
+      removed, _ = PeriodicTask.objects.filter(name='index_internal_txs').delete()
+      if removed:
+          print('Removed trace-based index_internal_txs task (L2 network)')
+      {% endif %}
       created_count = 0
       for name, task, interval in tasks:
           obj, created = PeriodicTask.objects.update_or_create(
@@ -792,7 +827,50 @@
       print('Created ' + str(created_count) + ' periodic tasks, total: ' + str(PeriodicTask.objects.count()))
       "
   register: safe_periodic_tasks
-  changed_when: "'Created' in safe_periodic_tasks.stdout and 'Created 0' not in safe_periodic_tasks.stdout"
+  changed_when: >-
+    ('Created' in safe_periodic_tasks.stdout and 'Created 0' not in safe_periodic_tasks.stdout)
+    or 'Removed trace-based' in safe_periodic_tasks.stdout
+
+# Repair execution-indexing state for any Safe whose history wasn't fully indexed.
+#
+# Root cause (verified against TXS v5.40.1 + CGW v1.96.0): the Client Gateway labels a
+# transaction "Cancelled" iff `isExecuted == false AND safe.nonce > tx.nonce`, and TXS's
+# get_safe_info returns the *live on-chain* nonce whenever a Safe has no SafeLastStatus
+# row. So any Safe whose executions were never indexed into SafeLastStatus (trace-only
+# deployments where trace_block fails forever on Avalanche, or an interrupted/partial
+# index) shows every executed transaction as permanently "Cancelled".
+#
+# This detects the broken state directly — Safes that exist (SafeContract) but have no
+# SafeLastStatus — instead of assuming a particular cause. When found, reindex_master_copies
+# re-fetches their events (events mode on L2) and process_txs_again rebuilds SafeLastStatus
+# and re-links executions to the proposed transactions, flipping them to Success. When no
+# Safe is missing its status the task is a cheap no-op (no reprocess), so it is safe to run
+# on every deploy.
+- name: Detect + repair Safes missing SafeLastStatus (fixes "Canceled" transactions)
+  ansible.builtin.shell:
+    # pipefail + bash: the address query is piped through `tr`, so a failure in the
+    # docker exec must fail the task rather than be masked by tr's exit code.
+    executable: /bin/bash
+    cmd: |
+      set -eo pipefail
+      missing=$(docker exec safe-txs-web python manage.py shell -c "
+      from safe_transaction_service.history.models import SafeContract, SafeLastStatus
+      sc = set(SafeContract.objects.values_list('address', flat=True))
+      have = set(SafeLastStatus.objects.values_list('address', flat=True))
+      print(' '.join(sorted(sc - have)))
+      " | tr -d '\r')
+      if [ -z "$missing" ]; then
+        echo "All indexed Safes have SafeLastStatus; nothing to repair"
+        exit 0
+      fi
+      echo "Safes missing SafeLastStatus (stuck/Canceled): $missing"
+      docker exec safe-txs-web python manage.py reindex_master_copies \
+        --addresses $missing --block-process-limit 500
+      # Rebuild SafeLastStatus + re-link executions (flips "Cancelled" -> Success)
+      docker exec safe-txs-web python manage.py process_txs_again --sync
+      echo "Repaired execution-indexing state"
+  register: safe_reindex_repair
+  changed_when: "'Repaired execution-indexing state' in safe_reindex_repair.stdout"
 
 # Validation - ensure chain and contracts are properly registered
 - name: Verify chain registered in Config Service

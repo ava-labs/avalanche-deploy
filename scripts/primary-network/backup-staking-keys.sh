@@ -11,6 +11,9 @@
 
 set -euo pipefail
 
+# Key-handling script: ensure any artifacts written locally are owner-only.
+umask 077
+
 HOSTNAME="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

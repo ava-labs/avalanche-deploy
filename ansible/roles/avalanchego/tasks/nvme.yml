@@ -53,14 +53,60 @@
     mode: "0755"
   when: avalanchego_nvme_device.stdout | length > 0
 
-- name: Mount NVMe device
+# Mount by filesystem UUID, not raw device name: /dev/nvme* names are not
+# stable across reboots/instance types. nofail keeps the instance bootable if
+# the data disk is ever missing (e.g. instance-store loss on stop/start).
+- name: Read filesystem UUID of NVMe device
+  ansible.builtin.command: "blkid -s UUID -o value {{ avalanchego_nvme_device.stdout }}"
+  register: avalanchego_nvme_uuid
+  changed_when: false
+  when: avalanchego_nvme_device.stdout | length > 0
+
+- name: Assert NVMe filesystem has a UUID
+  ansible.builtin.assert:
+    that:
+      - avalanchego_nvme_uuid.stdout | trim | length > 0
+    fail_msg: "Could not read filesystem UUID from {{ avalanchego_nvme_device.stdout }} - refusing to write an fstab entry by raw device name"
+  when: avalanchego_nvme_device.stdout | length > 0
+
+- name: Mount NVMe device by UUID
   ansible.posix.mount:
     path: "{{ avalanchego_data_dir }}"
-    src: "{{ avalanchego_nvme_device.stdout }}"
+    src: "UUID={{ avalanchego_nvme_uuid.stdout | trim }}"
     fstype: ext4
-    opts: defaults,noatime,nodiratime,discard
+    opts: defaults,noatime,nodiratime,discard,nofail
     state: mounted
   when: avalanchego_nvme_device.stdout | length > 0
+
+# Re-run case: the device is already mounted (so the detection above finds
+# nothing), but an older deploy may have written a raw /dev/nvme* fstab entry
+# without nofail. Migrate it to UUID + nofail in place.
+- name: Find existing data dir mount (fstab migration check)
+  ansible.builtin.set_fact:
+    avalanchego_existing_data_mount: >-
+      {{ ansible_facts.mounts | default([])
+         | selectattr('mount', 'equalto', avalanchego_data_dir)
+         | list | first | default({}) }}
+  when: avalanchego_nvme_device.stdout | length == 0
+
+- name: Migrate existing fstab entry to UUID + nofail
+  when:
+    - avalanchego_nvme_device.stdout | length == 0
+    - (avalanchego_existing_data_mount.device | default('')) is match('/dev/nvme')
+  block:
+    - name: Read filesystem UUID of mounted data device
+      ansible.builtin.command: "blkid -s UUID -o value {{ avalanchego_existing_data_mount.device }}"
+      register: avalanchego_mounted_uuid
+      changed_when: false
+
+    - name: Update fstab entry to UUID with nofail
+      ansible.posix.mount:
+        path: "{{ avalanchego_data_dir }}"
+        src: "UUID={{ avalanchego_mounted_uuid.stdout | trim }}"
+        fstype: "{{ avalanchego_existing_data_mount.fstype | default('ext4') }}"
+        opts: defaults,noatime,nodiratime,discard,nofail
+        state: mounted
+      when: avalanchego_mounted_uuid.stdout | trim | length > 0
 
 - name: Set ownership of mounted filesystem
   ansible.builtin.file:

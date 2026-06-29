@@ -226,6 +226,13 @@ spec:
               # ============================================================
               # Step 2: Create Celery periodic tasks for indexing
               # TXS uses DatabaseScheduler - tasks must be created in DB
+              #
+              # index_internal_txs_task is the trace-based indexer and requires
+              # the Parity/OpenEthereum trace_block RPC method, which Avalanche
+              # EVMs do not expose. Only seed it for non-L2 networks: with
+              # ETH_L2_NETWORK=1 the SafeL2 events indexer covers the same data
+              # via eth_getLogs. Seeding both double-indexes every transfer and
+              # floods the indexer with "trace_block does not exist" errors.
               # ============================================================
               print("\n=== Step 2: Create Celery periodic tasks ===\n")
 
@@ -238,8 +245,11 @@ spec:
               every_1h, _ = IntervalSchedule.objects.get_or_create(every=1, period=IntervalSchedule.HOURS)
 
               tasks = [
+              {{- if not .Values.l1.useL2 }}
                   ("index_internal_txs", "safe_transaction_service.history.tasks.index_internal_txs_task", every_10s),
+              {{- else }}
                   ("index_safe_events", "safe_transaction_service.history.tasks.index_safe_events_task", every_10s),
+              {{- end }}
                   ("index_erc20_events", "safe_transaction_service.history.tasks.index_erc20_events_task", every_10s),
                   ("index_new_proxies", "safe_transaction_service.history.tasks.index_new_proxies_task", every_30s),
                   ("check_reorgs", "safe_transaction_service.history.tasks.check_reorgs_task", every_60s),
@@ -247,6 +257,13 @@ spec:
                   ("reindex_master_copies", "safe_transaction_service.history.tasks.reindex_master_copies_task", every_1h),
                   ("check_sync_status", "safe_transaction_service.history.tasks.check_sync_status_task", every_5m),
               ]
+
+              {{- if .Values.l1.useL2 }}
+              # Remediate deployments that previously seeded the trace-based task
+              removed, _ = PeriodicTask.objects.filter(name="index_internal_txs").delete()
+              if removed:
+                  print("  Removed trace-based index_internal_txs task (L2 network)")
+              {{- end }}
 
               created_count = 0
               for name, task, interval in tasks:
@@ -256,6 +273,31 @@ spec:
                   if created:
                       created_count += 1
               print(f"  Created {created_count} periodic tasks, total: {PeriodicTask.objects.count()}")
+
+              {{- if .Values.l1.useL2 }}
+              # Repair any Safe whose executions were never indexed into SafeLastStatus.
+              # CGW labels a tx "Cancelled" iff isExecuted == false AND safe.nonce > tx.nonce,
+              # and TXS's get_safe_info returns the live on-chain nonce when a Safe has no
+              # SafeLastStatus row -- so a Safe missing that row shows every executed tx as
+              # permanently "Cancelled" (trace-only deployments, or an interrupted index).
+              # Detect the broken state directly (SafeContract without SafeLastStatus) and
+              # rebuild it: reindex re-fetches the Safe events, process_txs_again rebuilds
+              # SafeLastStatus and re-links executions, flipping them to Success. No-op when
+              # nothing is missing.
+              from django.core.management import call_command
+              from safe_transaction_service.history.models import SafeContract, SafeLastStatus
+              sc = set(SafeContract.objects.values_list("address", flat=True))
+              have = set(SafeLastStatus.objects.values_list("address", flat=True))
+              missing = sorted(sc - have)
+              if missing:
+                  print(f"  Repairing {len(missing)} Safe(s) missing SafeLastStatus (stuck/Canceled)")
+                  try:
+                      call_command("reindex_master_copies", addresses=missing, block_process_limit=500)
+                      call_command("process_txs_again", sync=True)
+                      print("  Repaired execution-indexing state for existing Safes")
+                  except Exception as e:
+                      print(f"  WARNING: execution-indexing repair failed: {e}")
+              {{- end }}
 
               # ============================================================
               # Step 3: Initialize chain in Config Service database
@@ -358,6 +400,49 @@ spec:
                           ON CONFLICT DO NOTHING
                       """, (feature_id, chain_id))
                   print(f"  Enabled {len(features)} features")
+
+              # ============================================================
+              # Step 4: Seed default Safe Apps (Transaction Builder, etc.)
+              # The SAFE_APPS feature flag only controls the UI's Apps tab
+              # visibility; the apps themselves come from safe_apps_safeapp.
+              # Without these records Tx Builder is unreachable from the UI.
+              # ============================================================
+              print("\n=== Step 4: Seed default Safe Apps ===\n")
+
+              default_apps = [
+                  {
+                      "url": "https://apps-portal.safe.global/tx-builder",
+                      "name": "Transaction Builder",
+                      "description": "Compose custom contract interactions and batch them into a single transaction",
+                  },
+                  {
+                      "url": "https://apps-portal.safe.global/drain-safe",
+                      "name": "Drain Account",
+                      "description": "Transfer all assets from a Safe to another wallet",
+                  },
+                  {
+                      "url": "https://apps-portal.safe.global/csv-airdrop",
+                      "name": "CSV Airdrop",
+                      "description": "Send ERC20 or native token transfers to many recipients at once",
+                  },
+              ]
+              for spec in default_apps:
+                  # UPSERT by url (unique). If the row exists with a different
+                  # chain_ids list, merge our chain in without duplicates.
+                  cur.execute("""
+                      INSERT INTO safe_apps_safeapp
+                          (url, name, icon_url, description, chain_ids, listed, featured, developer_website)
+                      VALUES
+                          (%s, %s, 'safe_apps/icon_url.jpg', %s, ARRAY[%s]::bigint[], TRUE, FALSE, '')
+                      ON CONFLICT (url) DO UPDATE SET
+                          chain_ids = (
+                              SELECT ARRAY(
+                                  SELECT DISTINCT unnest(safe_apps_safeapp.chain_ids || ARRAY[%s]::bigint[])
+                              )
+                          ),
+                          listed = TRUE
+                  """, (spec["url"], spec["name"], spec["description"], chain_id, chain_id))
+              print(f"  Registered {len(default_apps)} Safe Apps for chain {chain_id}")
 
               cur.close()
               cfg_conn.close()

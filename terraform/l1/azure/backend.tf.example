@@ -1,0 +1,27 @@
+# Opt-in remote state backend (Azure Blob Storage) for the l1/azure root.
+#
+# Local state (terraform.tfstate in this directory) is the DEFAULT. Nothing in
+# this repo requires remote state, and `terraform init` works without this file.
+#
+# How to opt in:
+#   1. Use a PRE-EXISTING storage account + container (create them out-of-band
+#      with blob versioning enabled; do not let Terraform create its own state
+#      storage).
+#   2. cp backend.tf.example backend.tf    # then edit the values below
+#   3. terraform init -migrate-state       # copies local state into the blob
+#   4. Commit backend.tf so every operator points at the same state.
+#
+# WARNING: ALL operators of a deployment must switch together. Mixing local and
+# remote state against the same infrastructure guarantees drift and clobbering.
+#
+# The azurerm backend provides state locking natively via blob leases.
+# Each terraform root must use a DISTINCT `key`. This root: l1/azure.
+#
+# terraform {
+#   backend "azurerm" {
+#     resource_group_name  = "REPLACE-ME-rg"
+#     storage_account_name = "REPLACEMESTATESA"
+#     container_name       = "tfstate"
+#     key                  = "avalanche-deploy/l1/azure/terraform.tfstate"
+#   }
+# }

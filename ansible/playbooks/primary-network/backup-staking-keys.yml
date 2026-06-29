@@ -53,37 +53,67 @@
       ansible.builtin.set_fact:
         backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
 
-    - name: Create backup archive
-      ansible.builtin.shell: |
-        set -euo pipefail
-        tar -czf /tmp/staking-keys-{{ inventory_hostname }}.tar.gz -C {{ staking_dir }} .
-        chmod 600 /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
-      args:
-        executable: /bin/bash
-      changed_when: true
+    # The node is never stopped by this playbook (the staking key files are
+    # static), so there is no restart concern — only verification and cleanup.
+    # Key material is staged in a private (0700) temp directory and the archive
+    # is created under umask 077, so it is never world-readable, even briefly.
+    - name: Create, verify and upload backup (staging dir always cleaned up)
+      block:
+        - name: Create private staging directory
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: staking-backup-
+          register: backup_staging
 
-    - name: Upload current backup to S3
-      ansible.builtin.command: >
-        aws s3 cp /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
-        s3://{{ staking_keys_bucket }}/{{ inventory_hostname }}/staking-keys.tar.gz
-        --sse aws:kms
-        --sse-kms-key-id {{ staking_keys_kms_arn }}
-      register: s3_upload
-      changed_when: s3_upload.rc == 0
+        - name: Create backup archive
+          ansible.builtin.shell: |
+            set -euo pipefail
+            umask 077
+            tar -czf {{ backup_staging.path }}/staking-keys-{{ inventory_hostname }}.tar.gz -C {{ staking_dir }} .
+          args:
+            executable: /bin/bash
+          changed_when: true
 
-    - name: Upload timestamped backup to S3
-      ansible.builtin.command: >
-        aws s3 cp /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
-        s3://{{ staking_keys_bucket }}/{{ inventory_hostname }}/backups/staking-keys-{{ backup_timestamp }}.tar.gz
-        --sse aws:kms
-        --sse-kms-key-id {{ staking_keys_kms_arn }}
-      register: s3_upload_timestamped
-      changed_when: s3_upload_timestamped.rc == 0
+        - name: Verify backup archive contains staking key material
+          ansible.builtin.shell: |
+            set -euo pipefail
+            tar -tzf {{ backup_staging.path }}/staking-keys-{{ inventory_hostname }}.tar.gz | grep -qE '(^|/)staker\.key$'
+            tar -tzf {{ backup_staging.path }}/staking-keys-{{ inventory_hostname }}.tar.gz | grep -qE '(^|/)staker\.crt$'
+          args:
+            executable: /bin/bash
+          changed_when: false
 
-    - name: Clean up temp file
-      ansible.builtin.file:
-        path: /tmp/staking-keys-{{ inventory_hostname }}.tar.gz
-        state: absent
+        - name: Upload current backup to S3
+          ansible.builtin.command: >
+            aws s3 cp {{ backup_staging.path }}/staking-keys-{{ inventory_hostname }}.tar.gz
+            s3://{{ staking_keys_bucket }}/{{ inventory_hostname }}/staking-keys.tar.gz
+            --sse aws:kms
+            --sse-kms-key-id {{ staking_keys_kms_arn }}
+          register: s3_upload
+          changed_when: s3_upload.rc == 0
+
+        - name: Upload timestamped backup to S3
+          ansible.builtin.command: >
+            aws s3 cp {{ backup_staging.path }}/staking-keys-{{ inventory_hostname }}.tar.gz
+            s3://{{ staking_keys_bucket }}/{{ inventory_hostname }}/backups/staking-keys-{{ backup_timestamp }}.tar.gz
+            --sse aws:kms
+            --sse-kms-key-id {{ staking_keys_kms_arn }}
+          register: s3_upload_timestamped
+          changed_when: s3_upload_timestamped.rc == 0
+      rescue:
+        - name: Re-raise backup failure
+          ansible.builtin.fail:
+            msg: |
+              Staking key backup FAILED at '{{ ansible_failed_task.name }}' on
+              {{ inventory_hostname }}. NO backup (or an incomplete one) was
+              uploaded — do not rely on S3 for this node until a re-run succeeds.
+              Original error: {{ ansible_failed_result.msg | default(ansible_failed_result) }}
+      always:
+        - name: Clean up staging directory
+          ansible.builtin.file:
+            path: "{{ backup_staging.path }}"
+            state: absent
+          when: backup_staging.path is defined
 
     - name: Display backup status
       ansible.builtin.debug:

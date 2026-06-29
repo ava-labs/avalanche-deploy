@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer init-validator-manager initialize-validator-manager primary-infra primary-infra-plan primary-deploy primary-status primary-destroy backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
+.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer init-validator-manager initialize-validator-manager primary-infra primary-infra-plan primary-deploy primary-status primary-destroy backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-erpc k8s-faucet k8s-blockscout k8s-graph-node k8s-safe k8s-backup-keys k8s-health-checks k8s-init-validator-manager k8s-reset-l1 k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
 
 # Default cloud provider
 CLOUD ?= aws
@@ -144,7 +144,7 @@ health-checks:
 upgrade:
 	@if [ -z "$(VERSION)" ]; then echo "Usage: make upgrade VERSION=1.12.0"; exit 1; fi
 	@echo "Upgrading nodes to avalanchego $(VERSION)..."
-	@echo "NOTE: subnet-evm is bundled with avalanchego and will be updated automatically."
+	@echo "NOTE: subnet-evm is installed alongside avalanchego (checksum-verified standalone release)."
 	@cd ansible && ansible-playbook -i $(ANSIBLE_INVENTORY) playbooks/shared/upgrade-nodes.yml \
 		-e "avalanchego_version=$(VERSION)"
 
@@ -165,7 +165,9 @@ logs:
 create-l1:
 	@echo "Building create-l1 tool..."
 	@cd tools/create-l1 && go build -o create-l1 .
-	@echo "Done! Binary at tools/create-l1/create-l1"
+	@echo "Built tools/create-l1/create-l1 (binary only - the L1 is NOT created yet)."
+	@echo "Next, create your L1 by running the tool (writes l1.env):"
+	@echo "  ./tools/create-l1/create-l1 --network=fuji --validators=<ip1>,<ip2> --genesis=genesis.json"
 
 #
 # Blockscout Block Explorer
@@ -267,7 +269,7 @@ primary-deploy: check-primary-cloud
 	@echo "Done! Run 'make primary-status' to check sync progress."
 
 primary-status: check-primary-cloud
-	@CLOUD=$(CLOUD) ./scripts/primary-network/check-sync.sh
+	@CLOUD=$(CLOUD) INVENTORY=ansible/$(PRIMARY_ANSIBLE_INVENTORY) ./scripts/primary-network/check-sync.sh
 
 primary-destroy: check-primary-cloud
 	@echo "Destroying Primary Network infrastructure..."
@@ -286,7 +288,7 @@ restore-keys: check-primary-cloud
 prepare-migration: check-primary-cloud
 	@if [ -z "$(NODE)" ]; then echo "Usage: make prepare-migration NODE=migration-target [SNAPSHOT=true] [SNAPSHOT_NAME=latest]"; exit 1; fi
 	@echo "Preparing migration node $(NODE)..."
-	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/primary-network/prepare-migration.yml --limit $(NODE) \
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/primary-network/prepare-migration.yml -e "target_host=$(NODE)" \
 		$(if $(SNAPSHOT),-e "use_snapshot=$(SNAPSHOT)",) \
 		$(if $(SNAPSHOT_NAME),-e "snapshot_name=$(SNAPSHOT_NAME)",)
 
@@ -304,13 +306,13 @@ migrate-validator: check-primary-cloud
 create-snapshot: check-primary-cloud
 	@if [ -z "$(NODE)" ]; then echo "Usage: make create-snapshot NODE=primary-validator-1 [NAME=my-snapshot]"; exit 1; fi
 	@echo "Creating database snapshot from $(NODE)..."
-	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/primary-network/create-snapshot.yml --limit $(NODE) \
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/primary-network/create-snapshot.yml -e "target_host=$(NODE)" \
 		$(if $(NAME),-e "snapshot_name=$(NAME)",)
 
 restore-snapshot: check-primary-cloud
 	@if [ -z "$(TARGET)" ]; then echo "Usage: make restore-snapshot TARGET=migration-target [SNAPSHOT=latest]"; exit 1; fi
 	@echo "Restoring snapshot to $(TARGET)..."
-	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/primary-network/restore-snapshot.yml --limit $(TARGET) \
+	@cd ansible && ansible-playbook -i $(PRIMARY_ANSIBLE_INVENTORY) playbooks/primary-network/restore-snapshot.yml -e "target_host=$(TARGET)" \
 		$(if $(SNAPSHOT),-e "snapshot_name=$(SNAPSHOT)",)
 
 list-snapshots: check-primary-cloud
@@ -324,7 +326,7 @@ safe:
 	$(eval _EVM_CHAIN_ID := $(or $(EVM_CHAIN_ID),$(shell [ -f l1.env ] && . ./l1.env 2>/dev/null && echo $$EVM_CHAIN_ID)))
 	$(eval _CHAIN_NAME := $(or $(CHAIN_NAME),$(shell [ -f l1.env ] && . ./l1.env 2>/dev/null && echo $$CHAIN_NAME)))
 	@if [ -z "$(_CHAIN_ID)" ] || [ -z "$(_EVM_CHAIN_ID)" ]; then \
-		echo "Error: CHAIN_ID/EVM_CHAIN_ID not found. Run 'make create-l1' first or pass explicitly."; exit 1; fi
+		echo "Error: CHAIN_ID/EVM_CHAIN_ID not found. Build the tool with 'make create-l1', then run ./tools/create-l1/create-l1 to create your L1 (writes l1.env), or pass CHAIN_ID/EVM_CHAIN_ID explicitly."; exit 1; fi
 	@if [ -n "$(AVALANCHE_PRIVATE_KEY)" ]; then \
 		echo "Deploying Safe contracts via Singleton Factory..."; \
 		RPC_URL=$$(cd terraform/l1/$(CLOUD) && terraform output -json rpc_ips 2>/dev/null | jq -r '.[0]' 2>/dev/null || echo ""); \
@@ -720,7 +722,8 @@ help-l1:
 	@echo "  make setup"
 	@echo "  make infra CLOUD=aws|gcp|azure"
 	@echo "  make deploy CLOUD=aws|gcp|azure NETWORK=fuji|mainnet"
-	@echo "  make create-l1"
+	@echo "  make create-l1                                   (builds the create-l1 binary)"
+	@echo "  ./tools/create-l1/create-l1 --network=fuji --validators=<ip,...>   (creates the L1, writes l1.env)"
 	@echo "  make configure-l1 CLOUD=<provider> SUBNET_ID=... CHAIN_ID=...  (includes eRPC)"
 	@echo "  make status CLOUD=<provider>"
 	@echo ""
@@ -816,7 +819,7 @@ help-all:
 	@echo ""
 	@echo "Operations:"
 	@echo "  make rolling-restart   Restart nodes one-at-a-time (zero downtime)"
-	@echo "  make upgrade           Upgrade avalanchego (subnet-evm bundled)"
+	@echo "  make upgrade           Upgrade avalanchego (subnet-evm installed alongside)"
 	@echo "  make health-checks     Run comprehensive health checks on all nodes"
 	@echo "  make monitoring        Deploy Prometheus + Grafana monitoring"
 	@echo ""

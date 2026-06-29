@@ -7,11 +7,13 @@
 #
 # Usage:
 #   # State sync (slower, no snapshot needed):
-#   ansible-playbook playbooks/primary-network/prepare-migration.yml --limit migration-target
+#   ansible-playbook playbooks/primary-network/prepare-migration.yml -e target_host=migration-target
 #
 #   # Snapshot restore (faster, requires existing snapshot):
-#   ansible-playbook playbooks/primary-network/prepare-migration.yml --limit migration-target -e use_snapshot=true
-#   ansible-playbook playbooks/primary-network/prepare-migration.yml --limit migration-target -e use_snapshot=true -e snapshot_name=mainnet-2025-02
+#   ansible-playbook playbooks/primary-network/prepare-migration.yml -e target_host=migration-target -e use_snapshot=true
+#   ansible-playbook playbooks/primary-network/prepare-migration.yml -e target_host=migration-target -e use_snapshot=true -e snapshot_name=mainnet-2025-02
+#
+# target_host is REQUIRED (this playbook can stop avalanchego and delete its database).
 #
 # After preparation:
 #   1. Wait for node to sync (all chains bootstrapped)
@@ -22,8 +24,31 @@
 #   - Added to inventory with ansible_host set
 #   - For snapshot restore: snapshot must exist in S3
 
+- name: Validate Preparation Parameters
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check required variables
+      ansible.builtin.assert:
+        that:
+          - target_host is defined
+        fail_msg: |
+          Missing required variable 'target_host'. This playbook can stop avalanchego and
+          DELETE its database on the targeted host, so an explicit target is required.
+          Usage:
+            ansible-playbook playbooks/primary-network/prepare-migration.yml \
+              -e target_host=<inventory-name> [-e use_snapshot=true] [-e snapshot_name=<name>]
+
+    - name: Verify target host exists
+      ansible.builtin.assert:
+        that:
+          - target_host in groups['all']
+        fail_msg: "Target host '{{ target_host }}' not found in inventory"
+
 - name: Prepare Node for Validator Migration
-  hosts: all
+  # default('localhost') is never used: the validation play above aborts the run
+  # when target_host is undefined. It only keeps 'hosts' parseable for syntax-check.
+  hosts: "{{ target_host | default('localhost') }}"
   become: true
   gather_facts: true
 
@@ -91,16 +116,24 @@
               Snapshot not found: s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4
 
               Create a snapshot first:
-                ansible-playbook playbooks/primary-network/create-snapshot.yml --limit <synced-node>
+                ansible-playbook playbooks/primary-network/create-snapshot.yml -e target_host=<synced-node>
 
               Or use state sync instead (slower):
-                ansible-playbook playbooks/primary-network/prepare-migration.yml --limit {{ inventory_hostname }}
+                ansible-playbook playbooks/primary-network/prepare-migration.yml -e target_host={{ inventory_hostname }}
           when: snapshot_check.rc != 0
+
+        - name: Track snapshot restore progress (drives rescue recovery decisions)
+          ansible.builtin.set_fact:
+            prepare_restore_phase: "pre-wipe"
 
         - name: Stop avalanchego for snapshot restore
           ansible.builtin.systemd:
             name: avalanchego
             state: stopped
+
+        - name: Mark restore as past the point of no return
+          ansible.builtin.set_fact:
+            prepare_restore_phase: "post-wipe"
 
         - name: Remove existing database
           ansible.builtin.file:
@@ -142,6 +175,52 @@
         - name: Display snapshot restore status
           ansible.builtin.debug:
             msg: "Snapshot restored from s3://{{ staking_keys_bucket }}/snapshots/{{ snapshot_name }}.tar.lz4"
+      rescue:
+        # This node is a migration TARGET: it has no staking keys yet, so there
+        # is no duplicate-NodeID risk here — only database consistency.
+        - name: Restart avalanchego (database untouched)
+          ansible.builtin.systemd:
+            name: avalanchego
+            state: started
+          when: prepare_restore_phase | default('pre-wipe') == 'pre-wipe'
+
+        - name: Report failure before database wipe
+          ansible.builtin.debug:
+            msg: |
+              Snapshot restore on the migration target FAILED before the database
+              was touched. avalanchego has been restarted on its existing database;
+              the node is exactly as it was. Fix the error below and re-run:
+                ansible-playbook playbooks/primary-network/prepare-migration.yml \
+                  -e target_host={{ inventory_hostname }} -e use_snapshot=true
+          when: prepare_restore_phase | default('pre-wipe') == 'pre-wipe'
+
+        - name: Report failure after database wipe — node left STOPPED
+          ansible.builtin.debug:
+            msg: |
+              Snapshot restore on the migration target FAILED AFTER the database
+              was wiped.
+
+              Current state of {{ inventory_hostname }}:
+                - avalanchego: STOPPED (deliberately NOT restarted)
+                - /var/lib/avalanchego/db: PARTIAL / INCOMPLETE — not usable as-is
+
+              Do ONE of the following:
+                1. Re-run the snapshot restore:
+                     ansible-playbook playbooks/primary-network/prepare-migration.yml \
+                       -e target_host={{ inventory_hostname }} -e use_snapshot=true
+                2. Abandon the snapshot and state-sync instead:
+                     sudo rm -rf /var/lib/avalanchego/db
+                     sudo systemctl start avalanchego   # state-sync bootstrap (slow)
+
+              Do NOT just 'systemctl start avalanchego' on the partial database.
+          when: prepare_restore_phase | default('pre-wipe') == 'post-wipe'
+
+        - name: Re-raise snapshot restore failure
+          ansible.builtin.fail:
+            msg: >-
+              Snapshot restore failed at '{{ ansible_failed_task.name }}'
+              (phase: {{ prepare_restore_phase | default('pre-wipe') }}):
+              {{ ansible_failed_result.msg | default(ansible_failed_result) }}
 
     # Wait for all chains to fully bootstrap
     - name: Display sync start

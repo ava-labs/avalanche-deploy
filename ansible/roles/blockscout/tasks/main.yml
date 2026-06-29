@@ -66,6 +66,74 @@
     - "{{ blockscout_data_dir }}/redis"
     - "{{ blockscout_data_dir }}/logs"
 
+# Secret generation - generate once, persist to disk, reuse on re-runs so the
+# postgres volume and all templates always see the same credentials
+- name: Check for existing DB password
+  ansible.builtin.stat:
+    path: "{{ blockscout_install_dir }}/.db_password"
+  register: blockscout_db_password_file
+
+- name: Read existing DB password
+  ansible.builtin.slurp:
+    src: "{{ blockscout_install_dir }}/.db_password"
+  register: blockscout_existing_db_password
+  when: blockscout_db_password_file.stat.exists
+  no_log: true
+
+- name: Generate new DB password
+  ansible.builtin.set_fact:
+    blockscout_db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+  when: not blockscout_db_password_file.stat.exists and blockscout_db_password | length == 0
+  no_log: true
+
+- name: Use existing DB password
+  ansible.builtin.set_fact:
+    blockscout_db_password: "{{ blockscout_existing_db_password.content | b64decode | trim }}"
+  when: blockscout_db_password_file.stat.exists
+  no_log: true
+
+- name: Persist DB password
+  ansible.builtin.copy:
+    content: "{{ blockscout_db_password }}"
+    dest: "{{ blockscout_install_dir }}/.db_password"
+    owner: "{{ blockscout_user }}"
+    group: "{{ blockscout_group }}"
+    mode: "0600"
+  no_log: true
+
+- name: Check for existing SECRET_KEY_BASE
+  ansible.builtin.stat:
+    path: "{{ blockscout_install_dir }}/.secret_key_base"
+  register: blockscout_secret_key_base_file
+
+- name: Read existing SECRET_KEY_BASE
+  ansible.builtin.slurp:
+    src: "{{ blockscout_install_dir }}/.secret_key_base"
+  register: blockscout_existing_secret_key_base
+  when: blockscout_secret_key_base_file.stat.exists
+  no_log: true
+
+- name: Generate new SECRET_KEY_BASE
+  ansible.builtin.set_fact:
+    blockscout_secret_key_base: "{{ lookup('password', '/dev/null length=64 chars=ascii_letters,digits') }}"
+  when: not blockscout_secret_key_base_file.stat.exists and blockscout_secret_key_base | length == 0
+  no_log: true
+
+- name: Use existing SECRET_KEY_BASE
+  ansible.builtin.set_fact:
+    blockscout_secret_key_base: "{{ blockscout_existing_secret_key_base.content | b64decode | trim }}"
+  when: blockscout_secret_key_base_file.stat.exists
+  no_log: true
+
+- name: Persist SECRET_KEY_BASE
+  ansible.builtin.copy:
+    content: "{{ blockscout_secret_key_base }}"
+    dest: "{{ blockscout_install_dir }}/.secret_key_base"
+    owner: "{{ blockscout_user }}"
+    group: "{{ blockscout_group }}"
+    mode: "0600"
+  no_log: true
+
 - name: Generate docker-compose.yml
   ansible.builtin.template:
     src: docker-compose.yml.j2
@@ -113,8 +181,15 @@
     - Reload systemd
     - Restart blockscout
 
-- name: Pull Docker images
-  ansible.builtin.command: docker compose pull
+# Prefetch images so the systemd start below stays within TimeoutStartSec.
+# --policy missing only fetches tags not already present locally, so with the
+# pinned tags in defaults a re-run never silently upgrades a running stack;
+# a changed pin is fetched, an unchanged one is left alone. Use
+# -e force_pull=true to re-pull a tag that was re-published upstream.
+- name: Pull Docker images (missing tags only unless force_pull=true)
+  ansible.builtin.command: >-
+    docker compose pull
+    --policy {{ 'always' if (force_pull | default(false) | bool) else 'missing' }}
   args:
     chdir: "{{ blockscout_install_dir }}"
   register: blockscout_pull
@@ -127,6 +202,12 @@
     state: started
     daemon_reload: true
 
+# Apply any pending env/compose changes now (systemd stop/start = compose
+# down + up, which re-reads env files) so the readiness check below validates
+# the configuration we just rendered, not a stale running stack
+- name: Apply pending Blockscout restarts
+  ansible.builtin.meta: flush_handlers
+
 - name: Wait for Blockscout to be ready
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ blockscout_http_port }}/api/v2/stats"
@@ -136,7 +217,6 @@
   until: blockscout_ready.status == 200
   retries: 60
   delay: 10
-  ignore_errors: true
 
 - name: Display Blockscout URL
   ansible.builtin.debug:

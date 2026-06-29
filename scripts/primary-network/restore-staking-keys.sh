@@ -11,6 +11,9 @@
 
 set -euo pipefail
 
+# This script stages private staking keys on disk; keep everything owner-only.
+umask 077
+
 SOURCE_HOST="${1:-}"
 TARGET_IP="${2:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,9 +64,26 @@ echo "Source: s3://$BUCKET/$SOURCE_HOST/staking-keys.tar.gz"
 echo "Target: $TARGET_IP"
 echo ""
 
-# Download keys locally
+# Get SSH key from inventory
+SSH_KEY=$(grep "ansible_ssh_private_key_file" "$INVENTORY" | head -1 | sed 's/.*=//')
+SSH_OPTS="-o StrictHostKeyChecking=no"
+
+if [ -n "$SSH_KEY" ] && [ -f "$SSH_KEY" ]; then
+    SSH_OPTS="$SSH_OPTS -i $SSH_KEY"
+fi
+
+# Stage keys in owner-only temp dirs (local and remote) and always clean up,
+# even on failure, so no key tarball is left behind.
 TEMP_DIR=$(mktemp -d)
-trap "rm -rf $TEMP_DIR" EXIT
+REMOTE_TMP=""
+cleanup() {
+    rm -rf "$TEMP_DIR"
+    if [ -n "$REMOTE_TMP" ]; then
+        # shellcheck disable=SC2086
+        ssh $SSH_OPTS ubuntu@"$TARGET_IP" "rm -rf '$REMOTE_TMP'" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
 
 echo "Downloading keys from S3..."
 aws s3 cp "s3://$BUCKET/$SOURCE_HOST/staking-keys.tar.gz" "$TEMP_DIR/staking-keys.tar.gz"
@@ -73,14 +93,6 @@ if [ ! -f "$TEMP_DIR/staking-keys.tar.gz" ]; then
     exit 1
 fi
 
-# Get SSH key from inventory
-SSH_KEY=$(grep "ansible_ssh_private_key_file" "$INVENTORY" | head -1 | sed 's/.*=//')
-SSH_OPTS="-o StrictHostKeyChecking=no"
-
-if [ -n "$SSH_KEY" ] && [ -f "$SSH_KEY" ]; then
-    SSH_OPTS="$SSH_OPTS -i $SSH_KEY"
-fi
-
 echo "Stopping avalanchego on target..."
 ssh $SSH_OPTS ubuntu@"$TARGET_IP" "sudo systemctl stop avalanchego || true"
 
@@ -88,16 +100,20 @@ echo "Clearing existing staking keys..."
 ssh $SSH_OPTS ubuntu@"$TARGET_IP" "sudo rm -rf /var/lib/avalanchego/staking/*"
 
 echo "Copying keys to target..."
-scp $SSH_OPTS "$TEMP_DIR/staking-keys.tar.gz" ubuntu@"$TARGET_IP":/tmp/
+# mktemp -d creates a mode-700 directory, so the tarball is never readable by
+# other users on the target (unlike a bare file in /tmp).
+REMOTE_TMP=$(ssh $SSH_OPTS ubuntu@"$TARGET_IP" "mktemp -d")
+scp $SSH_OPTS "$TEMP_DIR/staking-keys.tar.gz" ubuntu@"$TARGET_IP":"$REMOTE_TMP/"
 
 echo "Extracting keys..."
 ssh $SSH_OPTS ubuntu@"$TARGET_IP" "
-    sudo tar -xzf /tmp/staking-keys.tar.gz -C /var/lib/avalanchego/staking/
+    sudo tar -xzf '$REMOTE_TMP/staking-keys.tar.gz' -C /var/lib/avalanchego/staking/
     sudo chown -R avalanche:avalanche /var/lib/avalanchego/staking/
     sudo chmod 700 /var/lib/avalanchego/staking/
     sudo chmod 600 /var/lib/avalanchego/staking/*
-    rm /tmp/staking-keys.tar.gz
+    rm -rf '$REMOTE_TMP'
 "
+REMOTE_TMP=""
 
 echo ""
 echo "=== Keys Restored ==="

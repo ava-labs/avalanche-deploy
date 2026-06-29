@@ -44,6 +44,14 @@ l1_rpc_config:
   # Partial sync for L1 - faster bootstrap, less storage.
   # AvalancheGo expects a boolean for this flag.
   partialSyncPrimaryNetwork: true
+  # Host headers accepted by the HTTP API (--http-allowed-hosts).
+  # AvalancheGo's built-in default is "localhost" only, which 403-rejects
+  # in-cluster clients that reach the node via service DNS (e.g.
+  # http://l1-rpc:9650). Empty list = chart default: localhost plus this
+  # release's service DNS names (<svc>, <svc>.<ns>, <svc>.<ns>.svc,
+  # <svc>.<ns>.svc.cluster.local). Matching is exact (no suffix wildcards);
+  # use ["*"] to accept any host header. IP host headers are always accepted.
+  httpAllowedHosts: []
 
 # Service configuration - LoadBalancer for external access
 l1_rpc_service:
