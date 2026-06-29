@@ -848,8 +848,11 @@
 # on every deploy.
 - name: Detect + repair Safes missing SafeLastStatus (fixes "Canceled" transactions)
   ansible.builtin.shell:
+    # pipefail + bash: the address query is piped through `tr`, so a failure in the
+    # docker exec must fail the task rather than be masked by tr's exit code.
+    executable: /bin/bash
     cmd: |
-      set -e
+      set -eo pipefail
       missing=$(docker exec safe-txs-web python manage.py shell -c "
       from safe_transaction_service.history.models import SafeContract, SafeLastStatus
       sc = set(SafeContract.objects.values_list('address', flat=True))
