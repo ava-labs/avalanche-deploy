@@ -222,10 +222,11 @@ NOT the HTTPS proxy (`https://<rpc-node-ip>/rpc`).
 
 For production, use a real domain with Let's Encrypt (`safe_use_letsencrypt: true`) to eliminate this issue entirely.
 
-### Transaction stuck on "indexing..." / `trace_block does not exist` / duplicate transfers
+### Transaction stuck on "indexing..." / shows "Canceled" / `trace_block does not exist` / duplicate transfers
 
-Symptoms (all three share one root cause):
+Symptoms (all share one root cause):
 - Executing a transaction in the UI hangs at "indexing..." and the pending tx eventually disappears
+- After execution, clicking "View Transaction" shows the transaction as **Canceled** (even though it confirmed on-chain)
 - Transaction Service indexer logs show `the method trace_block does not exist/is not available`
 - `/api/v1/safes/<address>/transfers/` returns the same transfer twice (same `transactionHash`, different `transferId` — one ending in a log index like `...1`, one in a trace address like `...0,0`), and history in the UI shows duplicate/missing entries
 
@@ -261,7 +262,58 @@ print('Deleting', len(dupes), 'duplicated simulated transfers:',
 cd /opt/safe && docker compose up -d
 ```
 
-Pending signatures and proposed transactions are not affected — they live in separate tables.
+### Executed transactions show "Canceled" in the UI
+
+Symptom: you execute a multisig transaction, it confirms on-chain (the Safe nonce
+advances), but the Safe Wallet shows it as **Canceled** — often seen right after
+clicking "View Transaction" during the indexing step, and on freshly-created Safes
+it can stick permanently.
+
+This is **not** a separate bug from the trace-indexer issue above — it is the *visible
+symptom* of the Safe's execution history never being indexed into `SafeLastStatus`.
+The mechanism is exact (verified against TXS v5.40.1 + CGW v1.96.0):
+
+- The Client Gateway labels a transaction **Cancelled** when, and only when,
+  `isExecuted == false` **and** `safe.nonce > transaction.nonce`
+  (`multisig-transaction-status.mapper.ts`).
+- `isExecuted` is set when the indexer links the on-chain execution to the proposed
+  transaction by matching `safe_tx_hash`. On L2 networks that linkage is done by the
+  **events** indexer (`index_safe_events_task`) decoding `SafeMultiSigTransaction`
+  events — never by the trace indexer.
+- `safe.nonce` comes from the indexed `SafeLastStatus`, but TXS **falls back to the
+  live on-chain nonce when `SafeLastStatus.nonce == 0`** (`safe_service.get_safe_info`).
+
+So if the Safe's executions were never indexed (because the trace indexer was the
+only execution indexer and it failed forever on Avalanche), `SafeLastStatus` is never
+built → `safe.nonce` is always the live, already-advanced nonce while `isExecuted`
+stays `false` → **every executed transaction shows Cancelled, permanently.**
+
+Switching to event-only indexing (above) fixes this **going forward**, but it does
+**not** reprocess history — Safes indexed under the old config keep showing Cancelled
+until their execution history is rebuilt. Re-running `deploy-safe` now does this
+automatically (it reindexes + reprocesses whenever it removes the stale trace task).
+To repair manually:
+
+```bash
+# 1. Re-fetch the Safe's events from its creation block (events-mode reindex)
+docker exec safe-txs-web python manage.py reindex_master_copies \
+  --addresses <SAFE_ADDRESS> --block-process-limit 500
+
+# 2. Rebuild SafeLastStatus and re-link executions to proposed transactions.
+#    This is what flips already-"Cancelled" transactions to Success.
+docker exec safe-txs-web python manage.py process_txs_again --sync
+
+# 3. Restart so workers pick up the rebuilt state
+cd /opt/safe && docker compose up -d
+```
+
+After this, `safe.nonce` is served from the rebuilt `SafeLastStatus` (consistent with
+`isExecuted`), and transactions that actually executed render as Success.
+
+> If `reindex_master_copies` finds no events for the Safe at all, confirm TXS is
+> connected to the **L1's** RPC (`/ext/bc/<CHAIN_ID>/rpc`), not the C-Chain — a chainId
+> mismatch makes the indexer compute a different `safe_tx_hash` than the proposer, which
+> also breaks linkage. Verify with `manage.py check_chainid_matches`.
 
 ### CLOSE_WAIT connections accumulating
 

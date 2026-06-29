@@ -831,6 +831,44 @@
     ('Created' in safe_periodic_tasks.stdout and 'Created 0' not in safe_periodic_tasks.stdout)
     or 'Removed trace-based' in safe_periodic_tasks.stdout
 
+# Repair execution-indexing state for any Safe whose history wasn't fully indexed.
+#
+# Root cause (verified against TXS v5.40.1 + CGW v1.96.0): the Client Gateway labels a
+# transaction "Cancelled" iff `isExecuted == false AND safe.nonce > tx.nonce`, and TXS's
+# get_safe_info returns the *live on-chain* nonce whenever a Safe has no SafeLastStatus
+# row. So any Safe whose executions were never indexed into SafeLastStatus (trace-only
+# deployments where trace_block fails forever on Avalanche, or an interrupted/partial
+# index) shows every executed transaction as permanently "Cancelled".
+#
+# This detects the broken state directly — Safes that exist (SafeContract) but have no
+# SafeLastStatus — instead of assuming a particular cause. When found, reindex_master_copies
+# re-fetches their events (events mode on L2) and process_txs_again rebuilds SafeLastStatus
+# and re-links executions to the proposed transactions, flipping them to Success. When no
+# Safe is missing its status the task is a cheap no-op (no reprocess), so it is safe to run
+# on every deploy.
+- name: Detect + repair Safes missing SafeLastStatus (fixes "Canceled" transactions)
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      missing=$(docker exec safe-txs-web python manage.py shell -c "
+      from safe_transaction_service.history.models import SafeContract, SafeLastStatus
+      sc = set(SafeContract.objects.values_list('address', flat=True))
+      have = set(SafeLastStatus.objects.values_list('address', flat=True))
+      print(' '.join(sorted(sc - have)))
+      " | tr -d '\r')
+      if [ -z "$missing" ]; then
+        echo "All indexed Safes have SafeLastStatus; nothing to repair"
+        exit 0
+      fi
+      echo "Safes missing SafeLastStatus (stuck/Canceled): $missing"
+      docker exec safe-txs-web python manage.py reindex_master_copies \
+        --addresses $missing --block-process-limit 500
+      # Rebuild SafeLastStatus + re-link executions (flips "Cancelled" -> Success)
+      docker exec safe-txs-web python manage.py process_txs_again --sync
+      echo "Repaired execution-indexing state"
+  register: safe_reindex_repair
+  changed_when: "'Repaired execution-indexing state' in safe_reindex_repair.stdout"
+
 # Validation - ensure chain and contracts are properly registered
 - name: Verify chain registered in Config Service
   ansible.builtin.uri:

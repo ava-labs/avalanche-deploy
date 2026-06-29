@@ -274,6 +274,31 @@ spec:
                       created_count += 1
               print(f"  Created {created_count} periodic tasks, total: {PeriodicTask.objects.count()}")
 
+              {{- if .Values.l1.useL2 }}
+              # Repair any Safe whose executions were never indexed into SafeLastStatus.
+              # CGW labels a tx "Cancelled" iff isExecuted == false AND safe.nonce > tx.nonce,
+              # and TXS's get_safe_info returns the live on-chain nonce when a Safe has no
+              # SafeLastStatus row -- so a Safe missing that row shows every executed tx as
+              # permanently "Cancelled" (trace-only deployments, or an interrupted index).
+              # Detect the broken state directly (SafeContract without SafeLastStatus) and
+              # rebuild it: reindex re-fetches the Safe events, process_txs_again rebuilds
+              # SafeLastStatus and re-links executions, flipping them to Success. No-op when
+              # nothing is missing.
+              from django.core.management import call_command
+              from safe_transaction_service.history.models import SafeContract, SafeLastStatus
+              sc = set(SafeContract.objects.values_list("address", flat=True))
+              have = set(SafeLastStatus.objects.values_list("address", flat=True))
+              missing = sorted(sc - have)
+              if missing:
+                  print(f"  Repairing {len(missing)} Safe(s) missing SafeLastStatus (stuck/Canceled)")
+                  try:
+                      call_command("reindex_master_copies", addresses=missing, block_process_limit=500)
+                      call_command("process_txs_again", sync=True)
+                      print("  Repaired execution-indexing state for existing Safes")
+                  except Exception as e:
+                      print(f"  WARNING: execution-indexing repair failed: {e}")
+              {{- end }}
+
               # ============================================================
               # Step 3: Initialize chain in Config Service database
               # Uses direct psycopg2 connection to CFG database
