@@ -30,6 +30,15 @@ var (
 	DSTPoP  = []byte("BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
 )
 
+// Every function below deterministically zeroizes its transient
+// blst.SecretKey before returning.  blst only arranges zeroing for KeyGen'd
+// keys, via a GC finalizer — Deserialize'd keys get nothing, and (as blst's
+// own comment puts it) "postponing secret key zeroing till garbage collection
+// can be too late to be effective".  Without this, every Sign call would leave
+// an uncleared copy of the scalar in freed heap memory.  This is hardening
+// against opportunistic memory disclosure (core dumps, swap), not protection
+// from a live memory-read attacker — for that, use the aws-nitro backend.
+
 // KeyGen derives a valid BLS12-381 secret key from input key material (IKM)
 // using the standard HKDF-based derivation.  IKM must be at least 32 bytes.
 func KeyGen(ikm []byte) ([]byte, error) {
@@ -40,6 +49,7 @@ func KeyGen(ikm []byte) ([]byte, error) {
 	if sk == nil {
 		return nil, fmt.Errorf("BLS key generation failed")
 	}
+	defer sk.Zeroize()
 	return sk.Serialize(), nil
 }
 
@@ -50,7 +60,11 @@ func ValidateSecretKey(skBytes []byte) bool {
 		return false
 	}
 	sk := new(blst.SecretKey)
-	return sk.Deserialize(skBytes) != nil
+	if sk.Deserialize(skBytes) == nil {
+		return false
+	}
+	sk.Zeroize()
+	return true
 }
 
 // PublicKey derives the 48-byte compressed G1 public key from skBytes.
@@ -59,6 +73,7 @@ func PublicKey(skBytes []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer sk.Zeroize()
 	pk := new(blst.P1Affine).From(sk)
 	if pk == nil {
 		return nil, fmt.Errorf("BLS public key derivation failed")
@@ -73,6 +88,7 @@ func Sign(skBytes, msg, dst []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer sk.Zeroize()
 	sig := new(blst.P2Affine).Sign(sk, msg, dst)
 	if sig == nil {
 		return nil, fmt.Errorf("BLS sign failed")

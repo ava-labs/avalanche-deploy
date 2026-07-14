@@ -73,14 +73,19 @@ func main() {
 		sendInitResponse(initConn, "", fmt.Sprintf("KMS decrypt: %v", err))
 		log.Fatalf("KMS decrypt: %v", err)
 	}
-	defer zeroize(skBytes)
 
 	// Step 3: deserialize and validate the BLS key.
 	sk := new(blst.SecretKey)
 	if sk.Deserialize(skBytes) == nil {
+		zeroize(skBytes)
 		sendInitResponse(initConn, "", "invalid BLS scalar")
 		log.Fatal("invalid BLS scalar from KMS decrypt")
 	}
+	// sk now holds its own copy of the scalar (and must live for the life of
+	// the process — it signs every request), so wipe the decrypted bytes
+	// eagerly. A defer would never run: serve() blocks forever and every
+	// error path is log.Fatal → os.Exit, which skips deferred calls.
+	zeroize(skBytes)
 	pk := new(blst.P1Affine).From(sk)
 	pkHex := hex.EncodeToString(pk.Compress())
 

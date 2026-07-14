@@ -385,13 +385,13 @@ Flags:
 | Threat | Mitigation |
 |---|---|
 | Disk compromise | BLS key never stored in plaintext — only KMS ciphertext or Vault storage |
-| Memory scraping (KMS backends) | Key zeroed in `Backend.Close()` on shutdown |
+| Memory disclosure after the fact (KMS backends) | Transient per-sign key copies zeroized after every operation; long-lived copy zeroed in `Backend.Close()`. Hardening against core dumps/swap only — a live memory-read attacker still wins (see `aws-nitro`) |
 | Memory scraping (Vault backend) | Key never in signer process — not possible to extract |
 | Network interception | gRPC server binds to `127.0.0.1` by default; use TLS + mTLS for remote |
 | Credential theft | Use instance profiles / workload identity; no long-lived credentials in config |
 | Key rotation | Migrate to a new KMS-encrypted blob; no downtime required |
 
-The plaintext key exists in process memory only for the lifetime of the signer process. It is never logged, never written to disk, and is zeroed when the process shuts down.
+The plaintext key exists in process memory only for the lifetime of the signer process. It is never logged and never written to disk. Transient copies made during signing are zeroized after each operation and the long-lived copy is zeroed at shutdown — this limits what a core dump or swap image leaks, but it is not protection against an attacker who can read live process memory. If that is in your threat model, use the `aws-nitro` (or `vault`) backend, where the signer process never holds the key at all.
 
 ---
 

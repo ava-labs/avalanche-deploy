@@ -149,7 +149,7 @@ This is intentionally minimal: the KMS key ID is stored in config, not in the bl
 | ----------------------- | ---------------------------------------------------------------------------------- |
 | Key material at rest    | 32-byte scalar is encrypted with the cloud KMS key; only ciphertext on disk        |
 | Key material in transit | KMS API calls use TLS; gRPC binds to loopback by default                           |
-| Key material in memory  | Held in a Go `[]byte`; zeroed in `Close()`                                         |
+| Key material in memory  | Held in a Go `[]byte`, zeroed in `Close()`; transient per-sign copies zeroized after each op |
 | Process isolation       | Signer runs as a separate process from AvalancheGo; can run as a dedicated OS user |
 | KMS credential scope    | Production IAM roles need only `Decrypt`; `Encrypt` is only needed at setup time   |
 
