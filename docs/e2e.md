@@ -16,6 +16,10 @@ All backends share [`scripts/e2e/remote-setup.sh`](../scripts/e2e/remote-setup.s
 (except Nitro, which uses [`remote-setup-nitro.sh`](../scripts/e2e/remote-setup-nitro.sh))
 and the same [`tests/e2e`](../tests/e2e) gRPC validator.
 
+> ✅ **Validated**: `aws-kms` (EC2 reuse mode) and `vault` (Ubuntu 24.04 VM,
+> Vault + BLS plugin installed by `setup-vault-host.sh`; passed 2026-07-14) have
+> both completed this suite against real infrastructure with `ALL CHECKS PASSED`.
+>
 > **🧪 Experimental**: the `gcp-kms` and `azure-kv` orchestrators exist but have
 > **never been run against real GCP/Azure infrastructure** (no test VM was
 > available). Treat those backends as experimental until an E2E run passes here;
