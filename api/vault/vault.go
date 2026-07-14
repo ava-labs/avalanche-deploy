@@ -122,13 +122,23 @@ func (b *Backend) renewTokenLoop(ctx context.Context) {
 	for {
 		ttl, renewable, err := b.tokenTTL()
 		if err != nil {
-			b.logf("warn", "could not look up Vault token TTL", "err", err)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(30 * time.Second):
-				continue
+			// A failed lookup usually means the token has expired or been
+			// revoked — renewal cannot recover that, only a fresh login can.
+			// Re-authenticate here; otherwise an expired token wedges this
+			// loop (and therefore all signing) permanently, since the renewal
+			// path below is only reachable after a successful lookup.
+			b.logf("warn", "Vault token lookup failed, re-authenticating", "err", err)
+			if authErr := authenticate(b.client, b.cfg); authErr != nil {
+				b.logf("error", "Vault re-authentication failed", "err", authErr)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(30 * time.Second):
+				}
+			} else {
+				b.logf("info", "Vault re-authentication successful")
 			}
+			continue
 		}
 
 		// Root tokens and non-expiring tokens don't need renewal.
