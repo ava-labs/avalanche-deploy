@@ -109,9 +109,13 @@ start_vault() {
 }
 
 init_and_unseal() {
-  local initialized sealed
-  initialized="$(vault status -format=json 2>/dev/null | jq -r .initialized 2>/dev/null || echo unknown)"
-  sealed="$(vault status -format=json 2>/dev/null | jq -r .sealed 2>/dev/null || echo unknown)"
+  local status_json initialized sealed
+  # vault status exits 2 while sealed/uninitialized; under pipefail that makes a
+  # `... | jq ... || echo unknown` pipeline emit BOTH jq's value and "unknown".
+  # Capture the JSON first, then parse.
+  status_json="$(vault status -format=json 2>/dev/null || true)"
+  initialized="$(jq -r '.initialized' <<<"$status_json" 2>/dev/null || echo unknown)"
+  sealed="$(jq -r '.sealed' <<<"$status_json" 2>/dev/null || echo unknown)"
 
   if [[ "$initialized" == "false" ]]; then
     log "initializing vault (1 share / threshold 1 — dev/e2e only)"
