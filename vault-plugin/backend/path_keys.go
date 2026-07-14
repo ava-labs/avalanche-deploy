@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/hashicorp/vault/sdk/framework"
+	"github.com/hashicorp/vault/sdk/helper/locksutil"
 	"github.com/hashicorp/vault/sdk/logical"
 )
 
@@ -75,6 +76,12 @@ func pathKeys(b *backend) []*framework.Path {
 func (b *backend) handleGenerate(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get("name").(string)
 
+	// Hold the per-key write lock across the exists-check + write so a
+	// concurrent generate/import for the same name can't clobber this key.
+	lock := locksutil.LockForKey(b.locks, name)
+	lock.Lock()
+	defer lock.Unlock()
+
 	// Check if key already exists.
 	entry, err := req.Storage.Get(ctx, storageKeyPrefix+name)
 	if err != nil {
@@ -127,6 +134,12 @@ func (b *backend) handleImport(ctx context.Context, req *logical.Request, d *fra
 	if err != nil {
 		return nil, fmt.Errorf("invalid BLS key: %w", err)
 	}
+
+	// Hold the per-key write lock across the exists-check + write so a
+	// concurrent generate/import for the same name can't clobber this key.
+	lock := locksutil.LockForKey(b.locks, name)
+	lock.Lock()
+	defer lock.Unlock()
 
 	// Check if key already exists.
 	entry, err := req.Storage.Get(ctx, storageKeyPrefix+name)

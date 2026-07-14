@@ -7,18 +7,28 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
 )
 
 // AvalancheGo domain separation tags — hardcoded so callers don't need to
-// supply them.  The generic sign endpoint accepts an arbitrary DST for
-// flexibility; sign-pop uses the PoP DST unconditionally.
+// supply them.  /sign defaults to the Warp DST; sign-pop uses the PoP DST
+// unconditionally.
 var (
 	dstSign     = hex.EncodeToString([]byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_"))
 	dstPopProve = hex.EncodeToString([]byte("BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_"))
 )
+
+// allowedSignDSTs is the allow-list for the generic /sign endpoint. Restricting
+// it to Avalanche's two DSTs stops a caller holding only /sign from signing
+// under an arbitrary domain — e.g. reusing the validator key in an unrelated
+// BLS protocol. Keys are the lowercase hex encodings of the DSTs above.
+var allowedSignDSTs = map[string]struct{}{
+	dstSign:     {},
+	dstPopProve: {},
+}
 
 func pathSign(b *backend) []*framework.Path {
 	return []*framework.Path{
@@ -35,7 +45,7 @@ func pathSign(b *backend) []*framework.Path {
 				},
 				"dst": {
 					Type:        framework.TypeString,
-					Description: "Domain separation tag, hex-encoded. Defaults to the AvalancheGo Warp DST.",
+					Description: "Domain separation tag, hex-encoded. Defaults to the AvalancheGo Warp DST. Only the Warp and proof-of-possession DSTs are accepted.",
 				},
 			},
 			ExistenceCheck: b.keyExists,
@@ -78,7 +88,12 @@ func (b *backend) handleSign(ctx context.Context, req *logical.Request, d *frame
 
 	dst := dstSign
 	if v, ok := d.GetOk("dst"); ok {
-		dst = v.(string)
+		// hex is case-insensitive; normalize so the allow-list check can't be
+		// bypassed with mixed-case input.
+		dst = strings.ToLower(v.(string))
+		if _, ok := allowedSignDSTs[dst]; !ok {
+			return logical.ErrorResponse("dst not allowed: /sign accepts only the AvalancheGo Warp or proof-of-possession DST"), nil
+		}
 	}
 
 	return b.doSign(ctx, req, name, msgHex.(string), dst)

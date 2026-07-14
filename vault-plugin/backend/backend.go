@@ -11,17 +11,25 @@ import (
 	"fmt"
 
 	"github.com/hashicorp/vault/sdk/framework"
+	"github.com/hashicorp/vault/sdk/helper/locksutil"
 	"github.com/hashicorp/vault/sdk/logical"
 )
 
 // backend is the Vault plugin backend.
 type backend struct {
 	*framework.Backend
+
+	// locks serializes read-check-then-write key creation per key name, so two
+	// concurrent generate/import calls for the same key can't both see "no key"
+	// and race to overwrite a validator's BLS identity.
+	locks []*locksutil.LockEntry
 }
 
 // Factory is the Vault plugin factory function registered in main.go.
 func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend, error) {
-	b := &backend{}
+	b := &backend{
+		locks: locksutil.CreateLocks(),
+	}
 	b.Backend = &framework.Backend{
 		Help:        backendHelp,
 		BackendType: logical.TypeLogical,
