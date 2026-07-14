@@ -161,7 +161,10 @@ func commonKMSFlags(cmd *cobra.Command) *config.Config {
 	// Vault flags.
 	cmd.Flags().String("vault-addr", "", "Vault server address (e.g. http://127.0.0.1:8200)")
 	cmd.Flags().String("vault-token", "", "Vault token for authentication")
-	cmd.Flags().String("vault-mount-path", "bls", "Vault secrets engine mount path")
+	// Default is empty (not "bls") so an unset flag does not clobber a
+	// mount_path set in the config file; keytool falls back to "bls" itself
+	// when the resolved value is empty.
+	cmd.Flags().String("vault-mount-path", "", "Vault secrets engine mount path (default \"bls\")")
 	cmd.Flags().String("vault-key-name", "", "Name of the BLS key within Vault")
 
 	return cfg

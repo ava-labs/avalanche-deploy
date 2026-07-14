@@ -18,28 +18,40 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: 'stable'
+          go-version-file: go.mod   # track the toolchain the module declares
           cache: false
 
       - name: Install C build tools
         run: sudo apt-get install -y gcc
 
+      # Formatting must be clean across every module (root + submodules).
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
       - name: Build
         run: CGO_ENABLED=1 go build ./...
 
-      - name: Test
-        run: CGO_ENABLED=1 go test ./...
+      - name: Vet
+        run: CGO_ENABLED=1 go vet ./...
+
+      # Race detector on the root module — the gRPC server signs concurrently.
+      - name: Test (race)
+        run: CGO_ENABLED=1 go test -race ./...
 
       # Cross-checks BLS signing (DSTs and real signatures) against
       # avalanchego's own bls package — catches the failure mode where
       # PoP/registration works but every warp signature is rejected.
       - name: BLS compatibility tests (tests module)
-        run: cd tests && CGO_ENABLED=1 go test ./...
+        run: cd tests && CGO_ENABLED=1 go test -race ./...
 
       # The enclave and vault-plugin are separate modules the root
-      # go test cannot see — make sure they at least compile.
-      - name: Build enclave module
-        run: cd enclave && CGO_ENABLED=1 go build ./...
+      # go test cannot see — vet + build them so drift is caught.
+      - name: Enclave module (vet + build)
+        run: cd enclave && CGO_ENABLED=1 go vet ./... && CGO_ENABLED=1 go build ./...
 
-      - name: Build vault-plugin module
-        run: cd vault-plugin && CGO_ENABLED=1 go build ./...
+      - name: Vault-plugin module (vet + build)
+        run: cd vault-plugin && CGO_ENABLED=1 go vet ./... && CGO_ENABLED=1 go build ./...

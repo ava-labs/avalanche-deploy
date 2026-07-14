@@ -4,8 +4,12 @@
 
 # Build artifacts — don't copy local binaries into the image
 avalanche-remote-signer
+avalanche-kms-signer
 vault-plugin-bls
 vault-plugin/vault-plugin-bls
+enclave/enclave
+enclave/enclave-bin
+*.eif
 
 # macOS metadata
 .DS_Store

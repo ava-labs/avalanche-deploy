@@ -9,6 +9,10 @@
 /avalanche-kms-signer-bin
 /vault-plugin-bls
 /vault-plugin/vault-plugin-bls
+# Enclave build outputs (statically-linked binary + packaged image)
+/enclave/enclave
+/enclave/enclave-bin
+*.eif
 
 # Go test & coverage output
 *.out
@@ -23,8 +27,3 @@ coverage.html
 *.swo
 .idea/
 .vscode/
-
-# NOTE: vendor/ is intentionally committed and is NOT ignored here.
-# The Dockerfile builds with `-mod=vendor` for network-free, reproducible
-# (enclave) builds, and scripts/vendor-blst.sh layers blst's C sources on top
-# of `go mod vendor`. Do not add vendor/ to this file.
