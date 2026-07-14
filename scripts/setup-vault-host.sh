@@ -92,9 +92,13 @@ start_vault() {
   fi
   log "starting vault server"
   nohup vault server -config="$VAULT_CONFIG" >/tmp/vault-server.log 2>&1 &
-  local i
-  for i in $(seq 1 30); do
-    if vault status >/dev/null 2>&1 || vault status 2>&1 | grep -qE 'initialized (true|false)|Sealed (true|false)'; then
+  # vault status exits 0 (unsealed) or 2 (sealed/uninitialized) — both mean the
+  # server is up and reachable; anything else means it isn't answering yet.
+  local rc
+  for _ in $(seq 1 30); do
+    rc=0
+    vault status >/dev/null 2>&1 || rc=$?
+    if [[ $rc -eq 0 || $rc -eq 2 ]]; then
       return 0
     fi
     sleep 1
