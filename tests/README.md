@@ -5,7 +5,7 @@
 ## What this is
 
 A separate Go module (`github.com/ava-labs/avalanche-remote-signer/tests`, own
-`go.mod` with `replace ... => ../`, Go 1.25.8). It isolates the heavy
+`go.mod` with `replace ... => ../`, Go 1.25.12). It isolates the heavy
 `github.com/ava-labs/avalanchego` dependency from the root module and shipped
 binaries.
 

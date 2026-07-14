@@ -40,7 +40,7 @@ Adding a provider = implement that interface + register it in `main/`.
 | **tests** | `tests/` | isolates the heavy `avalanchego` dependency; BLS compat tests + live `e2e` validator |
 
 `enclave/` and `tests/` use `replace => ../` to build against the root module.
-All modules target **Go 1.25.8** (root `go.mod`, `tests/go.mod`, `enclave/`, `vault-plugin/`).
+All modules target **Go 1.25.12** (root `go.mod`, `tests/go.mod`, `enclave/`, `vault-plugin/`).
 
 ## Folder map
 

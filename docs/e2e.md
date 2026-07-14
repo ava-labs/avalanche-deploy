@@ -155,7 +155,7 @@ Tunables (env):
 | `E2E_AMI_ID` | Ubuntu 22.04 via SSM | Override AMI when launching EC2 |
 | `E2E_NETWORK_ID` | `fuji` | Avalanche network ID |
 | `AVALANCHEGO_VERSION` | `v1.14.0` | Must support `--staking-rpc-signer-endpoint` |
-| `GO_VERSION` | `1.25.8` | Go toolchain on the remote host |
+| `GO_VERSION` | `1.25.12` | Go toolchain on the remote host |
 | `E2E_RUN_ID` | auto-generated | Correlates tags, temp dirs, and logs |
 | `E2E_KEEP` | `0` | Set to `1` to skip teardown (you clean up) |
 

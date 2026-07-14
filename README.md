@@ -72,7 +72,7 @@ cd tests && go test ./...
 
 ## Prerequisites
 
-- Go 1.25+ with CGO enabled (`CGO_ENABLED=1`) — the `tests/` module pins Go 1.25.8
+- Go 1.25+ with CGO enabled (`CGO_ENABLED=1`) — the `tests/` module pins Go 1.25.12
 - A C compiler (Xcode CLT on macOS: `xcode-select --install`)
 - An AWS, GCP, or Azure account with a KMS key created
 - `protoc` only needed if you modify `signer.proto` (pre-generated files are checked in)

@@ -17,7 +17,7 @@ VAULT_DATA="${VAULT_DATA:-${VAULT_HOME}/data}"
 PLUGIN_DIR="${PLUGIN_DIR:-${VAULT_HOME}/plugins}"
 PLUGIN_NAME="vault-plugin-bls"
 MOUNT_PATH="${VAULT_MOUNT_PATH:-bls}"
-GO_VERSION="${GO_VERSION:-1.25.8}"
+GO_VERSION="${GO_VERSION:-1.25.12}"
 export VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
 
 # `vault operator init` writes the root token + unseal key to disk; keep

@@ -46,7 +46,7 @@ install_build_deps() {
 }
 
 install_go() {
-  local go_version="${GO_VERSION:-1.25.8}"
+  local go_version="${GO_VERSION:-1.25.12}"
   if ! command -v go >/dev/null 2>&1 || ! go version | grep -q "go${go_version}"; then
     curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o /tmp/go.tgz
     sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tgz
