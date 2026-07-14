@@ -16,7 +16,15 @@ REPO="${REPO:-$HOME/remote-signer}"
 SIGNER_ADDR="127.0.0.1:50051"
 SIGNER_BIN="/tmp/avalanche-remote-signer"
 BLOB_PATH="/tmp/bls.key.enc"
-EIF_PATH="${E2E_EIF_PATH:-$HOME/remote-signer.eif}"
+# Default EIF path depends on mode: reuse mode points at the deployed EIF, but a
+# rebuild writes to a SEPARATE file so it can never clobber a production EIF
+# (the key blob is baked into the EIF — overwriting it would silently change
+# the validator's BLS identity on next restart).
+if [[ "${E2E_SKIP_EIF_REBUILD:-0}" == "1" ]]; then
+  EIF_PATH="${E2E_EIF_PATH:-$HOME/remote-signer.eif}"
+else
+  EIF_PATH="${E2E_EIF_PATH:-$HOME/remote-signer-e2e.eif}"
+fi
 ENCLAVE_CID="${E2E_ENCLAVE_CID:-16}"
 CPU_COUNT="${E2E_NITRO_CPU_COUNT:-2}"
 MEMORY_MIB="${E2E_NITRO_MEMORY_MIB:-512}"
@@ -51,12 +59,21 @@ stop_prod_nitro_services
 stop_prior_signer_node
 terminate_all_nitro_enclaves
 
-e2e_setup_log "generating KMS-encrypted BLS key for the enclave"
-"$SIGNER_BIN" keytool generate \
-  --backend aws-kms --aws-region "$AWS_REGION" --aws-kms-key-id "$KMS_KEY_ARN" \
-  --output "$BLOB_PATH" | tee /tmp/keytool.out
-KEYTOOL_PUB_HEX="$(grep -F 'BLS public key (hex):' /tmp/keytool.out | awk '{print $NF}')"
-[[ -n "$KEYTOOL_PUB_HEX" ]] || { echo "could not parse keytool public key"; exit 1; }
+# The blob is baked into the EIF at build time, so a fresh key is only
+# meaningful when we rebuild. In reuse mode the enclave signs with whatever
+# key its EIF already contains — generating (and match-checking) a new one
+# would always fail.
+KEYTOOL_PUB_HEX=""
+if [[ "${E2E_SKIP_EIF_REBUILD:-0}" == "1" ]]; then
+  e2e_setup_log "E2E_SKIP_EIF_REBUILD=1 — reusing ${EIF_PATH}; signer identity comes from the key baked into that EIF"
+else
+  e2e_setup_log "generating KMS-encrypted BLS key for the enclave"
+  "$SIGNER_BIN" keytool generate \
+    --backend aws-kms --aws-region "$AWS_REGION" --aws-kms-key-id "$KMS_KEY_ARN" \
+    --output "$BLOB_PATH" | tee /tmp/keytool.out
+  KEYTOOL_PUB_HEX="$(grep -F 'BLS public key (hex):' /tmp/keytool.out | awk '{print $NF}')"
+  [[ -n "$KEYTOOL_PUB_HEX" ]] || { echo "could not parse keytool public key"; exit 1; }
+fi
 
 if [[ "${E2E_SKIP_EIF_REBUILD:-0}" != "1" ]]; then
   e2e_setup_log "building enclave EIF at ${EIF_PATH} (slow — set E2E_SKIP_EIF_REBUILD=1 to reuse existing EIF)"
@@ -99,7 +116,11 @@ SIGNER_PID=$!
 wait_signer_listening "$SIGNER_PID"
 echo "signer listening (pid $SIGNER_PID)"
 
-verify_signer_pubkey_matches_keytool "$REPO" "$KEYTOOL_PUB_HEX" "$SIGNER_ADDR"
+if [[ -n "$KEYTOOL_PUB_HEX" ]]; then
+  verify_signer_pubkey_matches_keytool "$REPO" "$KEYTOOL_PUB_HEX" "$SIGNER_ADDR"
+else
+  e2e_setup_log "skipping keytool match (reused EIF) — validator still verifies signing end to end"
+fi
 run_avalanchego_and_validate "$REPO" "$SIGNER_ADDR"
 
 kill "$SIGNER_PID" 2>/dev/null || true
