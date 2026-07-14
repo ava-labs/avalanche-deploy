@@ -44,16 +44,23 @@ e2e_ship_repo() {
   $ssh_cmd "$SSH_USER@$HOST" 'mkdir -p ~/remote-signer && tar -xzf /tmp/repo.tgz -C ~/remote-signer'
 }
 
-# Run remote-setup (or another script) on the host with the given env prefix.
+# Run remote-setup (or another script) on the host with the given env (a
+# space-separated list of KEY=VALUE, e.g. "E2E_BACKEND=vault VAULT_TOKEN=…").
+# The env is `export`ed from a script fed over stdin rather than embedded in the
+# ssh command string, so secrets like VAULT_TOKEN never appear in argv/`ps` on
+# the laptop or the host — only `bash -s` does.
 e2e_run_remote() {
   local ssh_cmd=$1
   local setup_script=$2
   shift 2
   local remote_env="$*"
   e2e_log "running ${setup_script} on $HOST …"
-  if $ssh_cmd "$SSH_USER@$HOST" \
-       "cd ~/remote-signer && ${remote_env} E2E_RUN_ID=$RUN_ID NETWORK_ID=$NETWORK_ID AVALANCHEGO_VERSION=$AVALANCHEGO_VERSION bash scripts/e2e/${setup_script}"
-  then
+  local script="set -euo pipefail
+cd ~/remote-signer
+export E2E_RUN_ID=${RUN_ID} NETWORK_ID=${NETWORK_ID} AVALANCHEGO_VERSION=${AVALANCHEGO_VERSION}
+${remote_env:+export ${remote_env}}
+exec bash scripts/e2e/${setup_script}"
+  if $ssh_cmd "$SSH_USER@$HOST" 'bash -s' <<<"$script"; then
     e2e_log "✅ E2E PASSED — warp + proof-of-possession signing verified end to end."
   else
     e2e_fail "❌ E2E FAILED — see the instance output above."

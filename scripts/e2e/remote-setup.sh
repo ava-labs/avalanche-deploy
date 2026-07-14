@@ -26,6 +26,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
+umask 077 # the signer config may hold a Vault token — keep created files owner-only
+
+# Restore production services and clean up test processes on ANY exit, so a
+# failure (or success) never leaves the validator down or ports held.
+cleanup() {
+  set +e
+  [[ -n "${SIGNER_PID:-}" ]] && kill "$SIGNER_PID" 2>/dev/null
+  kill_listeners_on_port 50051
+  kill_listeners_on_port 9650
+  rm -f /tmp/signer.yaml
+  restart_prod_services
+}
+# NOTE: the trap is armed later, right before we first stop/kill anything — an
+# early exit (e.g. bad backend, keytool failure) must not kill prod listeners.
+
 case "$E2E_BACKEND" in
   aws-kms)
     AWS_REGION="${AWS_REGION:?AWS_REGION required}"
@@ -84,6 +99,11 @@ esac
 KEYTOOL_PUB_HEX="$(grep -F 'BLS public key (hex):' /tmp/keytool.out | awk '{print $NF}')"
 [[ -n "$KEYTOOL_PUB_HEX" ]] || { echo "could not parse keytool public key from output"; exit 1; }
 
+# On a live-validator host, stop the systemd units first so they don't respawn
+# and fight the test for the ports. Arm the cleanup trap here — from this point
+# on, ANY exit restores the production services it stopped.
+trap cleanup EXIT
+stop_prod_services
 stop_prior_signer_node
 
 e2e_setup_log "starting the signer (${E2E_BACKEND})"

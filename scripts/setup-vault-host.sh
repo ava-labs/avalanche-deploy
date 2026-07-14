@@ -20,6 +20,10 @@ MOUNT_PATH="${VAULT_MOUNT_PATH:-bls}"
 GO_VERSION="${GO_VERSION:-1.25.8}"
 export VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
 
+# `vault operator init` writes the root token + unseal key to disk; keep
+# everything this script creates owner-only (dev/e2e credentials).
+umask 077
+
 log() { printf '\n=== %s ===\n' "$*"; }
 fail() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -120,6 +124,7 @@ init_and_unseal() {
   if [[ "$initialized" == "false" ]]; then
     log "initializing vault (1 share / threshold 1 — dev/e2e only)"
     vault operator init -key-shares=1 -key-threshold=1 | tee /tmp/vault-init.txt
+    chmod 600 /tmp/vault-init.txt # explicit: a pre-existing file keeps its old mode through tee
     initialized=true
     sealed=true
   fi

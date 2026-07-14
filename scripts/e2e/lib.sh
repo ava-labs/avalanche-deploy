@@ -66,15 +66,50 @@ stop_prior_signer_node() {
   wait_port_free "${node_api##*:}"
 }
 
-# Stop production systemd units that would respawn a signer/enclave during E2E.
-stop_prod_nitro_services() {
+# Production systemd units stopped by stop_prod_services, in stop order (signer
+# before node). restart_prod_services brings them back on exit.
+E2E_STOPPED_UNITS=""
+
+# Stop production systemd units that would otherwise fight the E2E for the
+# ports / the enclave slot. Records each unit it actually stops so it can be
+# restarted afterwards — the test MUST leave the validator as it found it.
+stop_prod_services() {
   command -v systemctl >/dev/null || return 0
   local unit
   for unit in remote-signer avalanche-remote-signer avalanchego; do
     if systemctl is-active --quiet "$unit" 2>/dev/null; then
-      e2e_setup_log "stopping systemd unit ${unit} (would hold the enclave)"
-      sudo systemctl stop "$unit" 2>/dev/null || systemctl stop "$unit" 2>/dev/null || true
+      e2e_setup_log "stopping production systemd unit ${unit} (restarted on exit)"
+      if sudo systemctl stop "$unit" 2>/dev/null || systemctl stop "$unit" 2>/dev/null; then
+        E2E_STOPPED_UNITS="${E2E_STOPPED_UNITS:+$E2E_STOPPED_UNITS }$unit"
+      fi
     fi
+  done
+}
+
+# Restart the production units stop_prod_services stopped, in the same order
+# (signer before node). Safe to call from an EXIT trap; never exits nonzero.
+restart_prod_services() {
+  [[ -n "${E2E_STOPPED_UNITS:-}" ]] || return 0
+  command -v systemctl >/dev/null || return 0
+  local unit
+  for unit in $E2E_STOPPED_UNITS; do
+    e2e_setup_log "restarting production systemd unit ${unit}"
+    sudo systemctl start "$unit" 2>/dev/null || systemctl start "$unit" 2>/dev/null || \
+      echo "WARNING: failed to restart ${unit} — start it manually" >&2
+  done
+  E2E_STOPPED_UNITS=""
+}
+
+# Best-effort enclave termination for use inside an EXIT trap: frees the enclave
+# slot so a restarted production signer can claim it, and never exits nonzero
+# (unlike terminate_all_nitro_enclaves, which verifies and may exit 1).
+best_effort_terminate_enclaves() {
+  command -v nitro-cli >/dev/null 2>&1 || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  local id
+  for id in $(nitro-cli describe-enclaves 2>/dev/null | jq -r '.[].EnclaveID' 2>/dev/null); do
+    [[ -z "$id" || "$id" == "null" ]] && continue
+    sudo nitro-cli terminate-enclave --enclave-id "$id" >/dev/null 2>&1 || true
   done
 }
 

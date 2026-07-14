@@ -34,8 +34,33 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
+umask 077 # the signer config may hold secrets — keep created files owner-only
+
+# Restore production services + clean up test processes/enclaves on ANY exit.
+# Armed below, right before the first stop/kill — an early exit (bad args, the
+# EIF guard) must not touch a live host.
+cleanup() {
+  set +e
+  [[ -n "${SIGNER_PID:-}" ]] && kill "$SIGNER_PID" 2>/dev/null
+  kill_listeners_on_port 50051
+  kill_listeners_on_port 9650
+  best_effort_terminate_enclaves
+  rm -f /tmp/signer.yaml
+  restart_prod_services
+}
+
 if ! command -v nitro-cli >/dev/null; then
   echo "nitro-cli not found — use Amazon Linux 2023 with Nitro Enclaves enabled (see docs/aws-nitro.md)" >&2
+  exit 1
+fi
+
+# In rebuild mode we build a fresh EIF (with a fresh key) at EIF_PATH. Refuse to
+# overwrite an existing EIF: its baked-in key means overwriting could silently
+# change a validator's BLS identity on the next restart. Checked before any
+# service is stopped, so this failure leaves the host untouched.
+if [[ "${E2E_SKIP_EIF_REBUILD:-0}" != "1" && -e "$EIF_PATH" && "${E2E_ALLOW_EIF_OVERWRITE:-0}" != "1" ]]; then
+  echo "refusing to overwrite existing EIF at $EIF_PATH" >&2
+  echo "  reuse it with E2E_SKIP_EIF_REBUILD=1, choose a new E2E_EIF_PATH, or force with E2E_ALLOW_EIF_OVERWRITE=1" >&2
   exit 1
 fi
 
@@ -54,8 +79,12 @@ e2e_setup_log "building the signer"
 cd "$REPO"
 go build -o "$SIGNER_BIN" ./main/
 
+# From here on we stop/kill things — arm the cleanup trap so ANY exit restores
+# the production services and frees the enclave slot.
+trap cleanup EXIT
+
 # Stop any prior signer/node, production services, and stale enclaves.
-stop_prod_nitro_services
+stop_prod_services
 stop_prior_signer_node
 terminate_all_nitro_enclaves
 
@@ -91,7 +120,7 @@ if [[ "${E2E_SKIP_EIF_REBUILD:-0}" != "1" ]]; then
 fi
 [[ -f "$EIF_PATH" ]] || { echo "EIF not found at $EIF_PATH — unset E2E_SKIP_EIF_REBUILD or build manually"; exit 1; }
 
-stop_prod_nitro_services
+stop_prod_services
 stop_prior_signer_node
 terminate_all_nitro_enclaves
 sleep 3
