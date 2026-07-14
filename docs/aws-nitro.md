@@ -399,7 +399,7 @@ grpcurl -plaintext \
   127.0.0.1:50051 signer.Signer/PublicKey
 grpcurl -plaintext \
   -proto spec/signer/signer.proto -import-path spec \
-  -d '{"message":"cGVybWFmcm9zdC1kc3QtdGVzdA=="}' \
+  -d '{"message":"cmVtb3RlLXNpZ25lci1kc3QtdGVzdA=="}' \
   127.0.0.1:50051 signer.Signer/Sign
 ```
 
