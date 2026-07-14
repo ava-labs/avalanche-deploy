@@ -26,11 +26,16 @@ AvalancheGo validators use BLS keys for peer handshakes and ICM (Interchain Mess
 AvalancheGo ──gRPC──▶ avalanche-remote-signer ──▶ Backend
                        (signer.proto)             ├── memory   (dev/test)
                                                   ├── aws-kms  ✅ available
-                                                  ├── gcp-kms  ✅ available
-                                                  ├── azure-kv ✅ available
+                                                  ├── gcp-kms  🧪 experimental
+                                                  ├── azure-kv 🧪 experimental
                                                   ├── vault    ✅ available
                                                   └── aws-nitro ✅ available
 ```
+
+> **🧪 Experimental**: the `gcp-kms` and `azure-kv` backends have unit-test
+> coverage but have **not** been validated by the [end-to-end suite](docs/e2e.md)
+> against real GCP/Azure infrastructure. They may be modified at any time and
+> should not be relied on for production validators until an E2E run has passed.
 
 For cloud KMS backends (AWS/GCP/Azure), the sidecar decrypts the BLS key blob at startup and holds it in memory for signing. The plaintext key **never touches disk** at runtime.
 
@@ -264,8 +269,8 @@ All config fields can be set via environment variables:
 |---|---|
 | Architecture | [docs/architecture.md](docs/architecture.md) — package layout, key lifecycle, testing pyramid |
 | AWS KMS | [docs/aws-kms.md](docs/aws-kms.md) |
-| GCP Cloud KMS | [docs/gcp-kms.md](docs/gcp-kms.md) |
-| Azure Key Vault | [docs/azure-kv.md](docs/azure-kv.md) |
+| GCP Cloud KMS (🧪 experimental) | [docs/gcp-kms.md](docs/gcp-kms.md) |
+| Azure Key Vault (🧪 experimental) | [docs/azure-kv.md](docs/azure-kv.md) |
 | HashiCorp Vault | [docs/vault.md](docs/vault.md) |
 | AWS Nitro Enclave | [docs/aws-nitro.md](docs/aws-nitro.md) |
 | End-to-end tests | [docs/e2e.md](docs/e2e.md) — `./scripts/e2e-aws.sh`, `e2e-gcp.sh`, `e2e-azure.sh`, `e2e-vault.sh`, `e2e-aws-nitro.sh` |

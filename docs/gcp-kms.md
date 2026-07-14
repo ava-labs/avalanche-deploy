@@ -1,5 +1,10 @@
 # GCP Cloud KMS Backend
 
+> **🧪 Experimental**: this backend has unit-test coverage but has not been
+> validated by the [end-to-end suite](e2e.md) against real GCP infrastructure.
+> It may be modified at any time and should not be relied on for production
+> validators until an E2E run has passed.
+
 This guide covers setting up the `gcp-kms` backend: creating the key ring and key, configuring IAM, generating or migrating your BLS key, and running the signer on GCE or GKE.
 
 ---

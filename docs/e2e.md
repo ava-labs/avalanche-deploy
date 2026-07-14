@@ -7,14 +7,19 @@ private key held by the chosen backend (KMS, Vault, or Nitro enclave).
 | Backend | Orchestrator | Host provisioning |
 |---|---|---|
 | `aws-kms` | [`scripts/e2e-aws.sh`](../scripts/e2e-aws.sh) | Optional (AWS CLI); reuse EC2 common |
-| `gcp-kms` | [`scripts/e2e-gcp.sh`](../scripts/e2e-gcp.sh) | Reuse a Linux VM with GCP credentials |
-| `azure-kv` | [`scripts/e2e-azure.sh`](../scripts/e2e-azure.sh) | Reuse a Linux VM with Azure credentials |
+| `gcp-kms` 🧪 | [`scripts/e2e-gcp.sh`](../scripts/e2e-gcp.sh) | Reuse a Linux VM with GCP credentials |
+| `azure-kv` 🧪 | [`scripts/e2e-azure.sh`](../scripts/e2e-azure.sh) | Reuse a Linux VM with Azure credentials |
 | `vault` | [`scripts/e2e-vault.sh`](../scripts/e2e-vault.sh) | Reuse a host with Vault + BLS plugin |
 | `aws-nitro` | [`scripts/e2e-aws-nitro.sh`](../scripts/e2e-aws-nitro.sh) | Reuse a Nitro-enabled EC2 host |
 
 All backends share [`scripts/e2e/remote-setup.sh`](../scripts/e2e/remote-setup.sh)
 (except Nitro, which uses [`remote-setup-nitro.sh`](../scripts/e2e/remote-setup-nitro.sh))
 and the same [`tests/e2e`](../tests/e2e) gRPC validator.
+
+> **🧪 Experimental**: the `gcp-kms` and `azure-kv` orchestrators exist but have
+> **never been run against real GCP/Azure infrastructure** (no test VM was
+> available). Treat those backends as experimental until an E2E run passes here;
+> expect first-run fixes.
 
 ## Quick reference — what you need before running
 

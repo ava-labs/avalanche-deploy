@@ -2,6 +2,8 @@
 
 > `Backend` implementation that unwraps a BLS key blob with an Azure Key Vault RSA key at startup and signs in-process.
 
+> **🧪 Experimental**: not yet validated by the [end-to-end suite](../../docs/e2e.md) against real Azure infrastructure; may be modified at any time. Do not rely on it for production validators until an E2E run has passed.
+
 ## What this is
 The `azure-kv` backend. At boot it reads the encrypted key blob from disk and calls Key Vault's `Decrypt` (RSA-OAEP-256) to unwrap the 32-byte BLS scalar into host memory; signing then happens locally via blst. It is one of the `api.Backend` providers behind `signerserver/`, selected when `backend: azure-kv`.
 

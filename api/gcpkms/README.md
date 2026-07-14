@@ -2,6 +2,8 @@
 
 > `Backend` implementation that decrypts a BLS key blob with Google Cloud KMS at startup and signs in-process.
 
+> **🧪 Experimental**: not yet validated by the [end-to-end suite](../../docs/e2e.md) against real GCP infrastructure; may be modified at any time. Do not rely on it for production validators until an E2E run has passed.
+
 ## What this is
 The `gcp-kms` backend. At boot it reads the encrypted key blob from disk and calls Cloud KMS `Decrypt` to recover the 32-byte BLS scalar into host memory; signing then happens locally via blst. It is one of the `api.Backend` providers behind `signerserver/`, selected when `backend: gcp-kms`.
 

@@ -50,8 +50,8 @@ All modules target **Go 1.25.8** (root `go.mod`, `tests/go.mod`, `enclave/`, `va
 | `signerserver/` | gRPC server implementing the signer service; delegates to an `api.Backend` |
 | `api/` | The `Backend` interface and all KMS provider implementations |
 | `api/awskms/` | AWS KMS backend |
-| `api/gcpkms/` | GCP Cloud KMS backend |
-| `api/azurekv/` | Azure Key Vault backend |
+| `api/gcpkms/` | GCP Cloud KMS backend (🧪 experimental — not yet E2E-validated) |
+| `api/azurekv/` | Azure Key Vault backend (🧪 experimental — not yet E2E-validated) |
 | `api/vault/` | HashiCorp Vault backend (talks to `vault-plugin/`) |
 | `api/awsnitro/` | AWS Nitro enclave backend (host side; talks to `enclave/` over vsock) |
 | `mockapi/` | In-memory backend — **dev/test only**, never production |
