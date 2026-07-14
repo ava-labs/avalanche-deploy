@@ -99,8 +99,13 @@ for e in json.load(sys.stdin):
   local enclave_id
   while read -r enclave_id; do
     [[ -z "$enclave_id" || "$enclave_id" == "null" ]] && continue
-    nitro-cli terminate-enclave --enclave-id "$enclave_id" 2>/dev/null || \
-      sudo nitro-cli terminate-enclave --enclave-id "$enclave_id" || true
+    # The enclave may already be tearing itself down (the signer's shutdown
+    # terminates its own enclave), in which case nitro-cli fails with a
+    # spurious socket error (E11). Quiet both attempts — the verification
+    # loop below is the real success check and fails loudly if anything
+    # actually survives.
+    nitro-cli terminate-enclave --enclave-id "$enclave_id" >/dev/null 2>&1 || \
+      sudo nitro-cli terminate-enclave --enclave-id "$enclave_id" >/dev/null 2>&1 || true
   done <<< "$ids"
   local i
   for i in $(seq 1 30); do
