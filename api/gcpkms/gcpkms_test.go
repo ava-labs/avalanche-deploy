@@ -4,6 +4,7 @@
 package gcpkms
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"os"
@@ -85,12 +86,34 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("expected 48-byte public key, got %d", len(pk))
 	}
 
-	sig, err := b.Sign(context.Background(), []byte("hello warp"))
+	msg := []byte("hello warp")
+	sig, err := b.Sign(context.Background(), msg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(sig) != 96 {
 		t.Errorf("expected 96-byte signature, got %d", len(sig))
+	}
+
+	popSig, err := b.SignProofOfPossession(context.Background(), msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(popSig) != 96 {
+		t.Errorf("expected 96-byte PoP signature, got %d", len(popSig))
+	}
+
+	// Sign must use the Warp DST and PoP the PoP DST. A swap passes the length
+	// checks but is rejected on-network (the historical RO_NUL_/RO_POP_ bug).
+	// BLS signing is deterministic — reconstruct from the known key.
+	if want, _ := blstutil.Sign(skBytes, msg, blstutil.DSTSign); !bytes.Equal(sig, want) {
+		t.Error("Sign did not use the Warp DST (blstutil.DSTSign)")
+	}
+	if want, _ := blstutil.Sign(skBytes, msg, blstutil.DSTPoP); !bytes.Equal(popSig, want) {
+		t.Error("SignProofOfPossession did not use the PoP DST (blstutil.DSTPoP)")
+	}
+	if bytes.Equal(sig, popSig) {
+		t.Error("Sign and SignProofOfPossession produced identical bytes — DSTs not differentiated")
 	}
 }
 

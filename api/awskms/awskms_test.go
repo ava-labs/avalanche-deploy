@@ -4,6 +4,7 @@
 package awskms
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"os"
@@ -100,6 +101,21 @@ func TestRoundTrip(t *testing.T) {
 	}
 	if len(popSig) != 96 {
 		t.Errorf("expected 96-byte PoP signature, got %d", len(popSig))
+	}
+
+	// The backend must sign with the Warp DST and prove-possess with the PoP
+	// DST. A swap passes the length checks above but is silently rejected
+	// on-network (the historical RO_NUL_/RO_POP_ failure). BLS signing is
+	// deterministic, so reconstruct the expected outputs from the known key
+	// and compare byte-for-byte.
+	if want, _ := blstutil.Sign(skBytes, msg, blstutil.DSTSign); !bytes.Equal(sig, want) {
+		t.Error("Sign did not use the Warp DST (blstutil.DSTSign)")
+	}
+	if want, _ := blstutil.Sign(skBytes, msg, blstutil.DSTPoP); !bytes.Equal(popSig, want) {
+		t.Error("SignProofOfPossession did not use the PoP DST (blstutil.DSTPoP)")
+	}
+	if bytes.Equal(sig, popSig) {
+		t.Error("Sign and SignProofOfPossession produced identical bytes — DSTs not differentiated")
 	}
 }
 

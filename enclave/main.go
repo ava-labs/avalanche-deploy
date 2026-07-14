@@ -34,14 +34,14 @@ import (
 	"github.com/mdlayher/vsock"
 	blst "github.com/supranational/blst/bindings/go"
 
+	blstutil "github.com/ava-labs/avalanche-remote-signer/internal/blstutil"
 	enclaveproto "github.com/ava-labs/avalanche-remote-signer/internal/enclaveproto"
 )
 
-// Domain separation tags — must match AvalancheGo exactly.
-var (
-	dstSign     = []byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
-	dstPopProve = []byte("BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
-)
+// Domain separation tags come from blstutil — the single source of truth that
+// the tests/ module cross-checks against AvalancheGo. Do not hand-copy them
+// here; a drift between this enclave and the host backends is exactly the
+// RO_NUL_/RO_POP_ failure that silently breaks every warp signature.
 
 // hostCID is the vsock CID of the host — always 3 inside an enclave.
 const hostCID = 3
@@ -221,14 +221,14 @@ func handleConn(conn net.Conn, sk *blst.SecretKey, pkBytes []byte) {
 	case enclaveproto.RequestPublicKey:
 		resp.Result = pkBytes
 	case enclaveproto.RequestSign:
-		sig := new(blst.P2Affine).Sign(sk, req.Message, dstSign)
+		sig := new(blst.P2Affine).Sign(sk, req.Message, blstutil.DSTSign)
 		if sig == nil {
 			writeError(conn, "BLS sign failed")
 			return
 		}
 		resp.Result = sig.Compress()
 	case enclaveproto.RequestSignPoP:
-		sig := new(blst.P2Affine).Sign(sk, req.Message, dstPopProve)
+		sig := new(blst.P2Affine).Sign(sk, req.Message, blstutil.DSTPoP)
 		if sig == nil {
 			writeError(conn, "BLS SignPoP failed")
 			return
