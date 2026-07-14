@@ -224,13 +224,28 @@ func (b *Backend) dial() (net.Conn, error) {
 	return vsock.Dial(b.enclaveCID, enclaveproto.VSockPort, nil)
 }
 
-// send sends a request to the enclave and returns the response.
-func (b *Backend) send(req enclaveproto.Request) (enclaveproto.Response, error) {
+// enclaveRequestTimeout bounds a single vsock request/response exchange so a
+// hung or crashed enclave can never block a signing RPC indefinitely. It is
+// the default when the caller's context carries no earlier deadline.
+const enclaveRequestTimeout = 10 * time.Second
+
+// send sends a request to the enclave and returns the response. The exchange
+// is bounded by the caller's context deadline (if sooner) or
+// enclaveRequestTimeout, enforced as a vsock connection deadline.
+func (b *Backend) send(ctx context.Context, req enclaveproto.Request) (enclaveproto.Response, error) {
 	conn, err := b.dial()
 	if err != nil {
 		return enclaveproto.Response{}, fmt.Errorf("vsock dial: %w", err)
 	}
 	defer conn.Close()
+
+	deadline := time.Now().Add(enclaveRequestTimeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		return enclaveproto.Response{}, fmt.Errorf("setting vsock deadline: %w", err)
+	}
 
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return enclaveproto.Response{}, fmt.Errorf("encoding request: %w", err)
@@ -248,7 +263,7 @@ func (b *Backend) send(req enclaveproto.Request) (enclaveproto.Response, error) 
 
 // fetchPublicKey requests the BLS public key from the enclave's signing port.
 func (b *Backend) fetchPublicKey() ([]byte, error) {
-	resp, err := b.send(enclaveproto.Request{Type: enclaveproto.RequestPublicKey})
+	resp, err := b.send(context.Background(), enclaveproto.Request{Type: enclaveproto.RequestPublicKey})
 	if err != nil {
 		return nil, err
 	}
@@ -259,8 +274,8 @@ func (b *Backend) fetchPublicKey() ([]byte, error) {
 func (b *Backend) PublicKey(_ context.Context) ([]byte, error) { return b.pkBytes, nil }
 
 // Sign requests a BLS signature from the enclave using the Warp DST.
-func (b *Backend) Sign(_ context.Context, msg []byte) ([]byte, error) {
-	resp, err := b.send(enclaveproto.Request{Type: enclaveproto.RequestSign, Message: msg})
+func (b *Backend) Sign(ctx context.Context, msg []byte) ([]byte, error) {
+	resp, err := b.send(ctx, enclaveproto.Request{Type: enclaveproto.RequestSign, Message: msg})
 	if err != nil {
 		return nil, err
 	}
@@ -271,8 +286,8 @@ func (b *Backend) Sign(_ context.Context, msg []byte) ([]byte, error) {
 }
 
 // SignProofOfPossession requests a BLS PoP signature from the enclave.
-func (b *Backend) SignProofOfPossession(_ context.Context, msg []byte) ([]byte, error) {
-	resp, err := b.send(enclaveproto.Request{Type: enclaveproto.RequestSignPoP, Message: msg})
+func (b *Backend) SignProofOfPossession(ctx context.Context, msg []byte) ([]byte, error) {
+	resp, err := b.send(ctx, enclaveproto.Request{Type: enclaveproto.RequestSignPoP, Message: msg})
 	if err != nil {
 		return nil, err
 	}
