@@ -1,25 +1,34 @@
 # AWS Nitro Enclave Backend
 
-This guide covers setting up the `aws-nitro` backend end-to-end: launching an EC2 instance with Nitro Enclaves enabled, building the enclave image, configuring the KMS key policy with PCR attestation, and running the signer.
+This guide covers setting up the `aws-nitro` backend end-to-end: launching an EC2 instance with Nitro Enclaves enabled, building the enclave image, configuring the KMS key policy, and running the signer.
 
 ---
 
 ## How it works
 
-The Nitro Enclave backend provides the strongest isolation of all backends. The BLS private key is decrypted and used **exclusively inside the enclave** — the host OS never sees the plaintext key, even with root access.
+The Nitro Enclave backend provides the strongest isolation of all backends. The BLS private key is decrypted and used **exclusively inside the enclave** — the host OS never holds the plaintext key in any process it can inspect, even with root access.
 
 ```
 startup:
   host ──nitro-cli run-enclave──▶ enclave VM boots
   host ──vsock 5001──▶ enclave   sends AWS credentials
-  enclave ──vsock-proxy──▶ KMS   decrypts BLS key (PCR0 verified)
+  enclave ──vsock-proxy──▶ KMS   decrypts BLS key (IAM-authorized)
   enclave ──vsock 5001──▶ host   returns public key
 
 runtime:
   AvalancheGo ──gRPC──▶ host signer ──vsock 5000──▶ enclave ──blst──▶ signature
 ```
 
-The KMS key policy enforces that decryption only succeeds when the request originates from the exact enclave image identified by PCR0. Even if an attacker gains root on the host EC2 instance, they cannot decrypt the BLS key.
+**What this protects — and what it doesn't.** The running key is unreadable
+from the host: enclave memory is inaccessible to the host OS, so no core dump,
+`ptrace`, or `/proc/<pid>/mem` on the host can reach the plaintext scalar.
+*Authorization to decrypt the key blob*, however, is enforced by **IAM alone**:
+the enclave calls `kms:Decrypt` with the instance role's credentials and does
+**not** attach a Nitro attestation document, so KMS cannot tell the enclave
+apart from any other caller with those credentials. A root attacker on the
+host who obtains the instance credentials can decrypt the blob by calling KMS
+directly. Closing that gap requires wiring up KMS cryptographic attestation —
+see [Hardening roadmap](#hardening-roadmap-cryptographic-attestation) below.
 
 The host signer manages the enclave lifecycle itself: on startup it launches the enclave from the configured `eif_path`, and if an initialized enclave is already running (e.g. after a signer restart) it **reconnects without re-initializing** — no manual `nitro-cli run-enclave` is needed in normal operation, and restarting the signer does not interrupt a healthy enclave.
 
@@ -177,7 +186,10 @@ The output includes PCR values:
 }
 ```
 
-**Save PCR0** — it goes into the KMS key policy.
+**Save PCR0** — it uniquely identifies this enclave image. It is not used by
+the KMS key policy today (see the warning in Step 8), but it is the value an
+attestation-gated policy would pin, and comparing it against
+`nitro-cli describe-enclaves` confirms which image a running enclave booted.
 
 ---
 
@@ -200,18 +212,13 @@ Go to **AWS Console → KMS → your key → Key policy → Edit** and set:
       "Resource": "*"
     },
     {
-      "Sid": "AllowEnclaveDecryptOnly",
+      "Sid": "AllowInstanceRoleDecrypt",
       "Effect": "Allow",
       "Principal": {
         "AWS": "arn:aws:iam::YOUR-ACCOUNT:role/YOUR-INSTANCE-ROLE"
       },
       "Action": "kms:Decrypt",
-      "Resource": "*",
-      "Condition": {
-        "StringEqualsIgnoreCase": {
-          "kms:RecipientAttestation:PCR0": "YOUR-PCR0-VALUE"
-        }
-      }
+      "Resource": "*"
     },
     {
       "Sid": "AllowEncrypt",
@@ -226,7 +233,18 @@ Go to **AWS Console → KMS → your key → Key policy → Edit** and set:
 }
 ```
 
-> **Security**: with this policy, `kms:Decrypt` only succeeds from within the specific enclave image identified by PCR0. Root on the host cannot decrypt the key directly.
+> **Do NOT add a `kms:RecipientAttestation:PCR0` condition to this policy.**
+> The current enclave sends a plain `Decrypt` request with **no attestation
+> document**, so an attestation condition can never match — it would deny the
+> enclave's own decrypt and the signer would fail to start. Attestation-gated
+> policies become possible only after the enclave attaches a signed attestation
+> document to its KMS requests (see
+> [Hardening roadmap](#hardening-roadmap-cryptographic-attestation)).
+>
+> **Security**: this policy is least-privilege IAM — only the instance role
+> can use the key, and `Encrypt` can be removed after setup (it is only needed
+> by `keytool generate`/`migrate`). It does **not** restrict decryption to the
+> enclave: any process holding the instance role's credentials can decrypt.
 
 ---
 
@@ -337,19 +355,18 @@ signer restart does not bounce the enclave.
 
 ## Updating the enclave image
 
-**Every rebuild produces a new PCR0** — even a one-line code change — and the
-old PCR0 in the KMS key policy stops matching, so plan one policy update per
-image change. The procedure:
+**Every rebuild produces a new PCR0** — even a one-line code change. With the
+current IAM-only key policy no policy update is needed on rebuild; record the
+new PCR0 anyway so you always know which image is deployed (and so an
+attestation-gated policy can be adopted later without archaeology). The
+procedure:
 
 1. Rebuild `enclave-bin` (statically linked!), the Docker image, and the EIF —
    run the `docker run --rm remote-signer-enclave /enclave-bin` smoke test
-   **before** building the EIF so you never burn a KMS policy update on an
-   image that cannot boot
+   **before** building the EIF so you never ship an image that cannot boot
 2. Note the new PCR0 from `nitro-cli build-enclave`
-3. Update the KMS key policy's `kms:RecipientAttestation:PCR0` condition with
-   the new value
-4. Terminate the old enclave and restart the signer — it launches the new EIF,
-   injects credentials, and the enclave decrypts the key under the new policy:
+3. Terminate the old enclave and restart the signer — it launches the new EIF,
+   injects credentials, and the enclave decrypts the key:
 
 ```bash
 nitro-cli terminate-enclave --enclave-id $(nitro-cli describe-enclaves | grep -o '"EnclaveID": "[^"]*"' | cut -d'"' -f4)
@@ -368,8 +385,37 @@ public key stays the same.
 | Key at rest | KMS-encrypted blob on host disk |
 | Key in memory | Only inside the enclave VM — host process never holds plaintext |
 | Key in transit | Never transmitted — only signatures cross the vsock boundary |
-| KMS access | Locked to specific enclave image via PCR0 condition |
-| Host compromise | Root on host cannot decrypt — PCR0 condition requires enclave attestation |
+| KMS access | Least-privilege IAM: only the instance role may `Decrypt`. **Not** attestation-gated — see roadmap below |
+| Host compromise (runtime key) | Root on host cannot read the running key — enclave memory is inaccessible to the host OS |
+| Host compromise (key blob) | Root holding the instance credentials **can** decrypt the blob via KMS directly — the enclave sends no attestation document, so KMS cannot distinguish it from any other caller |
+
+### Hardening roadmap: cryptographic attestation
+
+To make the "only this enclave image can decrypt" guarantee real, the enclave
+must use [KMS cryptographic attestation](https://docs.aws.amazon.com/enclaves/latest/user/kms.html):
+
+1. **In the enclave**: generate an ephemeral RSA-2048 key pair, request an
+   attestation document from the Nitro Security Module (`/dev/nsm`, e.g. via
+   `github.com/hf/nsm`) with the public key embedded, and pass it as the
+   `Recipient` parameter of the `kms:Decrypt` call
+   (`KeyEncryptionAlgorithm: RSAES_OAEP_SHA_256`).
+2. **Handle the response**: with `Recipient` set, KMS returns
+   `CiphertextForRecipient` (a CMS/PKCS#7 `EnvelopedData` structure encrypted
+   to the attested public key) instead of `Plaintext` — the enclave parses the
+   envelope and decrypts it with its ephemeral private key. The plaintext key
+   then never exists outside the enclave, even inside KMS's response to a
+   replayed request.
+3. **In the key policy**: add the `kms:RecipientAttestation:PCR0` (or
+   `ImageSha384`) condition to the `Decrypt` statement. From that point, KMS
+   verifies the attestation document's signature against the AWS Nitro root of
+   trust and refuses any decrypt that doesn't originate from the pinned image —
+   including one made by root on the host with the same IAM credentials.
+
+Operational cost: every EIF rebuild changes PCR0, so each image change then
+requires a key-policy update (build → note PCR0 → update policy → deploy), and
+a lost/rotated policy locks the key until an admin fixes it. Until this is
+wired up, treat the enclave as protecting the **running key's memory**, with
+KMS authorization resting on IAM alone.
 
 ---
 
@@ -381,7 +427,7 @@ public key stays the same.
 | `connection timed out` on init port (briefly) | Enclave still booting — signer retries automatically for 30s |
 | `enclave init: timed out after 30s` **and** `nitro-cli describe-enclaves` shows nothing | Enclave binary cannot exec — almost always a glibc-dynamic build on the Alpine/musl image. Check `file enclave-bin` (must say *statically linked*) and run the `docker run --rm remote-signer-enclave /enclave-bin` smoke test |
 | `IncorrectKeyException` | KMS key ID has trailing whitespace or wrong key |
-| `AccessDeniedException` on Decrypt | PCR0 in key policy doesn't match current enclave image |
+| `AccessDeniedException` on Decrypt | Instance role lacks `kms:Decrypt` on the key — or the key policy has a `kms:RecipientAttestation:*` condition, which the current enclave can never satisfy (it sends no attestation document; remove the condition) |
 | `/bin/sh: /enclave-bin: not found` | Binary not statically linked — rebuild with `-extldflags '-static'` |
 | `no EC2 IMDS role found` | vsock-proxy not running — start with `vsock-proxy 8443 kms.<region>.amazonaws.com 443` |
 | Registration/PoP works but **every warp/ICM signature is rejected** (aggregators log `invalid signature response`, relayers report `failed to collect a threshold of signatures`) | `Sign()` and the network disagree on the BLS domain separation tag. Avalanche uses the proof-of-possession *scheme* — the message-signing DST ends in `RO_POP_`, not the basic-scheme `RO_NUL_`. Run `cd tests && go test ./...` to cross-check against AvalancheGo, and verify the live signer as below |

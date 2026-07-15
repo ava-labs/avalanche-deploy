@@ -179,6 +179,12 @@ func decryptKey(init enclaveproto.InitMessage, ciphertext []byte) ([]byte, error
 	}
 	kmsKeyID := strings.TrimSpace(string(kmsKeyIDBytes))
 
+	// NOTE: this is a plain Decrypt with no Recipient attestation document, so
+	// KMS authorizes it by IAM alone — it cannot distinguish this enclave from
+	// any other caller holding the same credentials. Consequently the key
+	// policy must NOT carry a kms:RecipientAttestation:* condition (it would
+	// always deny). Wiring up NSM attestation + CiphertextForRecipient is the
+	// documented hardening path — see docs/aws-nitro.md "Hardening roadmap".
 	resp, err := client.Decrypt(context.Background(), &kms.DecryptInput{
 		KeyId:               aws.String(kmsKeyID),
 		CiphertextBlob:      ciphertext,

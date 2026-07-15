@@ -41,7 +41,7 @@ For cloud KMS backends (AWS/GCP/Azure), the sidecar decrypts the BLS key blob at
 
 For the Vault backend, the key **never leaves Vault's process** — signing happens inside the plugin and only signatures cross the API boundary.
 
-For the Nitro Enclave backend, the key is decrypted and used **exclusively inside the enclave VM** — the host OS never sees the plaintext key even with root access. The KMS key policy enforces this via PCR0 attestation.
+For the Nitro Enclave backend, the key is decrypted and used **exclusively inside the enclave VM** — the host OS cannot read the running key even with root access. Note: KMS *authorization* is IAM-based today (the enclave does not yet send a Nitro attestation document); see [docs/aws-nitro.md](docs/aws-nitro.md#hardening-roadmap-cryptographic-attestation).
 
 The gRPC server exposes three methods matching AvalancheGo's interface:
 
@@ -310,9 +310,9 @@ Credentials use `DefaultAzureCredential`: environment variables, managed identit
 
 ### `aws-nitro` — AWS Nitro Enclave ⭐ strongest isolation on AWS
 
-See **[docs/aws-nitro.md](docs/aws-nitro.md)** for full setup instructions including instance launch, enclave image build, and KMS PCR0 policy configuration.
+See **[docs/aws-nitro.md](docs/aws-nitro.md)** for full setup instructions including instance launch, enclave image build, and KMS key policy configuration.
 
-The Nitro Enclave backend decrypts and uses the BLS key exclusively inside the enclave VM. The host OS never sees the plaintext key — even root cannot extract it. The KMS key policy uses PCR0 attestation to ensure decryption only happens inside the specific enclave image.
+The Nitro Enclave backend decrypts and uses the BLS key exclusively inside the enclave VM. The host OS cannot read the running key — even root cannot reach enclave memory. KMS authorization is least-privilege IAM; the enclave does not yet attach a Nitro attestation document to its decrypt calls, so the key policy cannot pin decryption to the enclave image (see the [hardening roadmap](docs/aws-nitro.md#hardening-roadmap-cryptographic-attestation)).
 
 Requires an EC2 instance with Nitro Enclaves enabled (m5, c5, r5, z1d families).
 

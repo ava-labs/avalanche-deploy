@@ -16,12 +16,12 @@ On Linux, `New` checks `enclaveRunning(cid)`; if not, it runs `nitro-cli run-enc
 - "aws-nitro backend is only supported on Linux" → you built/ran the stub; this backend requires Linux on an EC2 instance with Nitro Enclaves enabled.
 - `nitro-cli run-enclave` fails → enclaves not enabled on the instance, `eif_path` missing, or `cpu_count`/`memory_mib` below minimums (≥2 vCPU, ≥512 MiB); also ensure the allocator service has reserved resources.
 - "vsock dial" / timeouts on init → `enclave_cid` mismatch (must be ≥4) or the enclave hasn't opened its ports yet (init retries for 30s); confirm the EIF actually listens on 5000/5001.
-- "enclave init error" from KMS → the enclave's KMS decrypt was denied; the key policy must permit the enclave's PCR0 attestation and the passed-in credentials must allow `kms:Decrypt`.
+- "enclave init error" from KMS → the enclave's KMS decrypt was denied; the passed-in credentials must allow `kms:Decrypt`, and the key policy must **not** contain a `kms:RecipientAttestation:*` condition (the enclave sends no attestation document, so it can never match — see `docs/aws-nitro.md`).
 - Enclave seems healthy but signatures rejected on-chain → DST handling is inside the enclave image; rebuild/redeploy the EIF (host code only selects request type).
 - Stale/zombie enclave after a crash → `nitro-cli describe-enclaves`; the backend reconnects to a matching CID, but a wrong-image enclave must be terminated manually.
 
 ## Related
-- [`docs/aws-nitro.md`](../../docs/aws-nitro.md) — end-to-end setup (EC2, EIF build, KMS PCR policy).
+- [`docs/aws-nitro.md`](../../docs/aws-nitro.md) — end-to-end setup (EC2, EIF build, KMS key policy).
 - [`../../enclave`](../../enclave/) — the enclave-side program that decrypts and signs.
 - [`../../internal/enclaveproto`](../../internal/enclaveproto/) — the vsock request/response protocol and ports.
 - [`../`](../) — the `Backend` interface and provider overview.

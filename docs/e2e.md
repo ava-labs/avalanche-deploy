@@ -33,7 +33,7 @@ and the same [`tests/e2e`](../tests/e2e) gRPC validator.
 | Backend | Run from laptop | One-time host / cloud setup |
 |---|---|---|
 | `aws-kms` | AWS CLI, `jq`, `ssh` | KMS key + IAM on EC2 (or let script provision) — [aws-kms.md](aws-kms.md) |
-| `aws-nitro` | same + reuse EC2 | Nitro EC2, KMS PCR0, `vsock-proxy` — [aws-nitro.md](aws-nitro.md) |
+| `aws-nitro` | same + reuse EC2 | Nitro EC2, KMS key + IAM `Decrypt`, `vsock-proxy` — [aws-nitro.md](aws-nitro.md) |
 | `gcp-kms` | `ssh`, `jq` | GCE VM + Cloud KMS key + SA with `cryptoKeyEncrypterDecrypter` — [gcp-kms.md](gcp-kms.md) |
 | `azure-kv` | `ssh`, `jq` | Azure VM + Key Vault RSA key + managed identity (`encrypt` + `decrypt`) — [azure-kv.md](azure-kv.md) |
 | `vault` | `ssh`, `jq` | Vault server + BLS plugin on host — [`scripts/setup-vault-host.sh`](../scripts/setup-vault-host.sh) |
@@ -326,9 +326,9 @@ the key inside Vault.
 # AWS Nitro Enclave (`aws-nitro`)
 
 Runs on a **reused Nitro-enabled EC2** host (Amazon Linux 2023, `nitro-cli`,
-`docker`). Requires IAM `kms:Encrypt`/`kms:Decrypt` and a KMS key policy
-compatible with the enclave (PCR0 if attestation is enforced). See
-[aws-nitro.md](aws-nitro.md).
+`docker`). Requires IAM `kms:Encrypt`/`kms:Decrypt`. The key policy must **not** have a
+`kms:RecipientAttestation:*` condition — the enclave sends no attestation
+document, so such a condition always denies. See [aws-nitro.md](aws-nitro.md).
 
 ```bash
 export AWS_PROFILE=remoteE2E
@@ -338,7 +338,7 @@ E2E_HOST=1.2.3.4 E2E_SSH_KEY=~/.ssh/key.pem E2E_SSH_USER=ec2-user \
   ./scripts/e2e-aws-nitro.sh
 ```
 
-The script rebuilds the EIF with a fresh key each run (slow). Set `E2E_SKIP_EIF_REBUILD=1` only when reusing an EIF that already embeds the key under test. Rebuilding changes **PCR0** — update the KMS key policy if attestation is enforced (see [aws-nitro.md](aws-nitro.md)).
+The script rebuilds the EIF with a fresh key each run (slow). Set `E2E_SKIP_EIF_REBUILD=1` only when reusing an EIF that already embeds the key under test. Rebuilding changes **PCR0**, which today is informational only — the KMS key policy is IAM-based, so no policy update is needed (see [aws-nitro.md](aws-nitro.md)).
 
 | Variable | Notes |
 |---|---|
@@ -346,7 +346,7 @@ The script rebuilds the EIF with a fresh key each run (slow). Set `E2E_SKIP_EIF_
 | `E2E_SKIP_EIF_REBUILD` | Set to `1` to reuse an existing EIF (must match the generated key) |
 | `E2E_ENCLAVE_CID` | Nitro enclave CID (default `16`) |
 
-First-time Nitro setup (KMS PCR0 policy, EIF build) is manual per
+First-time Nitro setup (KMS key policy, EIF build) is manual per
 [aws-nitro.md](aws-nitro.md); the E2E script automates a **repeatable test run**
 once the host is prepared.
 
@@ -383,7 +383,7 @@ On the remote host, `remote-setup.sh` / `remote-setup-nitro.sh`:
 | Vault `failed to get token helper: ~/.vault is a directory` | Do not use `~/.vault` as server data dir — use `~/vault-e2e` (see setup script). |
 | Vault sealed (`503`) | Run `vault operator unseal` with key from `/tmp/vault-init.txt`. |
 | `lstat .../vault-plugin-bls: no such file` | Build plugin: `cd vault-plugin && CGO_ENABLED=1 go build -o ~/vault-e2e/plugins/vault-plugin-bls .` |
-| Nitro signer times out on vsock | EIF not built, wrong PCR0 policy, or `vsock-proxy` not running — see [aws-nitro.md](aws-nitro.md). |
+| Nitro signer times out on vsock | EIF not built, IAM denies `kms:Decrypt` (or the key policy has an attestation condition the enclave can't satisfy), or `vsock-proxy` not running — see [aws-nitro.md](aws-nitro.md). |
 | Nitro `run-enclave: exit status 39` | Stale enclave or production `remote-signer` systemd unit still running — E2E stops those services and terminates all enclaves before each run. |
 | Nitro pubkey ≠ keytool output | Stale enclave with an old key — terminate with `nitro-cli terminate-enclave --enclave-id <id>` (`nitro-cli describe-enclaves` for the id). |
 | SSH connection refused / timeout | Wrong `E2E_SSH_USER` (`ubuntu` vs `ec2-user`), wrong `.pem`, or security group blocks your IP on a reused host. |

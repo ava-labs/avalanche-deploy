@@ -157,7 +157,7 @@ This is intentionally minimal: the KMS key ID is stored in config, not in the bl
 ### What this does NOT protect against
 
 - **OS-level memory reads** (cloud KMS backends): a process with sufficient privilege (e.g. `ptrace`, `/proc/mem`) could read the key from the signer process. The [AWS Nitro Enclave backend](aws-nitro.md) closes this gap — the key is decrypted and used exclusively inside the enclave VM, and the host never holds plaintext.
-- **Compromised KMS credentials**: if the IAM role / service account credentials are stolen, an attacker can decrypt the blob. Use short-lived credentials (instance profiles, workload identity) to limit exposure.
+- **Compromised KMS credentials**: if the IAM role / service account credentials are stolen, an attacker can decrypt the blob. Use short-lived credentials (instance profiles, workload identity) to limit exposure. This applies to the `aws-nitro` backend too — the enclave protects the *running* key's memory, but its KMS decrypt is authorized by IAM alone (no attestation document is sent), so stolen instance credentials still decrypt the blob. See the [attestation hardening roadmap](aws-nitro.md#hardening-roadmap-cryptographic-attestation).
 - **Side-channel attacks**: blst uses constant-time arithmetic, but the signer does not provide timing-attack mitigations at the process level.
 
 ---
