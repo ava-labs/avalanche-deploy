@@ -13,8 +13,10 @@ package awsnitro
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os/exec"
@@ -147,8 +149,18 @@ func runEnclave(cfg signerconfig.AWSNitroConfig, log *slog.Logger) error {
 	}
 
 	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 39 {
-		log.Warn("nitro-cli run-enclave: enclave slot busy (exit 39), terminating all enclaves and retrying")
-		if terr := terminateAllEnclaves(log); terr != nil {
+		// Exit 39 = enclave slot busy. Only terminate an enclave that occupies
+		// OUR configured CID — a blanket terminate-all could take down an
+		// unrelated enclave another service is running on the same host.
+		id, idErr := enclaveIDForCID(uint32(cfg.EnclaveCID))
+		if idErr != nil {
+			descs, _ := listEnclaves()
+			return fmt.Errorf("nitro-cli run-enclave: %w — slot busy but no enclave holds cid %d (running: %+v); terminate the conflicting enclave manually with nitro-cli\noutput: %s",
+				err, cfg.EnclaveCID, descs, out)
+		}
+		log.Warn("nitro-cli run-enclave: slot busy (exit 39), terminating stale enclave at our CID and retrying",
+			"cid", cfg.EnclaveCID, "enclave_id", id)
+		if terr := terminateEnclaveByID(id); terr != nil {
 			return fmt.Errorf("nitro-cli run-enclave: %w (cleanup: %v)\noutput: %s", err, terr, out)
 		}
 		time.Sleep(3 * time.Second)
@@ -191,7 +203,7 @@ func (b *Backend) sendInit(msg enclaveproto.InitMessage) ([]byte, error) {
 	}
 
 	var resp enclaveproto.InitResponse
-	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+	if err := json.NewDecoder(io.LimitReader(conn, enclaveproto.MaxMessageSize)).Decode(&resp); err != nil {
 		return nil, fmt.Errorf("decoding init response: %w", err)
 	}
 	if resp.Error != "" {
@@ -252,7 +264,7 @@ func (b *Backend) send(ctx context.Context, req enclaveproto.Request) (enclavepr
 	}
 
 	var resp enclaveproto.Response
-	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+	if err := json.NewDecoder(io.LimitReader(conn, enclaveproto.MaxMessageSize)).Decode(&resp); err != nil {
 		return enclaveproto.Response{}, fmt.Errorf("decoding response: %w", err)
 	}
 	if resp.Error != "" {
@@ -343,21 +355,14 @@ func enclaveIDForCID(cid uint32) (string, error) {
 	return "", fmt.Errorf("no enclave with cid %d", cid)
 }
 
-func terminateAllEnclaves(log *slog.Logger) error {
-	descs, err := listEnclaves()
+// terminateEnclaveByID terminates a single enclave and waits until it is no
+// longer listed.
+func terminateEnclaveByID(id string) error {
+	out, err := exec.Command("nitro-cli", "terminate-enclave",
+		"--enclave-id", id,
+	).CombinedOutput()
 	if err != nil {
-		return err
-	}
-	for _, d := range descs {
-		if log != nil {
-			log.Info("terminating enclave", "id", d.EnclaveID, "cid", d.EnclaveCID)
-		}
-		out, err := exec.Command("nitro-cli", "terminate-enclave",
-			"--enclave-id", d.EnclaveID,
-		).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("nitro-cli terminate-enclave %s: %w\noutput: %s", d.EnclaveID, err, out)
-		}
+		return fmt.Errorf("nitro-cli terminate-enclave %s: %w\noutput: %s", id, err, out)
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
@@ -365,25 +370,31 @@ func terminateAllEnclaves(log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		if len(descs) == 0 {
+		gone := true
+		for _, d := range descs {
+			if d.EnclaveID == id {
+				gone = false
+				break
+			}
+		}
+		if gone {
 			return nil
 		}
 		time.Sleep(time.Second)
 	}
-	return fmt.Errorf("enclave still listed after terminate")
+	return fmt.Errorf("enclave %s still listed after terminate", id)
 }
 
+// hexDecode wraps hex.DecodeString with an empty-input check. Unlike the
+// hand-rolled loop it replaces, hex.DecodeString errors on odd-length input
+// instead of silently dropping the trailing nibble.
 func hexDecode(s string) ([]byte, error) {
 	if len(s) == 0 {
 		return nil, fmt.Errorf("empty hex string")
 	}
-	out := make([]byte, len(s)/2)
-	for i := 0; i < len(s)-1; i += 2 {
-		var b byte
-		if _, err := fmt.Sscanf(s[i:i+2], "%02x", &b); err != nil {
-			return nil, fmt.Errorf("invalid hex at position %d: %w", i, err)
-		}
-		out[i/2] = b
+	out, err := hex.DecodeString(s)
+	if err != nil {
+		return nil, fmt.Errorf("invalid hex: %w", err)
 	}
 	return out, nil
 }

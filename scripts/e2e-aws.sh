@@ -109,6 +109,12 @@ teardown() {
   exit $code
 }
 trap teardown EXIT
+# Bash skips the EXIT trap when killed by an unhandled signal — and that is
+# exactly what a cancelled/timed-out CI run sends (SIGINT/SIGTERM), which
+# would leak the EC2 instance and KMS key. Convert signals to a plain exit so
+# teardown always runs.
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 
 # ── Preflight ───────────────────────────────────────────────────────────────────
 for bin in aws jq ssh scp git; do command -v "$bin" >/dev/null || fail "missing dependency: $bin"; done

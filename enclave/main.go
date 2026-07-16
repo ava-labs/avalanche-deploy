@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -119,7 +120,9 @@ func receiveInit() (enclaveproto.InitMessage, net.Conn, error) {
 		}
 
 		var msg enclaveproto.InitMessage
-		if err := json.NewDecoder(conn).Decode(&msg); err != nil {
+		// Cap the read at MaxMessageSize — the host is outside the trust
+		// boundary, and an unbounded decode would let it OOM the enclave.
+		if err := json.NewDecoder(io.LimitReader(conn, enclaveproto.MaxMessageSize)).Decode(&msg); err != nil {
 			// Empty or invalid connection — close and wait for the real one.
 			conn.Close()
 			continue
@@ -222,7 +225,9 @@ func handleConn(conn net.Conn, sk *blst.SecretKey, pkBytes []byte) {
 	defer conn.Close()
 
 	var req enclaveproto.Request
-	if err := json.NewDecoder(conn).Decode(&req); err != nil {
+	// Cap the read at MaxMessageSize — the host is outside the trust boundary,
+	// and an unbounded decode would let it OOM the enclave.
+	if err := json.NewDecoder(io.LimitReader(conn, enclaveproto.MaxMessageSize)).Decode(&req); err != nil {
 		writeError(conn, fmt.Sprintf("decode: %v", err))
 		return
 	}

@@ -103,6 +103,11 @@ KEYTOOL_PUB_HEX="$(grep -F 'BLS public key (hex):' /tmp/keytool.out | awk '{prin
 # and fight the test for the ports. Arm the cleanup trap here — from this point
 # on, ANY exit restores the production services it stopped.
 trap cleanup EXIT
+# An unhandled signal skips the EXIT trap (e.g. HUP when the orchestrator's
+# SSH connection drops) — convert to a plain exit so cleanup always restores
+# the production services.
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 stop_prod_services
 stop_prior_signer_node
 

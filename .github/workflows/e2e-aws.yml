@@ -25,6 +25,10 @@ jobs:
   e2e-aws:
     name: e2e-aws
     runs-on: ubuntu-22.04
+    # Hard cap so a hung run cannot hold real AWS resources indefinitely. A
+    # normal run takes ~15-20 min; on timeout/cancel the runner signals the
+    # step and e2e-aws.sh's signal traps run the teardown.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
 

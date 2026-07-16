@@ -82,6 +82,10 @@ go build -o "$SIGNER_BIN" ./main/
 # From here on we stop/kill things — arm the cleanup trap so ANY exit restores
 # the production services and frees the enclave slot.
 trap cleanup EXIT
+# An unhandled signal skips the EXIT trap (e.g. HUP when the orchestrator's
+# SSH connection drops) — convert to a plain exit so cleanup always runs.
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 
 # Stop any prior signer/node, production services, and stale enclaves.
 stop_prod_services

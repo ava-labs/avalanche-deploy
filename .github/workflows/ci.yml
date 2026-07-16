@@ -56,6 +56,25 @@ jobs:
       - name: Vault-plugin module (vet + build + test)
         run: cd vault-plugin && CGO_ENABLED=1 go vet ./... && CGO_ENABLED=1 go build ./... && CGO_ENABLED=1 go test -race ./...
 
+  # The vault-plugin Dockerfile is not exercised by any build or E2E path
+  # (those use a bare `go build`), so build it here or it rots unnoticed.
+  vault-plugin-docker:
+    name: vault-plugin Dockerfile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build image
+        run: docker build -t vault-plugin-bls ./vault-plugin/
+
+      - name: Binary is extractable and statically linked
+        run: |
+          docker create --name tmp vault-plugin-bls
+          docker cp tmp:/vault-plugin-bls ./vault-plugin-bls-out
+          docker rm tmp
+          file ./vault-plugin-bls-out | tee /dev/stderr | grep -q 'statically linked'
+
   # Fails on known vulnerabilities that the code actually calls (plus any
   # affecting the toolchain in go.mod). Scans all four modules.
   govulncheck:
