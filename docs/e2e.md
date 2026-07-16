@@ -8,7 +8,7 @@ private key held by the chosen backend (KMS, Vault, or Nitro enclave).
 |---|---|---|
 | `aws-kms` | [`scripts/e2e-aws.sh`](../scripts/e2e-aws.sh) | Optional (AWS CLI); reuse EC2 common |
 | `gcp-kms` 🧪 | [`scripts/e2e-gcp.sh`](../scripts/e2e-gcp.sh) | Reuse a Linux VM with GCP credentials |
-| `azure-kv` 🧪 | [`scripts/e2e-azure.sh`](../scripts/e2e-azure.sh) | Reuse a Linux VM with Azure credentials |
+| `azure-kv` | [`scripts/e2e-azure.sh`](../scripts/e2e-azure.sh) | Reuse a Linux VM with Azure credentials |
 | `vault` | [`scripts/e2e-vault.sh`](../scripts/e2e-vault.sh) | Reuse a host with Vault + BLS plugin |
 | `aws-nitro` | [`scripts/e2e-aws-nitro.sh`](../scripts/e2e-aws-nitro.sh) | Reuse a Nitro-enabled EC2 host |
 
@@ -17,16 +17,16 @@ All backends share [`scripts/e2e/remote-setup.sh`](../scripts/e2e/remote-setup.s
 and the same [`tests/e2e`](../tests/e2e) gRPC validator.
 
 > ✅ **Validated**: `aws-kms` (EC2 reuse mode), `vault` (Ubuntu 24.04 VM,
-> Vault + BLS plugin installed by `setup-vault-host.sh`; passed 2026-07-14), and
+> Vault + BLS plugin installed by `setup-vault-host.sh`; passed 2026-07-14),
 > `aws-nitro` (full-rebuild mode on a Nitro-enabled EC2 host — fresh key baked
-> into a new EIF, attested KMS decrypt inside the enclave; passed 2026-07-14)
-> have all completed this suite against real infrastructure with
-> `ALL CHECKS PASSED`.
+> into a new EIF, KMS decrypt inside the enclave; passed 2026-07-14), and
+> `azure-kv` (Azure VM with managed identity against an RBAC-mode Key Vault;
+> passed 2026-07-16) have all completed this suite against real infrastructure
+> with `ALL CHECKS PASSED`.
 >
-> **🧪 Experimental**: the `gcp-kms` and `azure-kv` orchestrators exist but have
-> **never been run against real GCP/Azure infrastructure** (no test VM was
-> available). Treat those backends as experimental until an E2E run passes here;
-> expect first-run fixes.
+> **🧪 Experimental**: the `gcp-kms` orchestrator exists but has **never been
+> run against real GCP infrastructure** (no test VM available). Treat that
+> backend as experimental until an E2E run passes here; expect first-run fixes.
 
 ## Quick reference — what you need before running
 
@@ -247,9 +247,14 @@ key (`encrypt` is required because E2E runs `keytool generate`). See
 
 **Prerequisites (one-time):**
 
-1. Key Vault + RSA key (`bls-signer`, encrypt + decrypt ops)
-2. Azure VM with user-assigned managed identity + Key Vault access policy
+1. Key Vault + RSA key (encrypt + decrypt ops)
+2. Azure VM with a managed identity granted key access — on an **RBAC-mode
+   vault** that means a role assignment (Key Vault Crypto User suffices);
+   `az keyvault set-policy` grants are silently ignored on RBAC vaults
 3. SSH access to the VM (`E2E_HOST`, `E2E_SSH_KEY`)
+
+Validated 2026-07-16 with exactly this shape: RBAC vault, VM system identity
+holding Crypto User, key created by a Crypto Officer.
 
 ```bash
 E2E_HOST=10.0.0.5 E2E_SSH_KEY=~/.ssh/key.pem \

@@ -27,15 +27,16 @@ AvalancheGo ──gRPC──▶ avalanche-remote-signer ──▶ Backend
                        (signer.proto)             ├── memory   (dev/test)
                                                   ├── aws-kms  ✅ available
                                                   ├── gcp-kms  🧪 experimental
-                                                  ├── azure-kv 🧪 experimental
+                                                  ├── azure-kv ✅ available
                                                   ├── vault    ✅ available
                                                   └── aws-nitro ✅ available
 ```
 
-> **🧪 Experimental**: the `gcp-kms` and `azure-kv` backends have unit-test
-> coverage but have **not** been validated by the [end-to-end suite](docs/e2e.md)
-> against real GCP/Azure infrastructure. They may be modified at any time and
-> should not be relied on for production validators until an E2E run has passed.
+> **🧪 Experimental**: the `gcp-kms` backend has unit-test coverage but has
+> **not** been validated by the [end-to-end suite](docs/e2e.md) against real
+> GCP infrastructure. It may be modified at any time and should not be relied
+> on for production validators until an E2E run has passed. (`azure-kv`
+> graduated: E2E passed against a real Key Vault on 2026-07-16.)
 
 For cloud KMS backends (AWS/GCP/Azure), the sidecar decrypts the BLS key blob at startup and holds it in memory for signing. The plaintext key **never touches disk** at runtime.
 

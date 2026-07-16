@@ -1,9 +1,9 @@
 # Azure Key Vault Backend
 
-> **🧪 Experimental**: this backend has unit-test coverage but has not been
-> validated by the [end-to-end suite](e2e.md) against real Azure infrastructure.
-> It may be modified at any time and should not be relied on for production
-> validators until an E2E run has passed.
+> **✅ Validated**: this backend passed the full [end-to-end suite](e2e.md)
+> against a real Azure Key Vault (RBAC mode, VM managed identity) on
+> 2026-07-16 — `keytool generate` → signer → live avalanchego → warp + PoP
+> verification, `ALL CHECKS PASSED`.
 
 This guide covers setting up the `azure-kv` backend: creating a Key Vault and RSA key, configuring access policies, generating or migrating your BLS key, and running the signer on an Azure VM or AKS.
 

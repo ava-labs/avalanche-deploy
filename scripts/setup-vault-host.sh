@@ -183,10 +183,12 @@ EOF
 E2E_TOKEN="$(vault token create -policy=bls-e2e -ttl=720h -format=json | jq -r .auth.client_token)"
 [[ -n "$E2E_TOKEN" && "$E2E_TOKEN" != "null" ]] || fail "could not create E2E token"
 
-log "done — run E2E from your laptop:"
+# Print placeholders, not a real host: a copy-pasted example IP could point the
+# harness at a production validator (it stops the running node/signer).
+log "done — run E2E from your laptop (fill in THIS host's IP/key/user):"
 cat <<EOF
 
-E2E_HOST=<validator-host> E2E_SSH_KEY=~/.ssh/bls-validator.pem E2E_SSH_USER=ec2-user \\
+E2E_HOST=<this-host-ip> E2E_SSH_KEY=<path-to-ssh-key> E2E_SSH_USER=<ssh-user> \\
 VAULT_ADDR=http://127.0.0.1:8200 \\
 VAULT_TOKEN=${E2E_TOKEN} \\
 VAULT_KEY_NAME=validator VAULT_MOUNT_PATH=${MOUNT_PATH} \\
