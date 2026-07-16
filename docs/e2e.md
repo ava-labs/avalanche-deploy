@@ -17,7 +17,9 @@ All backends share [`scripts/e2e/remote-setup.sh`](../scripts/e2e/remote-setup.s
 and the same [`tests/e2e`](../tests/e2e) gRPC validator.
 
 > ✅ **Validated**: `aws-kms` (EC2 reuse mode), `vault` (Ubuntu 24.04 VM,
-> Vault + BLS plugin installed by `setup-vault-host.sh`; passed 2026-07-14),
+> Vault + BLS plugin installed by `setup-vault-host.sh`; passed 2026-07-14,
+> re-validated 2026-07-16 after the plugin gained the DST allow-list,
+> per-key locking, and key zeroization),
 > `aws-nitro` (full-rebuild mode on a Nitro-enabled EC2 host — fresh key baked
 > into a new EIF, KMS decrypt inside the enclave; passed 2026-07-14), and
 > `azure-kv` (Azure VM with managed identity against an RBAC-mode Key Vault;
