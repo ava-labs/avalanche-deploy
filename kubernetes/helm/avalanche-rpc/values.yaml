@@ -1,8 +1,10 @@
 # L1 RPC - Subnet-EVM with Partial Sync
 # For Avalanche L1 (subnet) RPC access
 
-# Number of L1 RPC replicas
-l1_rpc_replicas: 2
+# Number of L1 RPC replicas. Persistent mode intentionally supports one replica:
+# each AvalancheGo node needs its own database and a Deployment cannot safely
+# share a ReadWriteOnce claim across replicas.
+l1_rpc_replicas: 1
 
 # Network: fuji or mainnet
 network: fuji
@@ -62,7 +64,7 @@ l1_rpc_service:
 # Horizontal pod autoscaler
 l1_rpc_autoscaling:
   enabled: false
-  minReplicas: 2
+  minReplicas: 1
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
 

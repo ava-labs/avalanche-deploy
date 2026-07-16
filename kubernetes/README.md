@@ -134,6 +134,29 @@ make k8s-icm-relayer SUBNET_ID=$SUBNET_ID CHAIN_ID=$CHAIN_ID RELAYER_KEY=0x...
 
 The relayer connects to the `l1-rpc` service by default. Override with `--set avalanchego.serviceName=<svc>`.
 
+## Validator-Lifecycle Relayer (relayerd)
+
+The validator-lifecycle relayer is distinct from the ICM Relayer. Install it only after
+Avalanche Deploy has created and configured an official PoAManager L1:
+
+```bash
+make k8s-relayer
+make k8s-relayer-access
+```
+
+The installer uses the current kube context and discovers one Avalanche Deploy L1 from
+the `l1-config` ConfigMap and standard Helm labels. It verifies the network, RPC, official
+PoAManager topology, and validator peers before asking only for target confirmation and an
+optional console password. It generates encrypted hot keys locally and preserves them in
+a Kubernetes Secret and the workload PVC. Re-running the command keeps the existing keys.
+
+The chart runs the daemon and console in one dedicated single-replica StatefulSet. The
+daemon listens only on pod loopback; no Service, Ingress, LoadBalancer, or NodePort is
+created. Default-deny ingress, restricted egress, and namespace-scoped port-forward RBAC
+are enabled. Use the lifecycle commands `k8s-relayer-status`, `k8s-relayer-logs`,
+`k8s-relayer-backup`, `k8s-relayer-upgrade`, and `k8s-relayer-remove`. Normal removal
+retains the Secret and PVC; `PURGE=true` adds a separate destructive confirmation.
+
 ## Helm Chart Map
 
 | Purpose | Chart Path | Recommended Release |
@@ -144,6 +167,7 @@ The relayer connects to the `l1-rpc` service by default. Override with `--set av
 | Primary RPC | `helm/primary-network-rpc` | `primary-rpc` |
 | Monitoring | `helm/monitoring` | `monitoring` |
 | ICM Relayer | `helm/icm-relayer` | `icm-relayer` |
+| Validator-lifecycle relayer | `helm/relayerd` | `relayer` |
 | eRPC load balancer | `helm/erpc` | `erpc` |
 | Token faucet | `helm/faucet` | `faucet` |
 | Blockscout explorer | `helm/blockscout` | `blockscout` |
@@ -164,6 +188,7 @@ The relayer connects to the `l1-rpc` service by default. Override with `--set av
 | `scripts/health-checks.sh` | Comprehensive health checks across all nodes |
 | `scripts/reset-l1.sh` | Reset L1 chain data for redeployment |
 | `scripts/init-validator-manager.sh` | Initialize ValidatorManager contract via port-forward |
+| `scripts/relayer.sh` | Discover, install, access, and manage the validator-lifecycle relayer |
 
 ## Add-on Services
 
@@ -307,7 +332,7 @@ Run these before merging Kubernetes changes:
 ```bash
 # Helm chart lint
 for chart in avalanche-validator avalanche-rpc primary-network-validator primary-network-rpc \
-  monitoring icm-relayer erpc faucet blockscout graph-node safe staking-key-backup; do
+  monitoring icm-relayer relayerd erpc faucet blockscout graph-node safe staking-key-backup; do
   helm lint ./helm/$chart
 done
 

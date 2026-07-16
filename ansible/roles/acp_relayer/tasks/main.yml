@@ -1,0 +1,376 @@
+---
+- name: Validate the zero-input Relayer deployment inputs
+  ansible.builtin.assert:
+    that:
+      - acp_relayer_operation in ['install', 'upgrade']
+      - acp_relayer_binary_local_src | length > 0
+      - acp_relayer_console_image is match('^ghcr\\.io/.+@sha256:[0-9a-f]{64}$')
+      - acp_relayer_blockchain_id | length > 0
+      - acp_relayer_api_port | int == 8080
+      - acp_relayer_console_port | int == 3080
+    fail_msg: >-
+      The Relayer role only accepts a verified local release binary, an immutable
+      console image digest, and automatically discovered L1 metadata. KMS,
+      plaintext keys, alternate deployment modes, and public listeners are not
+      supported.
+
+- name: Validate the generated setup bundle inputs
+  ansible.builtin.assert:
+    that:
+      - acp_relayer_config_src | length > 0
+      - acp_relayer_keystore_src | length > 0
+      - acp_relayer_keystore_password_src | length > 0
+      - acp_relayer_console_session_secret_src | length > 0
+      - acp_relayer_funding_src | length > 0
+  when: acp_relayer_operation == 'install'
+
+- name: Create the relayerd system group
+  ansible.builtin.group:
+    name: "{{ acp_relayer_group }}"
+    system: true
+
+- name: Create the relayerd system user
+  ansible.builtin.user:
+    name: "{{ acp_relayer_user }}"
+    group: "{{ acp_relayer_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ acp_relayer_state_dir }}"
+    create_home: false
+
+- name: Create root-owned Relayer configuration directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ acp_relayer_config_dir }}", mode: "0755"}
+    - {path: "{{ acp_relayer_secrets_dir }}", mode: "0700"}
+
+- name: Create persistent Relayer state directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ acp_relayer_user }}"
+    group: "{{ acp_relayer_group }}"
+    mode: "0700"
+  loop:
+    - "{{ acp_relayer_state_dir }}"
+    - "{{ acp_relayer_tls_dir }}"
+    - "{{ acp_relayer_backup_dir }}"
+
+- name: Install Docker for the systemd-managed console container
+  ansible.builtin.apt:
+    name: docker.io
+    state: present
+    update_cache: true
+
+- name: Enable Docker
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Inspect the persistent encrypted keystore
+  ansible.builtin.stat:
+    path: "{{ acp_relayer_keystore_path }}"
+  register: acp_relayer_keystore_stat
+
+- name: Refuse to replace a live encrypted keystore
+  ansible.builtin.assert:
+    that:
+      - acp_relayer_preserve_keystore | bool
+    fail_msg: >-
+      {{ acp_relayer_keystore_path }} already exists, but discovery did not mark
+      it for preservation. Stop and inspect the existing Relayer installation;
+      the role will never overwrite hot keys implicitly.
+  when:
+    - acp_relayer_operation == 'install'
+    - acp_relayer_keystore_stat.stat.exists
+
+- name: Install the generated encrypted keystore once
+  ansible.builtin.copy:
+    src: "{{ acp_relayer_keystore_src }}"
+    dest: "{{ acp_relayer_keystore_path }}"
+    owner: "{{ acp_relayer_user }}"
+    group: "{{ acp_relayer_group }}"
+    mode: "0600"
+  no_log: true
+  when:
+    - acp_relayer_operation == 'install'
+    - not acp_relayer_keystore_stat.stat.exists
+  notify: Restart relayerd
+
+- name: Inspect the root-only keystore password credential
+  ansible.builtin.stat:
+    path: "{{ acp_relayer_secrets_dir }}/keystore-password"
+  register: acp_relayer_password_stat
+
+- name: Assert preserved keys have their password credential
+  ansible.builtin.assert:
+    that:
+      - acp_relayer_password_stat.stat.exists
+      - acp_relayer_password_stat.stat.isreg
+    fail_msg: >-
+      The encrypted keystore exists but its systemd credential is missing at
+      {{ acp_relayer_secrets_dir }}/keystore-password. Restore both from the same
+      Relayer backup; generating a different password would make the keys unusable.
+  when:
+    - acp_relayer_operation == 'install'
+    - acp_relayer_keystore_stat.stat.exists
+
+- name: Install the generated keystore password credential once
+  ansible.builtin.copy:
+    src: "{{ acp_relayer_keystore_password_src }}"
+    dest: "{{ acp_relayer_secrets_dir }}/keystore-password"
+    owner: root
+    group: root
+    mode: "0400"
+  no_log: true
+  when:
+    - acp_relayer_operation == 'install'
+    - not acp_relayer_keystore_stat.stat.exists
+  notify: Restart relayerd
+
+- name: Install generated daemon configuration
+  ansible.builtin.copy:
+    src: "{{ acp_relayer_config_src }}"
+    dest: "{{ acp_relayer_config_dir }}/config.json"
+    owner: root
+    group: root
+    mode: "0644"
+  when: acp_relayer_operation == 'install'
+  notify: Restart relayerd
+
+- name: Preserve the generated funding addresses
+  ansible.builtin.copy:
+    src: "{{ acp_relayer_funding_src }}"
+    dest: "{{ acp_relayer_funding_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+  when: acp_relayer_operation == 'install'
+
+- name: Install the generated console session secret
+  ansible.builtin.copy:
+    src: "{{ acp_relayer_console_session_secret_src }}"
+    dest: "{{ acp_relayer_secrets_dir }}/console-session-secret"
+    owner: root
+    group: root
+    mode: "0400"
+  no_log: true
+  when: acp_relayer_operation == 'install'
+  notify: Restart relayer console
+
+- name: Install the optional console password hash
+  ansible.builtin.copy:
+    src: "{{ acp_relayer_console_password_hash_src }}"
+    dest: "{{ acp_relayer_secrets_dir }}/console-password-hash"
+    owner: root
+    group: root
+    mode: "0400"
+  no_log: true
+  when:
+    - acp_relayer_operation == 'install'
+    - acp_relayer_console_password_hash_src | length > 0
+  notify: Restart relayer console
+
+- name: Disable console password authentication when no hash was generated
+  ansible.builtin.file:
+    path: "{{ acp_relayer_secrets_dir }}/console-password-hash"
+    state: absent
+  when:
+    - acp_relayer_operation == 'install'
+    - acp_relayer_console_password_hash_src | length == 0
+  notify: Restart relayer console
+
+- name: Render the root-only console environment
+  ansible.builtin.template:
+    src: console.env.j2
+    dest: "{{ acp_relayer_secrets_dir }}/console.env"
+    owner: root
+    group: root
+    mode: "0400"
+  no_log: true
+  when: acp_relayer_operation == 'install'
+  notify: Restart relayer console
+
+- name: Back up the current executable and service definitions for rollback
+  when: acp_relayer_operation == 'upgrade'
+  block:
+    - name: Verify an existing installation is available to upgrade
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ acp_relayer_binary_path }}"
+        - /etc/systemd/system/relayerd.service
+        - /etc/systemd/system/relayer-console.service
+        - "{{ acp_relayer_config_dir }}/config.json"
+        - "{{ acp_relayer_secrets_dir }}/keystore-password"
+        - "{{ acp_relayer_keystore_path }}"
+        - "{{ acp_relayer_version_file }}"
+      register: acp_relayer_upgrade_files
+
+    - name: Refuse an upgrade of an incomplete installation
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_upgrade_files.results | map(attribute='stat.exists') | min
+        fail_msg: >-
+          The existing Relayer installation is incomplete. Restore its daemon,
+          unit files, config, encrypted keystore, and credential before upgrading.
+
+    - name: Save rollback copies
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ item }}.rollback"
+        remote_src: true
+        owner: root
+        group: root
+        mode: preserve
+      loop:
+        - "{{ acp_relayer_binary_path }}"
+        - /etc/systemd/system/relayerd.service
+        - /etc/systemd/system/relayer-console.service
+        - "{{ acp_relayer_version_file }}"
+
+- name: Pull the immutable production console image
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/docker
+      - pull
+      - "{{ acp_relayer_console_image }}"
+  register: acp_relayer_console_pull
+  changed_when: "'Downloaded newer image' in acp_relayer_console_pull.stdout"
+
+- name: Install Relayer release artifacts and units
+  block:
+    - name: Gracefully drain services before an upgrade
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - relayer-console
+        - relayerd
+      when: acp_relayer_operation == 'upgrade'
+
+    - name: Install the daemon release
+      ansible.builtin.include_tasks: install.yml
+
+    - name: Render the native relayerd unit
+      ansible.builtin.template:
+        src: relayerd.service.j2
+        dest: /etc/systemd/system/relayerd.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart relayerd
+
+    - name: Render the systemd-managed console container unit
+      ansible.builtin.template:
+        src: relayer-console.service.j2
+        dest: /etc/systemd/system/relayer-console.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart relayer console
+
+    - name: Apply pending service restarts
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable and start the Relayer services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+        daemon_reload: true
+      loop:
+        - relayerd
+        - relayer-console
+
+    - name: Wait for relayerd readiness on loopback
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ acp_relayer_api_port }}/ready"
+        status_code: 200
+      register: acp_relayer_ready
+      until: acp_relayer_ready.status == 200
+      retries: "{{ acp_relayer_ready_retries }}"
+      delay: "{{ acp_relayer_ready_delay }}"
+
+    - name: Wait for the console on loopback
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ acp_relayer_console_port }}/api/auth/session"
+        status_code: 200
+      register: acp_relayer_console_ready
+      until: acp_relayer_console_ready.status == 200
+      retries: 30
+      delay: 5
+
+  rescue:
+    - name: Restore the previous daemon after a failed upgrade
+      ansible.builtin.copy:
+        src: "{{ acp_relayer_binary_path }}.rollback"
+        dest: "{{ acp_relayer_binary_path }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+      when: acp_relayer_operation == 'upgrade'
+
+    - name: Restore the previous service definitions after a failed upgrade
+      ansible.builtin.copy:
+        src: "{{ item }}.rollback"
+        dest: "{{ item }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - /etc/systemd/system/relayerd.service
+        - /etc/systemd/system/relayer-console.service
+      when: acp_relayer_operation == 'upgrade'
+
+    - name: Restore the previous version marker after a failed upgrade
+      ansible.builtin.copy:
+        src: "{{ acp_relayer_version_file }}.rollback"
+        dest: "{{ acp_relayer_version_file }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+      when: acp_relayer_operation == 'upgrade'
+
+    - name: Restart the rolled-back services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: restarted
+        daemon_reload: true
+      loop:
+        - relayerd
+        - relayer-console
+      when: acp_relayer_operation == 'upgrade'
+
+    - name: Report deployment or upgrade failure
+      ansible.builtin.fail:
+        msg: >-
+          Relayer {{ acp_relayer_operation }} failed readiness checks.
+          {{
+            'The prior binary and units were restored and restarted.'
+            if acp_relayer_operation == 'upgrade'
+            else
+            'Generated keys and state were preserved for a safe rerun.'
+          }}
+
+- name: Remove successful upgrade rollback files
+  ansible.builtin.file:
+    path: "{{ item }}.rollback"
+    state: absent
+  loop:
+    - "{{ acp_relayer_binary_path }}"
+    - /etc/systemd/system/relayerd.service
+    - /etc/systemd/system/relayer-console.service
+    - "{{ acp_relayer_version_file }}"
+  when: acp_relayer_operation == 'upgrade'

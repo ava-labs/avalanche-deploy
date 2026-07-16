@@ -9,11 +9,12 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer init-validator-manager initialize-validator-manager primary-infra primary-infra-plan primary-deploy primary-status primary-destroy backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-erpc k8s-faucet k8s-blockscout k8s-graph-node k8s-safe k8s-backup-keys k8s-health-checks k8s-init-validator-manager k8s-reset-l1 k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
+.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer relayer relayer-access relayer-status relayer-logs relayer-upgrade relayer-backup relayer-remove init-validator-manager initialize-validator-manager primary-infra primary-infra-plan primary-deploy primary-status primary-destroy backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-relayer k8s-relayer-access k8s-relayer-status k8s-relayer-logs k8s-relayer-upgrade k8s-relayer-backup k8s-relayer-remove k8s-erpc k8s-faucet k8s-blockscout k8s-graph-node k8s-safe k8s-backup-keys k8s-health-checks k8s-init-validator-manager k8s-reset-l1 k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
 
 # Default cloud provider
 CLOUD ?= aws
 NETWORK ?= fuji
+RELAYER_VERSION ?= v0.1.0
 AUTO_APPROVE ?= false
 TF_INIT_RETRIES ?= 3
 SKIP_TERRAFORM_VALIDATE ?= false
@@ -70,12 +71,14 @@ setup:
 	@which jq > /dev/null || brew install jq
 	@which go > /dev/null || brew install go
 	@which shellcheck > /dev/null || brew install shellcheck
+	@which helm > /dev/null || brew install helm
+	@which kubectl > /dev/null || brew install kubectl
 	@which ansible-galaxy > /dev/null && ansible-galaxy collection install -r ansible/requirements.yml || true
 	@echo "Done! Run 'make infra' next."
 
 doctor:
 	@echo "Checking local development prerequisites..."
-	@for cmd in terraform ansible-playbook ansible-lint jq go shellcheck; do \
+	@for cmd in terraform ansible-playbook ansible-lint jq go shellcheck helm kubectl; do \
 		if ! command -v $$cmd > /dev/null 2>&1; then \
 			echo "Missing dependency: $$cmd"; \
 			exit 1; \
@@ -227,6 +230,30 @@ icm-relayer:
 		$(if $(NETWORK),-e "icm_relayer_network=$(NETWORK)",)
 
 #
+# ACP-77/99 Validator-Lifecycle Relayer (relayerd)
+#
+relayer:
+	@RELAYER_VERSION="$(RELAYER_VERSION)" ./scripts/l1/relayer.sh install
+
+relayer-access:
+	@./scripts/l1/relayer.sh access
+
+relayer-status:
+	@./scripts/l1/relayer.sh status
+
+relayer-logs:
+	@./scripts/l1/relayer.sh logs
+
+relayer-upgrade:
+	@RELAYER_VERSION="$(RELAYER_VERSION)" ./scripts/l1/relayer.sh upgrade
+
+relayer-backup:
+	@./scripts/l1/relayer.sh backup
+
+relayer-remove:
+	@PURGE="$(PURGE)" ./scripts/l1/relayer.sh remove
+
+#
 # Validator Manager
 #
 init-validator-manager:
@@ -361,6 +388,8 @@ k8s-help:
 	@echo "  make k8s-kind          # Create local kind cluster"
 	@echo "  make k8s-monitoring    # Install/upgrade monitoring chart"
 	@echo "  make k8s-icm-relayer   # Deploy ICM Relayer for cross-chain messaging"
+	@echo "  make k8s-relayer       # Discover and install the validator-lifecycle relayer"
+	@echo "  make k8s-relayer-access # Forward the relayer console and L1 RPC"
 	@echo "  make k8s-cleanup       # Cleanup releases + optional PVC/kind"
 	@echo ""
 	@echo "Add-ons:"
@@ -447,6 +476,7 @@ k8s-l1-create:
 k8s-l1-configure:
 	@cd "$(K8S_DIR)" && ./scripts/configure-l1.sh \
 		--release="$(K8S_L1_RELEASE)" \
+		--rpc-release="$(K8S_L1_RPC_RELEASE)" \
 		--env="$(K8S_L1_ENV_FILE)"
 
 k8s-l1-status:
@@ -478,6 +508,27 @@ k8s-icm-relayer:
 		--set "l1.blockchainId=$(CHAIN_ID)" \
 		--set "relayerPrivateKey=$(RELAYER_KEY)" \
 		--set "network=$(NETWORK)"
+
+k8s-relayer:
+	@cd "$(K8S_DIR)" && RELAYER_VERSION="$(RELAYER_VERSION)" ./scripts/relayer.sh install
+
+k8s-relayer-access:
+	@cd "$(K8S_DIR)" && ./scripts/relayer.sh access
+
+k8s-relayer-status:
+	@cd "$(K8S_DIR)" && ./scripts/relayer.sh status
+
+k8s-relayer-logs:
+	@cd "$(K8S_DIR)" && ./scripts/relayer.sh logs
+
+k8s-relayer-upgrade:
+	@cd "$(K8S_DIR)" && RELAYER_VERSION="$(RELAYER_VERSION)" ./scripts/relayer.sh upgrade
+
+k8s-relayer-backup:
+	@cd "$(K8S_DIR)" && ./scripts/relayer.sh backup
+
+k8s-relayer-remove:
+	@cd "$(K8S_DIR)" && PURGE="$(PURGE)" ./scripts/relayer.sh remove
 
 k8s-erpc:
 	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make k8s-erpc CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
@@ -670,6 +721,7 @@ test-unit:
 	@cd tools/create-l1 && go test ./...
 	@cd tools/initialize-validator-manager && go test ./...
 	@cd tools/initialize-validator-manager/cmd/init_valset && go test ./...
+	@./tests/relayer-static.sh
 	@echo "✓ Unit tests passed"
 
 test-incremental: lint validate test-unit test-e2e-dry
@@ -733,6 +785,7 @@ help-l1:
 	@echo "  make graph-node CHAIN_ID=... [NETWORK_NAME=...]"
 	@echo "  make erpc CHAIN_ID=... EVM_CHAIN_ID=...          (standalone re-deploy)"
 	@echo "  make icm-relayer SUBNET_ID=... CHAIN_ID=... RELAYER_KEY=0x..."
+	@echo "  make relayer                                      (auto-discovers and installs daemon + console on rpc[0])"
 	@echo "  make safe [CHAIN_ID=... EVM_CHAIN_ID=...]  (auto-detects from l1.env)"
 	@echo ""
 	@echo "Ops:"
@@ -806,6 +859,8 @@ help-all:
 	@echo "  make k8s-primary-status Check Primary release status"
 	@echo "  make k8s-monitoring     Install/upgrade monitoring chart"
 	@echo "  make k8s-icm-relayer    Deploy ICM Relayer for cross-chain messaging"
+	@echo "  make k8s-relayer        Auto-discover and install relayer daemon + console"
+	@echo "  make k8s-relayer-access Forward the relayer console and L1 RPC"
 	@echo "  make k8s-erpc           Deploy eRPC load balancer"
 	@echo "  make k8s-faucet         Deploy token faucet"
 	@echo "  make k8s-blockscout     Deploy Blockscout block explorer"
@@ -829,6 +884,7 @@ help-all:
 	@echo "  make graph-node        Deploy The Graph Node for indexing"
 	@echo "  make erpc              Deploy eRPC load balancer"
 	@echo "  make icm-relayer       Deploy ICM Relayer for cross-chain messaging"
+	@echo "  make relayer           Auto-discover and install relayer daemon + console on rpc[0]"
 	@echo ""
 	@echo "Validator Manager:"
 	@echo "  make init-validator-manager      Build the validator manager tool"

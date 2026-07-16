@@ -43,16 +43,16 @@ output "ansible_inventory" {
   value       = <<-EOT
 [validators]
 %{for i, instance in google_compute_instance.validators~}
-validator-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user} node_type=validator
+validator-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} private_ip=${instance.network_interface[0].network_ip} ansible_user=${var.ssh_user} node_type=validator
 %{endfor~}
 
 [rpc]
 %{for i, instance in google_compute_instance.rpc~}
-rpc-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user} node_type=rpc
+rpc-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} private_ip=${instance.network_interface[0].network_ip} ansible_user=${var.ssh_user} node_type=rpc
 %{endfor~}
 
 [monitoring]
-monitoring-1 ansible_host=${google_compute_instance.monitoring.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user}
+monitoring-1 ansible_host=${google_compute_instance.monitoring.network_interface[0].access_config[0].nat_ip} private_ip=${google_compute_instance.monitoring.network_interface[0].network_ip} ansible_user=${var.ssh_user}
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
@@ -63,16 +63,16 @@ resource "local_file" "ansible_inventory" {
   content  = <<-EOT
 [validators]
 %{for i, instance in google_compute_instance.validators~}
-validator-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user} node_type=validator
+validator-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} private_ip=${instance.network_interface[0].network_ip} ansible_user=${var.ssh_user} node_type=validator
 %{endfor~}
 
 [rpc]
 %{for i, instance in google_compute_instance.rpc~}
-rpc-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user} node_type=rpc
+rpc-${i + 1} ansible_host=${instance.network_interface[0].access_config[0].nat_ip} private_ip=${instance.network_interface[0].network_ip} ansible_user=${var.ssh_user} node_type=rpc
 %{endfor~}
 
 [monitoring]
-monitoring-1 ansible_host=${google_compute_instance.monitoring.network_interface[0].access_config[0].nat_ip} ansible_user=${var.ssh_user}
+monitoring-1 ansible_host=${google_compute_instance.monitoring.network_interface[0].access_config[0].nat_ip} private_ip=${google_compute_instance.monitoring.network_interface[0].network_ip} ansible_user=${var.ssh_user}
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'

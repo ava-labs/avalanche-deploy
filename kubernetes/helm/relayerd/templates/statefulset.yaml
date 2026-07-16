@@ -1,0 +1,231 @@
+{{- include "relayerd.validate" . -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "relayerd.fullname" . }}
+  labels:
+    {{- include "relayerd.labels" . | nindent 4 }}
+spec:
+  # A governing Service is deliberately not created. This field only supplies the
+  # stable StatefulSet pod identity; access is through pod port-forward.
+  serviceName: {{ include "relayerd.fullname" . }}
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      {{- include "relayerd.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "relayerd.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        # The installer owns this Secret. Hashing its data makes an optional console
+        # password rotation roll the pod without copying any secret into the manifest.
+        checksum/runtime-secret: {{ include "relayerd.runtimeSecretChecksum" . }}
+    spec:
+      serviceAccountName: {{ include "relayerd.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: initialize-keystore
+          image: {{ printf "%s:%s" .Values.images.init.repository .Values.images.init.tag | quote }}
+          imagePullPolicy: {{ .Values.images.init.pullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              umask 077
+              mkdir -p /data/keystore /data/tls /data/backups
+              if [ ! -s /data/keystore/keystore.json ]; then
+                cp /runtime/keystore.json /data/keystore/keystore.json
+                chmod 0600 /data/keystore/keystore.json
+              fi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources.init | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: runtime-secret
+              mountPath: /runtime
+              readOnly: true
+      containers:
+        - name: relayerd
+          image: {{ printf "%s:%s" .Values.images.relayerd.repository .Values.images.relayerd.tag | quote }}
+          imagePullPolicy: {{ .Values.images.relayerd.pullPolicy }}
+          args:
+            - --config-file=/etc/relayerd/config.json
+          env:
+            - name: RELAYER_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "relayerd.runtimeSecretName" . }}
+                  key: keystore-password
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources.relayerd | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/relayerd/config.json
+              subPath: config.json
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+        - name: console
+          image: {{ printf "%s:%s" .Values.images.console.repository .Values.images.console.tag | quote }}
+          imagePullPolicy: {{ .Values.images.console.pullPolicy }}
+          env:
+            - name: RELAYER_BASE_URL
+              value: http://127.0.0.1:{{ .Values.ports.api }}
+            - name: L1_RPC_URL
+              value: {{ include "relayerd.evmRpcUrl" . | quote }}
+            - name: BROWSER_RPC_URL
+              value: /api/rpc
+            - name: WALLET_RPC_URL
+              value: {{ default (printf "http://127.0.0.1:%d/ext/bc/%s/rpc" (int .Values.console.walletRpcTunnelPort) .Values.l1.blockchainId) .Values.console.walletRpcUrl | quote }}
+            - name: RELAYER_CONSOLE_ORIGIN
+              value: {{ .Values.console.origin | quote }}
+            # The supported Kubernetes surface is an HTTP loopback tunnel. Secure
+            # cookies cannot be stored there, so explicitly enable the console's
+            # documented tunnel-only cookie mode.
+            - name: RELAYER_CONSOLE_INSECURE_COOKIE
+              value: "1"
+            - name: RELAYER_CONSOLE_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "relayerd.runtimeSecretName" . }}
+                  key: console-session-secret
+            - name: RELAYER_CONSOLE_PASSWORD_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "relayerd.runtimeSecretName" . }}
+                  key: console-password-hash
+                  optional: true
+            {{- if .Values.safe.enabled }}
+            - name: SAFE_ADDRESS
+              value: {{ .Values.safe.address | quote }}
+            - name: SAFE_TX_SERVICE_URL
+              value: {{ .Values.safe.transactionServiceUrl | quote }}
+            {{- with .Values.safe.uiUrl }}
+            - name: SAFE_UI_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
+          ports:
+            - name: console
+              containerPort: {{ .Values.ports.console }}
+              protocol: TCP
+          startupProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - {{ printf "Promise.all([fetch('http://127.0.0.1:%d/api/auth/session'),fetch('http://127.0.0.1:%d/health')]).then(rs=>{if(rs.some(r=>!r.ok))process.exit(1)}).catch(()=>process.exit(1))" (int .Values.ports.console) (int .Values.ports.api) | quote }}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - {{ printf "Promise.all([fetch('http://127.0.0.1:%d/api/auth/session'),fetch('http://127.0.0.1:%d/health')]).then(rs=>{if(rs.some(r=>!r.ok))process.exit(1)}).catch(()=>process.exit(1))" (int .Values.ports.console) (int .Values.ports.api) | quote }}
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4
+          readinessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - {{ printf "Promise.all([fetch('http://127.0.0.1:%d/api/auth/session'),fetch('http://127.0.0.1:%d/ready')]).then(rs=>{if(rs.some(r=>!r.ok))process.exit(1)}).catch(()=>process.exit(1))" (int .Values.ports.console) (int .Values.ports.api) | quote }}
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources.console | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: console-cache
+              mountPath: /app/.next/cache
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "relayerd.fullname" . }}-config
+        - name: runtime-secret
+          secret:
+            secretName: {{ include "relayerd.runtimeSecretName" . }}
+            defaultMode: 0440
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: console-cache
+          emptyDir:
+            sizeLimit: 128Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "relayerd.labels" . | nindent 10 }}
+      spec:
+        accessModes:
+          {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}

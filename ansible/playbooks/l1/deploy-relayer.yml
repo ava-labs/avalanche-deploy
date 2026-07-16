@@ -1,0 +1,42 @@
+---
+- name: Validate the discovered Relayer target
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Require exactly the first RPC host
+      ansible.builtin.assert:
+        that:
+          - groups['rpc'] is defined
+          - groups['rpc'] | length > 0
+          - acp_relayer_discovered_target is defined
+          - acp_relayer_discovered_target == groups['rpc'][0]
+        fail_msg: >-
+          Relayer discovery did not resolve rpc[0] consistently. Regenerate the
+          Terraform inventory and rerun the zero-input installer.
+
+- name: Install one Relayer daemon and console on rpc[0]
+  hosts: rpc[0]
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Wait for the RPC host
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+  roles:
+    - role: acp_relayer
+  post_tasks:
+    - name: Read the non-secret funding addresses
+      ansible.builtin.slurp:
+        src: "{{ acp_relayer_funding_file }}"
+      register: acp_relayer_funding
+
+    - name: Report the funding addresses
+      vars:
+        funding: "{{ acp_relayer_funding.content | b64decode | from_json }}"
+      ansible.builtin.debug:
+        msg:
+          target: "{{ inventory_hostname }}"
+          version: "{{ acp_relayer_version }}"
+          pChainAddress: "{{ funding.pChainAddress }}"
+          evmAddress: "{{ funding.evmAddress }}"
+          access: "Run make relayer-access; console http://127.0.0.1:3080 and L1 RPC http://127.0.0.1:9650"
