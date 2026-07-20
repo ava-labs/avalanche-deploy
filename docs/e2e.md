@@ -345,12 +345,13 @@ E2E_HOST=1.2.3.4 E2E_SSH_KEY=~/.ssh/key.pem E2E_SSH_USER=ec2-user \
   ./scripts/e2e-aws-nitro.sh
 ```
 
-The script rebuilds the EIF with a fresh key each run (slow). Set `E2E_SKIP_EIF_REBUILD=1` only when reusing an EIF that already embeds the key under test. Rebuilding changes **PCR0**, which today is informational only — the KMS key policy is IAM-based, so no policy update is needed (see [aws-nitro.md](aws-nitro.md)).
+By default the script builds a fresh EIF (with a fresh key) at `~/remote-signer-e2e.eif` — deliberately a separate file so it can never clobber a production EIF. Because the key blob is baked into the EIF, an existing file at that path is protected by an overwrite guard: the **second** default-mode run exits with "refusing to overwrite existing EIF" unless you set `E2E_ALLOW_EIF_OVERWRITE=1` (or reuse the existing EIF with `E2E_SKIP_EIF_REBUILD=1`). Rebuilding changes **PCR0**, which today is informational only — the KMS key policy is IAM-based, so no policy update is needed (see [aws-nitro.md](aws-nitro.md)).
 
 | Variable | Notes |
 |---|---|
-| `E2E_EIF_PATH` | Use a pre-built EIF (default `~/remote-signer.eif` on host) |
-| `E2E_SKIP_EIF_REBUILD` | Set to `1` to reuse an existing EIF (must match the generated key) |
+| `E2E_EIF_PATH` | EIF path. Default in rebuild mode: `~/remote-signer-e2e.eif`; with `E2E_SKIP_EIF_REBUILD=1`: `~/remote-signer.eif` |
+| `E2E_SKIP_EIF_REBUILD` | Set to `1` to reuse an existing EIF (the enclave signs with the key baked into it) |
+| `E2E_ALLOW_EIF_OVERWRITE` | Set to `1` to let a rebuild overwrite an existing EIF at `E2E_EIF_PATH` |
 | `E2E_ENCLAVE_CID` | Nitro enclave CID (default `16`) |
 
 First-time Nitro setup (KMS key policy, EIF build) is manual per
@@ -367,9 +368,10 @@ On the remote host, `remote-setup.sh` / `remote-setup-nitro.sh`:
 - Stops any process listening on ports **50051** (signer) and **9650** (node API)
   before starting — important on reused hosts where a prior run may have left
   stale processes bound to the old key.
-- **Nitro only:** stops production `remote-signer` / `avalanchego` systemd units if
-  active, terminates **all** running enclaves (not just a single CID), then rebuilds
-  the EIF unless `E2E_SKIP_EIF_REBUILD=1`.
+- Stops production `remote-signer` / `avalanchego` systemd units if active (all
+  backends — they contend for the same ports), and restores them on exit via the
+  cleanup trap. **Nitro additionally** terminates **all** running enclaves (not
+  just a single CID) and rebuilds the EIF unless `E2E_SKIP_EIF_REBUILD=1`.
 - Uses a fresh AvalancheGo data dir per run (`/tmp/agodata-<run-id>`).
 - Verifies the signer's gRPC public key matches `keytool generate` output before
   starting avalanchego.

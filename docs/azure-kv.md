@@ -66,7 +66,10 @@ az identity create \
   --resource-group avalanche-rg
 ```
 
-Grant it Key Vault permissions:
+Grant it Key Vault permissions. **Check the vault's authorization mode first**
+— newer Key Vaults default to **RBAC authorization**, where `az keyvault
+set-policy` grants are **silently ignored** (the command succeeds, the access
+never materializes; we lost days to this during E2E validation):
 
 ```bash
 # Get the identity's principal ID
@@ -75,6 +78,30 @@ PRINCIPAL_ID=$(az identity show \
   --resource-group avalanche-rg \
   --query principalId -o tsv)
 
+# Which mode is the vault in?
+az keyvault show --name my-avalanche-vault \
+  --query properties.enableRbacAuthorization
+```
+
+**RBAC-mode vault (`true` — the default for new vaults; this is the
+configuration the E2E suite validated):** grants are role assignments.
+"Key Vault Crypto User" covers the encrypt (keytool setup) and decrypt
+(runtime) operations the signer needs:
+
+```bash
+az role assignment create \
+  --role "Key Vault Crypto User" \
+  --assignee $PRINCIPAL_ID \
+  --scope $(az keyvault show --name my-avalanche-vault --query id -o tsv)
+```
+
+Note: on an RBAC vault even the *subscription owner* has no data-plane rights
+by default — whoever creates the RSA key needs "Key Vault Crypto Officer" on
+the vault first.
+
+**Access-policy-mode vault (`false` — legacy):** use `set-policy`:
+
+```bash
 # Grant decrypt (production runtime)
 az keyvault set-policy \
   --name my-avalanche-vault \

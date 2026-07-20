@@ -11,8 +11,8 @@ This folder contains `signer.proto`, a verbatim copy of avalanchego's [`proto/si
 ## How it works
 `signer.proto` declares `package signer` and three unary RPCs on the `Signer` service:
 - `PublicKey(PublicKeyRequest) -> PublicKeyResponse` — returns the compressed BLS public key bytes.
-- `Sign(SignRequest) -> SignResponse` — signs `message` bytes with the standard (RO_NUL_) scheme.
-- `SignProofOfPossession(SignProofOfPossessionRequest) -> SignProofOfPossessionResponse` — signs with the PoP (RO_POP_) scheme used for validator proof-of-possession.
+- `Sign(SignRequest) -> SignResponse` — signs `message` bytes (warp/ICM) with the message-signing DST `BLS_SIG_...RO_POP_`. Avalanche uses the IETF proof-of-possession *scheme*, so even the message DST ends in `RO_POP_` — it is **not** the basic-scheme `RO_NUL_` DST (that mistake passes registration and silently breaks every warp signature; see `internal/blstutil`).
+- `SignProofOfPossession(SignProofOfPossessionRequest) -> SignProofOfPossessionResponse` — signs with the PoP DST `BLS_POP_...RO_POP_` used for validator proof-of-possession.
 
 All payload fields are `bytes` (`public_key`, `message`, `signature`). The `option go_package` line pins the generated import path to `github.com/ava-labs/avalanche-remote-signer/spec/pb/signer`. To keep this file matching upstream, re-copy it from avalanchego when the protocol changes, then regenerate.
 

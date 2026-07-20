@@ -271,7 +271,7 @@ All config fields can be set via environment variables:
 | Architecture | [docs/architecture.md](docs/architecture.md) — package layout, key lifecycle, testing pyramid |
 | AWS KMS | [docs/aws-kms.md](docs/aws-kms.md) |
 | GCP Cloud KMS (🧪 experimental) | [docs/gcp-kms.md](docs/gcp-kms.md) |
-| Azure Key Vault (🧪 experimental) | [docs/azure-kv.md](docs/azure-kv.md) |
+| Azure Key Vault | [docs/azure-kv.md](docs/azure-kv.md) |
 | HashiCorp Vault | [docs/vault.md](docs/vault.md) |
 | AWS Nitro Enclave | [docs/aws-nitro.md](docs/aws-nitro.md) |
 | End-to-end tests | [docs/e2e.md](docs/e2e.md) — `./scripts/e2e-aws.sh`, `e2e-gcp.sh`, `e2e-azure.sh`, `e2e-vault.sh`, `e2e-aws-nitro.sh` |
@@ -340,8 +340,9 @@ Creates a new BLS12-381 key, encrypts it using the specified KMS backend, and wr
 
 ```
 Flags:
-  --backend         KMS backend to use (required): aws-kms | gcp-kms | azure-kv
-  --output          Path to write the encrypted blob (required)
+  --backend         Backend to use (required): aws-kms | gcp-kms | azure-kv | vault
+  --output          Path to write the encrypted blob (required for KMS backends;
+                    omitted for vault — the key is generated inside Vault)
   --config-file     Load KMS settings from a YAML file instead of individual flags
   --aws-region      AWS region
   --aws-kms-key-id  AWS KMS key ID or ARN
@@ -351,6 +352,10 @@ Flags:
   --gcp-key-name    GCP key name
   --azure-vault-url Azure Key Vault URL
   --azure-key-name  Azure key name
+  --vault-addr      Vault server address
+  --vault-token     Vault token (or set VAULT_TOKEN in the environment)
+  --vault-mount-path  Vault secrets mount path (default "bls")
+  --vault-key-name  Name of the BLS key within Vault
 ```
 
 ### `keytool migrate`
@@ -465,7 +470,7 @@ export PATH=$PATH:~/go/bin
 
 ### Note on CGO and blst
 
-This project uses [blst](https://github.com/supranational/blst) v0.3.14 for BLS12-381 operations via the official Go bindings (`internal/blstutil/`). CGO must be enabled for all build and test commands:
+This project uses [blst](https://github.com/supranational/blst) v0.3.16 for BLS12-381 operations via the official Go bindings (`internal/blstutil/`). CGO must be enabled for all build and test commands:
 
 ```bash
 export CGO_ENABLED=1

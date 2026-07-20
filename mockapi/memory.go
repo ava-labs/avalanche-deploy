@@ -1,7 +1,7 @@
 // Copyright (C) 2024, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-// Package memory provides an in-memory BLS signing backend intended for
+// Package mockapi provides an in-memory BLS signing backend intended for
 // development and integration testing only.  It generates a fresh keypair on
 // every startup and never persists anything to disk.
 //

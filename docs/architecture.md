@@ -63,9 +63,9 @@ The KMS API is called **once at startup** (to decrypt the key blob). All subsequ
 
 ### `internal/blstutil`
 
-A thin wrapper over [blst](https://github.com/supranational/blst) v0.3.14's official Go bindings. It exposes four pure-Go functions — `KeyGen`, `ValidateSecretKey`, `PublicKey`, `Sign` — that take and return `[]byte`. No CGO types are exposed to the rest of the codebase.
+A thin wrapper over [blst](https://github.com/supranational/blst)'s official Go bindings (v0.3.16, pinned in `go.mod`). It exposes four pure-Go functions — `KeyGen`, `ValidateSecretKey`, `PublicKey`, `Sign` — that take and return `[]byte`. No CGO types are exposed to the rest of the codebase.
 
-blst v0.3.14 fixed a CGO type alias incompatibility that affected earlier versions on Go 1.22+. Dependencies — including blst's C headers and sources, which CGO compiles directly — are fetched from the Go module cache at build time; the project uses standard module-mode builds, not vendoring.
+Dependencies — including blst's C headers and sources, which CGO compiles directly — are fetched from the Go module cache at build time; the project uses standard module-mode builds, not vendoring.
 
 ### `api`
 

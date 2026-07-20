@@ -1,17 +1,17 @@
 // Copyright (C) 2024, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-// Package enclave defines the vsock protocol between the Nitro Enclave and
-// the host signer process.
+// Package enclaveproto defines the vsock protocol between the Nitro Enclave
+// and the host signer process.
 //
-// The enclave listens on vsock port 5000.  The host sends a Request and
-// receives a Response encoded as length-prefixed JSON.
+// The enclave listens on vsock port 5000.  Framing is one plain JSON value
+// per connection (no length prefix); both sides cap reads at MaxMessageSize.
 //
 // Message flow:
 //
 //	host                        enclave
-//	 |  -- SignRequest -------->  |   decrypt key via KMS + sign
-//	 |  <-- SignResponse -------  |   return signature
+//	 |  -- Request ----------->  |   sign with the in-enclave key
+//	 |  <-- Response ----------  |   return signature
 package enclaveproto
 
 // RequestType identifies the operation the host is requesting.
@@ -31,13 +31,13 @@ const (
 // Request is sent from the host to the enclave over vsock.
 type Request struct {
 	Type    RequestType `json:"type"`
-	Message []byte      `json:"message,omitempty"` // hex-encoded message to sign
+	Message []byte      `json:"message,omitempty"` // raw message bytes (JSON encodes []byte as base64)
 }
 
 // Response is sent from the enclave to the host.
 type Response struct {
-	// Result holds the signature (96 bytes) or public key (48 bytes),
-	// hex-encoded.
+	// Result holds the raw signature (96 bytes) or public key (48 bytes);
+	// JSON encodes []byte as base64 on the wire.
 	Result []byte `json:"result,omitempty"`
 
 	// Error is non-empty if the operation failed.
