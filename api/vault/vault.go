@@ -12,9 +12,12 @@
 // Supported auth methods: token | kubernetes | aws-iam
 //
 // Token renewal: Vault tokens have a TTL (typically 1h for Kubernetes auth).
-// This backend automatically renews the token before it expires and
-// re-authenticates if renewal fails.  A validator running for weeks will
-// never lose signing capability due to token expiry.
+// This backend renews renewable tokens before they expire, replaces
+// non-renewable dynamic tokens (e.g. batch tokens) with a fresh login, and
+// re-authenticates with backoff on failure.  A validator running for weeks
+// will not lose signing capability due to token expiry — with one exception:
+// a static token (auth_method=token) that is itself non-renewable cannot be
+// kept alive, and the signer logs a loud warning at startup in that case.
 package vault
 
 import (
@@ -107,17 +110,55 @@ func New(cfg signerconfig.VaultConfig, log *slog.Logger) (*Backend, error) {
 	}
 	b.pkBytes = pkBytes
 
-	// Start background token renewal.  Tokens for Kubernetes auth (and other
-	// dynamic auth methods) expire; without renewal the signer would stop
-	// working after the TTL.  Root tokens and non-renewable tokens are
-	// detected and skipped automatically.
+	// Start background token maintenance.  Tokens for Kubernetes auth (and
+	// other dynamic auth methods) expire; without renewal the signer would
+	// stop working after the TTL.  Renewable tokens are renewed, non-renewable
+	// dynamic tokens (e.g. batch tokens) are replaced by a fresh login, and
+	// never-expiring tokens (root) are detected and skipped.  A static
+	// non-renewable token cannot be kept alive — that case logs a loud
+	// warning at startup.
 	go b.renewTokenLoop(ctx)
 
 	return b, nil
 }
 
-// renewTokenLoop runs in a background goroutine, renewing the Vault token
-// before it expires.  If renewal fails it re-authenticates from scratch.
+// tokenAction is what the renewal loop should do with the current token,
+// decided from its TTL, renewability, and the configured auth method.
+type tokenAction int
+
+const (
+	// tokenActionNone: the token never expires (root tokens report ttl 0) —
+	// no renewal needed, the loop can exit.
+	tokenActionNone tokenAction = iota
+	// tokenActionStop: the token expires and cannot be refreshed — a static
+	// token (auth_method=token) that is non-renewable. Re-login would just
+	// re-install the same token, so warn loudly and exit.
+	tokenActionStop
+	// tokenActionRenew: renewable — RenewSelf at renewFraction of the TTL.
+	tokenActionRenew
+	// tokenActionReauth: non-renewable but issued by a dynamic auth method
+	// (e.g. a batch token from a kubernetes/aws-iam role with
+	// token_type=batch) — renewal is impossible by definition, so log in
+	// again for a fresh token at renewFraction of the TTL.
+	tokenActionReauth
+)
+
+func classifyToken(ttl time.Duration, renewable bool, authMethod string) tokenAction {
+	switch {
+	case ttl <= 0:
+		return tokenActionNone
+	case renewable:
+		return tokenActionRenew
+	case authMethod == "token" || authMethod == "":
+		return tokenActionStop
+	default:
+		return tokenActionReauth
+	}
+}
+
+// renewTokenLoop runs in a background goroutine, keeping the Vault token
+// valid: renewable tokens are renewed, non-renewable dynamic tokens are
+// replaced by a fresh login, and failures re-authenticate with backoff.
 func (b *Backend) renewTokenLoop(ctx context.Context) {
 	for {
 		ttl, renewable, err := b.tokenTTL()
@@ -130,26 +171,37 @@ func (b *Backend) renewTokenLoop(ctx context.Context) {
 			b.logf("warn", "Vault token lookup failed, re-authenticating", "err", err)
 			if authErr := authenticate(b.client, b.cfg); authErr != nil {
 				b.logf("error", "Vault re-authentication failed", "err", authErr)
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(30 * time.Second):
-				}
 			} else {
 				b.logf("info", "Vault re-authentication successful")
+			}
+			// Back off before the next lookup regardless of the auth outcome.
+			// For auth_method=token, authenticate just re-installs the same
+			// static token and always "succeeds" — without this backoff an
+			// expired static token would spin this loop unthrottled,
+			// hammering Vault with lookups and flooding the logs.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
 			}
 			continue
 		}
 
-		// Root tokens and non-expiring tokens don't need renewal.
-		if !renewable || ttl <= 0 {
-			b.logf("debug", "Vault token does not require renewal")
+		switch classifyToken(ttl, renewable, b.cfg.AuthMethod) {
+		case tokenActionNone:
+			b.logf("debug", "Vault token does not expire — renewal not needed")
+			return
+		case tokenActionStop:
+			b.logf("warn", "static Vault token is non-renewable and will expire — "+
+				"signing will fail once the TTL lapses; supply a renewable token "+
+				"(vault token create without -type=batch and with a policy allowing renew-self)",
+				"ttl", ttl)
 			return
 		}
 
 		// Sleep until renewFraction of the TTL has elapsed.
 		sleepFor := time.Duration(float64(ttl) * renewFraction)
-		b.logf("debug", "Vault token renewal scheduled", "ttl", ttl, "renew_in", sleepFor)
+		b.logf("debug", "Vault token refresh scheduled", "ttl", ttl, "refresh_in", sleepFor, "renewable", renewable)
 
 		select {
 		case <-ctx.Done():
@@ -157,23 +209,25 @@ func (b *Backend) renewTokenLoop(ctx context.Context) {
 		case <-time.After(sleepFor):
 		}
 
-		// Try to renew the current token.
-		_, err = b.client.Auth().Token().RenewSelf(0)
-		if err != nil {
-			b.logf("warn", "Vault token renewal failed, re-authenticating", "err", err)
-			if err := authenticate(b.client, b.cfg); err != nil {
-				b.logf("error", "Vault re-authentication failed", "err", err)
-				// Back off and try again next cycle.
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(15 * time.Second):
-				}
+		if renewable {
+			if _, err := b.client.Auth().Token().RenewSelf(0); err == nil {
+				b.logf("debug", "Vault token renewed successfully")
+				continue
 			} else {
-				b.logf("info", "Vault re-authentication successful")
+				b.logf("warn", "Vault token renewal failed, re-authenticating", "err", err)
+			}
+		}
+		// Non-renewable dynamic token, or renewal just failed: log in again.
+		if err := authenticate(b.client, b.cfg); err != nil {
+			b.logf("error", "Vault re-authentication failed", "err", err)
+			// Back off and try again next cycle.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(15 * time.Second):
 			}
 		} else {
-			b.logf("debug", "Vault token renewed successfully")
+			b.logf("info", "Vault re-authentication successful")
 		}
 	}
 }
@@ -188,7 +242,12 @@ func (b *Backend) tokenTTL() (time.Duration, bool, error) {
 	if err != nil {
 		return 0, false, err
 	}
-	renewable, _ := secret.TokenIsRenewable()
+	renewable, err := secret.TokenIsRenewable()
+	if err != nil {
+		// Don't guess: treating a parse hiccup as "non-renewable" would
+		// permanently disable renewal for a genuinely renewable token.
+		return 0, false, fmt.Errorf("token renewable lookup: %w", err)
+	}
 	return ttl, renewable, nil
 }
 
