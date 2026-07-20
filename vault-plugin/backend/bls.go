@@ -14,24 +14,30 @@ import (
 
 func randRead(b []byte) (int, error) { return rand.Read(b) }
 
-// Every function below deterministically zeroizes its transient
-// blst.SecretKey before returning — blst only zeroes KeyGen'd keys, via a GC
-// finalizer, and a finalizer can run arbitrarily late.  Without this, every
-// sign request would leave an uncleared copy of the scalar in freed heap
-// memory of the Vault plugin process.  Hardening against opportunistic
-// memory disclosure (core dumps, swap), not a live memory-read attacker.
+// Every function below zeroizes its transient secret material before
+// returning — the blst.SecretKey (blst only zeroes KeyGen'd keys, via a GC
+// finalizer that can run arbitrarily late) AND the raw []byte copies of the
+// scalar (decoded key bytes, IKM entropy, serialized scalar). Without this,
+// every sign request would leave an uncleared copy of the scalar in freed
+// heap memory of the Vault plugin process. This is hardening against
+// opportunistic memory disclosure (core dumps, swap), not a live memory-read
+// attacker — and the hex *string* copies (Go strings are immutable) cannot be
+// wiped, so the guarantee is best-effort by construction.
 
 func generateKey() (string, error) {
 	var ikm [32]byte
 	if _, err := randRead(ikm[:]); err != nil {
 		return "", fmt.Errorf("reading entropy: %w", err)
 	}
+	defer clear(ikm[:]) // the IKM fully determines the key
 	sk := blst.KeyGen(ikm[:])
 	if sk == nil {
 		return "", fmt.Errorf("BLS key generation failed")
 	}
 	defer sk.Zeroize()
-	return hex.EncodeToString(sk.Serialize()), nil
+	ser := sk.Serialize()
+	defer clear(ser)
+	return hex.EncodeToString(ser), nil
 }
 
 func publicKeyHex(skHex string) (string, error) {
@@ -73,6 +79,9 @@ func deserialize(skHex string) (*blst.SecretKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decoding key hex: %w", err)
 	}
+	// sk.Deserialize copies the scalar into the SecretKey; don't leave the raw
+	// decoded bytes lingering on the heap.
+	defer clear(skBytes)
 	if len(skBytes) != 32 {
 		return nil, fmt.Errorf("expected 32-byte key, got %d", len(skBytes))
 	}

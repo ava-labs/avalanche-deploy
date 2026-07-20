@@ -25,7 +25,7 @@ func pathKeys(b *backend) []*framework.Path {
 					Description: "Name of the BLS key to generate.",
 				},
 			},
-			ExistenceCheck: b.keyDoesNotExist,
+			ExistenceCheck: b.keyExists,
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.CreateOperation: &framework.PathOperation{Callback: b.handleGenerate},
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.handleGenerate},
@@ -48,7 +48,7 @@ func pathKeys(b *backend) []*framework.Path {
 					Description: "Hex-encoded 32-byte BLS scalar to import.",
 				},
 			},
-			ExistenceCheck: b.keyDoesNotExist,
+			ExistenceCheck: b.keyExists,
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.CreateOperation: &framework.PathOperation{Callback: b.handleImport},
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.handleImport},
@@ -70,7 +70,42 @@ func pathKeys(b *backend) []*framework.Path {
 			HelpSynopsis:    "Return the compressed BLS public key.",
 			HelpDescription: "Returns the 48-byte compressed G1 public key as a hex string.",
 		},
+		{
+			// Bare keys/<name> — delete a stored key. Enables rotation (generate
+			// and import refuse to overwrite an existing key, and tell the caller
+			// to delete first). GenericNameRegex has no "/…" suffix, so this only
+			// matches keys/<name>, never the operation sub-paths.
+			Pattern: "keys/" + framework.GenericNameRegex("name"),
+			Fields: map[string]*framework.FieldSchema{
+				"name": {
+					Type:        framework.TypeString,
+					Description: "Name of the BLS key to delete.",
+				},
+			},
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.DeleteOperation: &framework.PathOperation{Callback: b.handleDelete},
+			},
+			HelpSynopsis: "Delete a stored BLS key.",
+			HelpDescription: "Permanently deletes the stored BLS key. This destroys the " +
+				"validator's signing identity — it cannot be recovered unless the scalar " +
+				"was separately backed up. Intended for key rotation/decommissioning.",
+		},
 	}
+}
+
+func (b *backend) handleDelete(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+	name := d.Get("name").(string)
+
+	// Same per-key lock the writers hold, so a delete can't race a
+	// concurrent generate/import for the same name.
+	lock := locksutil.LockForKey(b.locks, name)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := req.Storage.Delete(ctx, storageKeyPrefix+name); err != nil {
+		return nil, fmt.Errorf("storage delete: %w", err)
+	}
+	return nil, nil
 }
 
 func (b *backend) handleGenerate(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
@@ -130,9 +165,11 @@ func (b *backend) handleImport(ctx context.Context, req *logical.Request, d *fra
 	}
 
 	// Validate the key by deriving the public key — this confirms it's a valid scalar.
+	// User-input failure → 400 ErrorResponse, and don't echo the (invalid) key
+	// bytes that a wrapped hex/scalar error would carry.
 	pkHex, err := publicKeyHex(skHex)
 	if err != nil {
-		return nil, fmt.Errorf("invalid BLS key: %w", err)
+		return logical.ErrorResponse("invalid BLS key: not a valid 32-byte scalar"), nil
 	}
 
 	// Hold the per-key write lock across the exists-check + write so a
@@ -188,19 +225,11 @@ func (b *backend) handlePublicKey(ctx context.Context, req *logical.Request, d *
 	}, nil
 }
 
-// keyExists is the ExistenceCheck for sign paths — returns true if the key exists.
+// keyExists is the ExistenceCheck for the generate/import/sign paths — it
+// reports whether the named key already exists so the framework routes to
+// Create vs Update. Both map to the same handler, and the handlers re-check
+// under the per-key lock, so this only affects which operation label fires.
 func (b *backend) keyExists(ctx context.Context, req *logical.Request, d *framework.FieldData) (bool, error) {
-	name := d.Get("name").(string)
-	entry, err := req.Storage.Get(ctx, storageKeyPrefix+name)
-	if err != nil {
-		return false, err
-	}
-	return entry != nil, nil
-}
-
-// keyDoesNotExist is the ExistenceCheck for the generate path.
-// Returns false (does not exist) always so CreateOperation always fires.
-func (b *backend) keyDoesNotExist(ctx context.Context, req *logical.Request, d *framework.FieldData) (bool, error) {
 	name := d.Get("name").(string)
 	entry, err := req.Storage.Get(ctx, storageKeyPrefix+name)
 	if err != nil {

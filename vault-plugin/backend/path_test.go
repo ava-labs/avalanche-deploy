@@ -139,6 +139,43 @@ func TestGenerateSerializedUnderConcurrency(t *testing.T) {
 	}
 }
 
+// Delete must let a key be recreated (rotation), and the bare keys/<name>
+// pattern must not shadow the operation sub-paths.
+func TestDeleteEnablesRotation(t *testing.T) {
+	b, storage := testBackend(t)
+	ctx := context.Background()
+
+	if resp := generate(t, b, storage, "validator"); resp.IsError() {
+		t.Fatalf("first generate errored: %v", resp.Error())
+	}
+	// Regenerate must be refused while the key exists.
+	if resp := generate(t, b, storage, "validator"); !resp.IsError() {
+		t.Fatal("expected second generate to be refused")
+	}
+	// Delete it.
+	if _, err := b.HandleRequest(ctx, &logical.Request{
+		Operation: logical.DeleteOperation,
+		Path:      "keys/validator",
+		Storage:   storage,
+	}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	// Now the key is gone...
+	resp, err := b.HandleRequest(ctx, &logical.Request{
+		Operation: logical.ReadOperation, Path: "keys/validator/public-key", Storage: storage,
+	})
+	if err != nil {
+		t.Fatalf("public-key after delete: %v", err)
+	}
+	if !resp.IsError() {
+		t.Fatal("expected public-key to report the key gone after delete")
+	}
+	// ...and can be regenerated.
+	if resp := generate(t, b, storage, "validator"); resp.IsError() {
+		t.Fatalf("regenerate after delete errored: %v", resp.Error())
+	}
+}
+
 func upperHex(s string) string {
 	b := []byte(s)
 	for i, c := range b {
