@@ -130,10 +130,14 @@ init_and_unseal() {
   fi
 
   if [[ "$initialized" == "true" && "$sealed" == "true" ]]; then
-    local unseal_key root_token
+    # Initialize to empty: under `set -u` an unassigned local is unset, so a
+    # missing init file would die with "unbound variable" instead of reaching
+    # the crafted error below. The `|| true` keeps a non-matching grep (exit 1
+    # under pipefail) from aborting before the guard can fire.
+    local unseal_key="" root_token=""
     if [[ -f /tmp/vault-init.txt ]]; then
-      unseal_key="$(grep -iE 'unseal key' /tmp/vault-init.txt | head -1 | sed 's/.*:[[:space:]]*//')"
-      root_token="$(grep -iE 'initial root token' /tmp/vault-init.txt | head -1 | sed 's/.*:[[:space:]]*//')"
+      unseal_key="$(grep -iE 'unseal key' /tmp/vault-init.txt | head -1 | sed 's/.*:[[:space:]]*//' || true)"
+      root_token="$(grep -iE 'initial root token' /tmp/vault-init.txt | head -1 | sed 's/.*:[[:space:]]*//' || true)"
     fi
     [[ -n "$unseal_key" ]] || fail "vault is sealed and /tmp/vault-init.txt has no unseal key — unseal manually"
     log "unsealing vault"
@@ -162,22 +166,32 @@ chmod 755 "${PLUGIN_DIR}/${PLUGIN_NAME}"
 [[ -f "${PLUGIN_DIR}/${PLUGIN_NAME}" ]] || fail "plugin binary missing at ${PLUGIN_DIR}/${PLUGIN_NAME}"
 ls -la "${PLUGIN_DIR}/${PLUGIN_NAME}"
 
+# Register unconditionally: the build above always produces a (potentially)
+# new binary, and Vault pins plugins by SHA — keeping a stale registered SHA
+# means the next plugin launch (reload, mount access after restart) fails
+# checksum verification and the mount breaks. Re-registering is idempotent
+# and updates the SHA in place.
 SHA="$(sha256sum "${PLUGIN_DIR}/${PLUGIN_NAME}" | awk '{print $1}')"
-if ! vault plugin list -format=json 2>/dev/null | jq -e '.["vault-plugin-bls"]' >/dev/null 2>&1; then
-  log "registering plugin"
-  vault plugin register -sha256="$SHA" secret vault-plugin-bls
-fi
+log "registering plugin (sha256 ${SHA})"
+vault plugin register -sha256="$SHA" secret vault-plugin-bls
 
 if ! vault secrets list -format=json 2>/dev/null | jq -e ".[\"${MOUNT_PATH}/\"]" >/dev/null 2>&1; then
   log "enabling mount ${MOUNT_PATH}/"
   vault secrets enable -path="$MOUNT_PATH" vault-plugin-bls
+else
+  # Mount already live: reload so the running plugin process picks up the
+  # rebuilt binary (and the freshly registered SHA).
+  log "reloading plugin on existing mount ${MOUNT_PATH}/"
+  vault plugin reload -plugin vault-plugin-bls
 fi
 
-vault policy write bls-e2e - <<'EOF'
-path "bls/keys/+/generate"    { capabilities = ["create", "update"] }
-path "bls/keys/+/public-key"  { capabilities = ["read"] }
-path "bls/keys/+/sign"        { capabilities = ["create", "update"] }
-path "bls/keys/+/sign-pop"    { capabilities = ["create", "update"] }
+# Unquoted heredoc so the policy tracks MOUNT_PATH — a literal "bls/" policy
+# with a custom VAULT_MOUNT_PATH would 403 every call the printed token makes.
+vault policy write bls-e2e - <<EOF
+path "${MOUNT_PATH}/keys/+/generate"    { capabilities = ["create", "update"] }
+path "${MOUNT_PATH}/keys/+/public-key"  { capabilities = ["read"] }
+path "${MOUNT_PATH}/keys/+/sign"        { capabilities = ["create", "update"] }
+path "${MOUNT_PATH}/keys/+/sign-pop"    { capabilities = ["create", "update"] }
 EOF
 
 E2E_TOKEN="$(vault token create -policy=bls-e2e -ttl=720h -format=json | jq -r .auth.client_token)"

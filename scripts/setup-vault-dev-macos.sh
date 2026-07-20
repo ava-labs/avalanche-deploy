@@ -36,13 +36,16 @@ if ! pgrep -f 'vault server' >/dev/null; then
   vault login "$ROOT_TOKEN"
 fi
 
+# Register unconditionally — Vault pins plugins by SHA, and the build above
+# may have produced a new binary; a stale registered SHA breaks the next
+# plugin launch. Re-registering is idempotent and updates the SHA in place.
 SHA="$(shasum -a 256 "${PLUGIN_DIR}/vault-plugin-bls" | awk '{print $1}')"
-if ! vault plugin list -format=json 2>/dev/null | grep -q '"vault-plugin-bls"'; then
-  vault plugin register -sha256="$SHA" secret vault-plugin-bls
-fi
+vault plugin register -sha256="$SHA" secret vault-plugin-bls
 
 if ! vault secrets list -format=json 2>/dev/null | grep -q "\"${MOUNT_PATH}/\""; then
   vault secrets enable -path="$MOUNT_PATH" vault-plugin-bls
+else
+  vault plugin reload -plugin vault-plugin-bls
 fi
 
 vault write -force "${MOUNT_PATH}/keys/test/generate"

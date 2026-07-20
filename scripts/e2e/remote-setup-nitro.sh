@@ -104,7 +104,9 @@ else
   "$SIGNER_BIN" keytool generate \
     --backend aws-kms --aws-region "$AWS_REGION" --aws-kms-key-id "$KMS_KEY_ARN" \
     --output "$BLOB_PATH" | tee /tmp/keytool.out
-  KEYTOOL_PUB_HEX="$(grep -F 'BLS public key (hex):' /tmp/keytool.out | awk '{print $NF}')"
+  # `|| true`: a non-matching grep exits 1, which under pipefail+errexit would
+  # kill the script before the crafted error below could fire.
+  KEYTOOL_PUB_HEX="$(grep -F 'BLS public key (hex):' /tmp/keytool.out | awk '{print $NF}' || true)"
   [[ -n "$KEYTOOL_PUB_HEX" ]] || { echo "could not parse keytool public key"; exit 1; }
 fi
 

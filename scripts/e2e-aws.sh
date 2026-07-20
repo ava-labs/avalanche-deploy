@@ -66,19 +66,31 @@ resolve_ubuntu_ami() {
 }
 
 # ── Teardown (runs on every exit) ──────────────────────────────────────────────
+# Ordered for a hostile clock: a cancelled CI run gets only ~10s of grace, so
+# everything quick and high-value (instance terminate request, KMS deletion
+# scheduling, IAM, key pair) is issued FIRST, and the multi-minute
+# wait-for-termination — needed only for the SG delete, which AWS refuses
+# while the instance exists — comes last.
 teardown() {
   local code=$?
+  # Disarm the signal-conversion traps: a second Ctrl-C (or the CI runner's
+  # follow-up SIGTERM after SIGINT) must not abort teardown mid-flight.
+  trap '' INT TERM HUP
   if [[ "${E2E_KEEP:-0}" == "1" ]]; then
     log "E2E_KEEP=1 — leaving resources up. Clean up manually (tag $TAG_KEY=$RUN_ID)."
     log "  instance=$INSTANCE_ID  key=$KEY_ARN  sg=$SG_ID  role=$ROLE_NAME  keypair=$KP_NAME"
     return
   fi
   log "tearing down (run-id $RUN_ID) …"
-  if [[ "$EC2_MANAGED_BY_E2E" == "true" ]]; then
-    [[ -n "$INSTANCE_ID" ]] && { aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" >/dev/null 2>&1 || true
-                                 aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID" 2>/dev/null || true; }
-    [[ -n "$SG_ID" ]]   && aws ec2 delete-security-group --group-id "$SG_ID" >/dev/null 2>&1 || true
-    [[ -n "$KP_NAME" ]] && aws ec2 delete-key-pair --key-name "$KP_NAME" >/dev/null 2>&1 || true
+  if [[ "$EC2_MANAGED_BY_E2E" == "true" && -n "$INSTANCE_ID" ]]; then
+    aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" >/dev/null 2>&1 || true
+  fi
+  if [[ "$KEY_MANAGED_BY_E2E" == "true" && -n "$KEY_ID" ]]; then
+    # KMS keys cannot be deleted instantly — schedule deletion at the minimum 7-day window.
+    aws kms schedule-key-deletion --key-id "$KEY_ID" --pending-window-in-days 7 >/dev/null 2>&1 || true
+    log "  KMS key $KEY_ID scheduled for deletion in 7 days."
+  elif [[ -n "$KEY_ARN" ]]; then
+    log "  reused KMS key $KEY_ARN left in place."
   fi
   if [[ "$IAM_MANAGED_BY_E2E" == "true" ]]; then
     if [[ -n "$PROFILE_NAME" ]]; then
@@ -90,21 +102,21 @@ teardown() {
       aws iam delete-role --role-name "$ROLE_NAME" >/dev/null 2>&1 || true
     fi
   fi
+  if [[ "$EC2_MANAGED_BY_E2E" == "true" ]]; then
+    [[ -n "$KP_NAME" ]] && aws ec2 delete-key-pair --key-name "$KP_NAME" >/dev/null 2>&1 || true
+    if [[ -n "$SG_ID" ]]; then
+      # The SG cannot be deleted until the instance is gone.
+      [[ -n "$INSTANCE_ID" ]] && aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID" 2>/dev/null || true
+      aws ec2 delete-security-group --group-id "$SG_ID" >/dev/null 2>&1 || true
+    fi
+  fi
   if [[ -n "${E2E_HOST:-}${E2E_INSTANCE_ID:-}" ]]; then
     log "  reused EC2 host $HOST left in place."
-  fi
-  if [[ "$KEY_MANAGED_BY_E2E" == "true" && -n "$KEY_ID" ]]; then
-    # KMS keys cannot be deleted instantly — schedule deletion at the minimum 7-day window.
-    aws kms schedule-key-deletion --key-id "$KEY_ID" --pending-window-in-days 7 >/dev/null 2>&1 || true
-    log "teardown done (KMS key $KEY_ID scheduled for deletion in 7 days)."
-  elif [[ -n "$KEY_ARN" ]]; then
-    log "teardown done (reused KMS key $KEY_ARN left in place)."
-  else
-    log "teardown done."
   fi
   if [[ -n "${E2E_INSTANCE_PROFILE:-}" ]]; then
     log "  reused instance profile $PROFILE_NAME left in place."
   fi
+  log "teardown done."
   rm -rf "$WORKDIR"
   exit $code
 }
@@ -117,7 +129,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 
 # ── Preflight ───────────────────────────────────────────────────────────────────
-for bin in aws jq ssh scp git; do command -v "$bin" >/dev/null || fail "missing dependency: $bin"; done
+for bin in aws jq ssh scp git curl; do command -v "$bin" >/dev/null || fail "missing dependency: $bin"; done
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text)" || fail "no working AWS credentials"
 log "account=$ACCOUNT region=$REGION run-id=$RUN_ID"
 

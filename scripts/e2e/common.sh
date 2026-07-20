@@ -9,7 +9,11 @@ e2e_init_common() {
   REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
   RUN_ID="${E2E_RUN_ID:-rs-e2e-$(date +%Y%m%d-%H%M%S)-$$}"
   WORKDIR="${WORKDIR:-$(mktemp -d)}"
-  SSH_USER="${E2E_SSH_USER:-ubuntu}"
+  # Precedence: explicit E2E_SSH_USER, then an orchestrator's own default
+  # (e2e-aws-nitro.sh sets SSH_USER=ec2-user for Amazon Linux before calling
+  # this), then ubuntu. The old unconditional assignment silently clobbered
+  # an orchestrator's default back to ubuntu.
+  SSH_USER="${E2E_SSH_USER:-${SSH_USER:-ubuntu}}"
   NETWORK_ID="${E2E_NETWORK_ID:-fuji}"
   AVALANCHEGO_VERSION="${AVALANCHEGO_VERSION:-v1.14.0}"
 }
@@ -55,11 +59,17 @@ e2e_run_remote() {
   shift 2
   local remote_env="$*"
   e2e_log "running ${setup_script} on $HOST …"
+  # %q-escape each VALUE so shell metacharacters in credentials/URLs are never
+  # interpreted by the remote bash. (Values containing whitespace are out of
+  # scope — the KEY=VALUE list is space-separated by contract.)
+  local export_lines="" kv
+  for kv in $remote_env; do
+    export_lines+="export ${kv%%=*}=$(printf '%q' "${kv#*=}")"$'\n'
+  done
   local script="set -euo pipefail
 cd ~/remote-signer
 export E2E_RUN_ID=${RUN_ID} NETWORK_ID=${NETWORK_ID} AVALANCHEGO_VERSION=${AVALANCHEGO_VERSION}
-${remote_env:+export ${remote_env}}
-exec bash scripts/e2e/${setup_script}"
+${export_lines}exec bash scripts/e2e/${setup_script}"
   if $ssh_cmd "$SSH_USER@$HOST" 'bash -s' <<<"$script"; then
     e2e_log "✅ E2E PASSED — warp + proof-of-possession signing verified end to end."
   else

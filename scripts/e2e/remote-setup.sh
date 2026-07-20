@@ -90,13 +90,19 @@ case "$E2E_BACKEND" in
     KEYTOOL_ARGS+=(--azure-vault-url "$AZURE_VAULT_URL" --azure-key-name "$AZURE_KEY_NAME" --output "$BLOB_PATH")
     ;;
   vault)
-    KEYTOOL_ARGS+=(--vault-addr "$VAULT_ADDR" --vault-token "$VAULT_TOKEN" \
+    # No --vault-token here: keytool reads VAULT_TOKEN from the environment
+    # (config.applyEnv), and this whole script received it via the stdin-export
+    # transport precisely to keep it out of argv/`ps` — putting it on the
+    # keytool command line would undo that.
+    KEYTOOL_ARGS+=(--vault-addr "$VAULT_ADDR" \
       --vault-mount-path "$VAULT_MOUNT_PATH" --vault-key-name "$VAULT_KEY_NAME")
     ;;
 esac
 
 "$SIGNER_BIN" "${KEYTOOL_ARGS[@]}" | tee /tmp/keytool.out
-KEYTOOL_PUB_HEX="$(grep -F 'BLS public key (hex):' /tmp/keytool.out | awk '{print $NF}')"
+# `|| true`: a non-matching grep exits 1, which under pipefail+errexit would
+# kill the script before the crafted error below could fire.
+KEYTOOL_PUB_HEX="$(grep -F 'BLS public key (hex):' /tmp/keytool.out | awk '{print $NF}' || true)"
 [[ -n "$KEYTOOL_PUB_HEX" ]] || { echo "could not parse keytool public key from output"; exit 1; }
 
 # On a live-validator host, stop the systemd units first so they don't respawn
