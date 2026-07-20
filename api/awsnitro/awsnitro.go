@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -174,7 +175,22 @@ func runEnclave(cfg signerconfig.AWSNitroConfig, log *slog.Logger) error {
 	return fmt.Errorf("nitro-cli run-enclave: %w\noutput: %s", err, out)
 }
 
-// sendInitWithRetry retries sendInit until it succeeds or the timeout expires.
+// errEnclaveInit marks an application-level rejection from the enclave (its
+// InitResponse carried an error). The enclave log.Fatals right after sending
+// it, so retrying is pointless — and would bury the real cause (e.g. a KMS
+// AccessDenied) under "connection refused" errors from redialing the corpse.
+var errEnclaveInit = fmt.Errorf("enclave init error")
+
+// initExchangeTimeout bounds a single init attempt. Looser than
+// enclaveRequestTimeout because the enclave performs its KMS decrypt (a real
+// network round-trip through the vsock proxy) before replying — but it must
+// exist: without it one stalled attempt blocks Decode forever, and
+// sendInitWithRetry only checks its clock between attempts, so its timeout
+// would never fire.
+const initExchangeTimeout = 20 * time.Second
+
+// sendInitWithRetry retries sendInit until it succeeds, the enclave rejects
+// the init outright, or the timeout expires.
 func (b *Backend) sendInitWithRetry(msg enclaveproto.InitMessage, timeout time.Duration) ([]byte, error) {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
@@ -182,6 +198,9 @@ func (b *Backend) sendInitWithRetry(msg enclaveproto.InitMessage, timeout time.D
 		pkBytes, err := b.sendInit(msg)
 		if err == nil {
 			return pkBytes, nil
+		}
+		if errors.Is(err, errEnclaveInit) {
+			return nil, err
 		}
 		lastErr = err
 		b.log.Debug("enclave not ready yet, retrying...", "err", err)
@@ -198,6 +217,10 @@ func (b *Backend) sendInit(msg enclaveproto.InitMessage) ([]byte, error) {
 	}
 	defer conn.Close()
 
+	if err := conn.SetDeadline(time.Now().Add(initExchangeTimeout)); err != nil {
+		return nil, fmt.Errorf("setting vsock deadline: %w", err)
+	}
+
 	if err := json.NewEncoder(conn).Encode(msg); err != nil {
 		return nil, fmt.Errorf("sending init message: %w", err)
 	}
@@ -207,7 +230,7 @@ func (b *Backend) sendInit(msg enclaveproto.InitMessage) ([]byte, error) {
 		return nil, fmt.Errorf("decoding init response: %w", err)
 	}
 	if resp.Error != "" {
-		return nil, fmt.Errorf("enclave init error: %s", resp.Error)
+		return nil, fmt.Errorf("%w: %s", errEnclaveInit, resp.Error)
 	}
 
 	pkBytes, err := hexDecode(resp.PublicKey)
@@ -215,20 +238,6 @@ func (b *Backend) sendInit(msg enclaveproto.InitMessage) ([]byte, error) {
 		return nil, fmt.Errorf("decoding public key: %w", err)
 	}
 	return pkBytes, nil
-}
-
-// waitForPort polls a vsock port until it's reachable or the timeout expires.
-func (b *Backend) waitForPort(port uint32, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		conn, err := vsock.Dial(b.enclaveCID, port, nil)
-		if err == nil {
-			conn.Close()
-			return nil
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	return fmt.Errorf("enclave port %d not ready within %s", port, timeout)
 }
 
 // dial opens a vsock connection to the enclave's signing port.

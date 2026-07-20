@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -103,33 +104,39 @@ func main() {
 }
 
 // receiveInit listens on vsock port 5001 for the host's InitMessage.
-// It keeps accepting connections until it receives a valid InitMessage,
-// so that a probe connection (empty) doesn't consume the accept slot.
+// It keeps accepting connections until it receives a valid InitMessage, so
+// that a probe connection doesn't consume the accept slot — whether the probe
+// closes immediately (Decode fails fast) or just sits silent (the read
+// deadline expires). Without the deadline one silent connection would park
+// this single-threaded loop forever and the real InitMessage would never be
+// accepted.
 func receiveInit() (enclaveproto.InitMessage, net.Conn, error) {
 	ln, err := vsock.Listen(enclaveproto.VSockInitPort, nil)
 	if err != nil {
 		return enclaveproto.InitMessage{}, nil, fmt.Errorf("vsock listen port %d: %w", enclaveproto.VSockInitPort, err)
 	}
-	// Note: do NOT defer ln.Close() — caller needs the listener open.
+	defer ln.Close()
 
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			ln.Close()
 			return enclaveproto.InitMessage{}, nil, fmt.Errorf("accept: %w", err)
 		}
 
 		var msg enclaveproto.InitMessage
 		// Cap the read at MaxMessageSize — the host is outside the trust
 		// boundary, and an unbounded decode would let it OOM the enclave.
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		if err := json.NewDecoder(io.LimitReader(conn, enclaveproto.MaxMessageSize)).Decode(&msg); err != nil {
-			// Empty or invalid connection — close and wait for the real one.
+			// Empty, invalid, or silent connection — close and wait for the
+			// real one.
 			conn.Close()
 			continue
 		}
+		// Clear the deadline: the InitResponse is written on this connection
+		// only after the KMS decrypt completes, which takes seconds.
+		_ = conn.SetReadDeadline(time.Time{})
 
-		// Got a valid message — close the listener and return.
-		ln.Close()
 		return msg, conn, nil
 	}
 }
@@ -148,6 +155,12 @@ func sendInitResponse(conn net.Conn, pkHex, errMsg string) {
 // the request URL so certificates validate correctly.
 func vsockHTTPClient() *http.Client {
 	return &http.Client{
+		// Bound every KMS request. Without this, a vsock-proxy that accepts
+		// the connection but stalls would block Decrypt forever — and by then
+		// the init listener is already closed, so the host can never re-init:
+		// the enclave would sit as an unreachable zombie holding live AWS
+		// credentials until someone terminates it with nitro-cli.
+		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return vsock.Dial(hostCID, kmsProxyPort, nil)
@@ -188,7 +201,12 @@ func decryptKey(init enclaveproto.InitMessage, ciphertext []byte) ([]byte, error
 	// policy must NOT carry a kms:RecipientAttestation:* condition (it would
 	// always deny). Wiring up NSM attestation + CiphertextForRecipient is the
 	// documented hardening path — see docs/aws-nitro.md "Hardening roadmap".
-	resp, err := client.Decrypt(context.Background(), &kms.DecryptInput{
+	// Overall bound across the SDK's internal retries (the HTTP client's 30s
+	// timeout bounds each attempt). On error, main reports it back to the
+	// host on the init connection and exits — a clean failure, not a hang.
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	resp, err := client.Decrypt(ctx, &kms.DecryptInput{
 		KeyId:               aws.String(kmsKeyID),
 		CiphertextBlob:      ciphertext,
 		EncryptionAlgorithm: types.EncryptionAlgorithmSpecSymmetricDefault,
@@ -214,7 +232,10 @@ func serve(sk *blst.SecretKey, pkBytes []byte) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			// Back off so a persistent Accept failure (e.g. FD exhaustion)
+			// doesn't become a CPU-burning hot loop flooding the console.
 			log.Printf("accept error: %v", err)
+			time.Sleep(time.Second)
 			continue
 		}
 		go handleConn(conn, sk, pkBytes)
@@ -223,6 +244,11 @@ func serve(sk *blst.SecretKey, pkBytes []byte) error {
 
 func handleConn(conn net.Conn, sk *blst.SecretKey, pkBytes []byte) {
 	defer conn.Close()
+
+	// One request/response per connection, bounded in time as well as size —
+	// an idle connection must not park this goroutine and its FD forever.
+	// Matches the host's enclaveRequestTimeout.
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 
 	var req enclaveproto.Request
 	// Cap the read at MaxMessageSize — the host is outside the trust boundary,
