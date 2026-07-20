@@ -132,10 +132,8 @@ func keytoolCmd() *cobra.Command {
 }
 
 // commonKMSFlags attaches the KMS config flags shared by generate and migrate.
-// It returns a config.Config pointer that will be populated after cobra parses flags.
-func commonKMSFlags(cmd *cobra.Command) *config.Config {
-	cfg := &config.Config{}
-
+// Flag values are read back later by resolveKMSConfig.
+func commonKMSFlags(cmd *cobra.Command) {
 	// Config file (optional — CLI flags override it).
 	cmd.Flags().String("config-file", "", "path to YAML config file (KMS settings can come from here)")
 
@@ -166,8 +164,15 @@ func commonKMSFlags(cmd *cobra.Command) *config.Config {
 	// when the resolved value is empty.
 	cmd.Flags().String("vault-mount-path", "", "Vault secrets engine mount path (default \"bls\")")
 	cmd.Flags().String("vault-key-name", "", "Name of the BLS key within Vault")
+}
 
-	return cfg
+// vaultMountPathOrDefault mirrors keytool's internal "bls" fallback so a
+// printed path matches where the key actually landed.
+func vaultMountPathOrDefault(cfg config.Config) string {
+	if cfg.Vault.MountPath == "" {
+		return "bls"
+	}
+	return cfg.Vault.MountPath
 }
 
 // resolveKMSConfig merges the optional config file with CLI flag overrides.
@@ -258,18 +263,12 @@ func keytoolGenerateCmd() *cobra.Command {
 			isVault := cfg.Backend == config.BackendVault
 			output, _ := cmd.Flags().GetString("output")
 
-			if !isVault && output == "" {
+			if isVault {
+				if cfg.Vault.KeyName == "" {
+					return fmt.Errorf("--vault-key-name is required for the vault backend")
+				}
+			} else if output == "" {
 				return fmt.Errorf("--output is required for backend %q", cfg.Backend)
-			}
-
-			// Propagate output path into the right config field.
-			switch cfg.Backend {
-			case config.BackendAWSKMS:
-				cfg.AWS.EncryptedBLSKeyPath = output
-			case config.BackendGCPKMS:
-				cfg.GCP.EncryptedBLSKeyPath = output
-			case config.BackendAzureKV:
-				cfg.Azure.EncryptedBLSKeyPath = output
 			}
 
 			pkHex, err := keytool.Generate(keytool.GenerateOpts{
@@ -285,7 +284,7 @@ func keytoolGenerateCmd() *cobra.Command {
 			}
 
 			if isVault {
-				fmt.Printf("BLS key generated inside Vault at: %s/keys/%s\n", cfg.Vault.MountPath, cfg.Vault.KeyName)
+				fmt.Printf("BLS key generated inside Vault at: %s/keys/%s\n", vaultMountPathOrDefault(cfg), cfg.Vault.KeyName)
 			} else {
 				fmt.Printf("Encrypted key written to: %s\n", output)
 			}
@@ -324,7 +323,11 @@ func keytoolMigrateCmd() *cobra.Command {
 			deleteInput, _ := cmd.Flags().GetBool("delete-input")
 
 			isVault := cfg.Backend == config.BackendVault
-			if !isVault && output == "" {
+			if isVault {
+				if cfg.Vault.KeyName == "" {
+					return fmt.Errorf("--vault-key-name is required for the vault backend")
+				}
+			} else if output == "" {
 				return fmt.Errorf("--output is required for backend %q", cfg.Backend)
 			}
 
@@ -343,7 +346,7 @@ func keytoolMigrateCmd() *cobra.Command {
 			}
 
 			if isVault {
-				fmt.Printf("BLS key imported into Vault at: %s/keys/%s\n", cfg.Vault.MountPath, cfg.Vault.KeyName)
+				fmt.Printf("BLS key imported into Vault at: %s/keys/%s\n", vaultMountPathOrDefault(cfg), cfg.Vault.KeyName)
 			} else {
 				fmt.Printf("Encrypted key written to: %s\n", output)
 			}

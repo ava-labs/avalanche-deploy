@@ -6,6 +6,7 @@ package gcpkms
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -36,7 +37,6 @@ type Backend struct {
 	skBytes []byte
 	pkBytes []byte
 	client  kmsClient
-	log     *slog.Logger
 }
 
 func resourceName(cfg signerconfig.GCPConfig) string {
@@ -50,7 +50,14 @@ func New(cfg signerconfig.GCPConfig, log *slog.Logger) (*Backend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating GCP KMS client: %w", err)
 	}
-	return newWithClient(cfg, log, client)
+	b, err := newWithClient(cfg, log, client)
+	if err != nil {
+		// newWithClient only wires b.client on success — close it here so a
+		// decrypt/read failure doesn't leak the client's gRPC connections.
+		client.Close()
+		return nil, err
+	}
+	return b, nil
 }
 
 func newWithClient(cfg signerconfig.GCPConfig, log *slog.Logger, client kmsClient) (*Backend, error) {
@@ -86,7 +93,12 @@ func backendFromBytes(skBytes []byte, log *slog.Logger) (*Backend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("BLS public key derivation: %w", err)
 	}
-	return &Backend{skBytes: skBytes, pkBytes: pkBytes, log: log}, nil
+	// Log the loaded identity so an operator can confirm it against the
+	// on-chain registration (public keys are public — safe to log).
+	if log != nil {
+		log.Info("gcp-kms backend initialized", "public_key", hex.EncodeToString(pkBytes))
+	}
+	return &Backend{skBytes: skBytes, pkBytes: pkBytes}, nil
 }
 
 func (b *Backend) PublicKey(_ context.Context) ([]byte, error) { return b.pkBytes, nil }

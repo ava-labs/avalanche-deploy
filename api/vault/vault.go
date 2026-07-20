@@ -369,7 +369,12 @@ func (b *Backend) requestSign(ctx context.Context, msgHex, dstHex, endpoint stri
 	path := fmt.Sprintf("%s/keys/%s/%s", b.mountPath, b.keyName, endpoint)
 	data := map[string]interface{}{
 		"message": msgHex,
-		"dst":     dstHex,
+	}
+	// The sign-pop endpoint declares no "dst" field and always uses the PoP
+	// DST; sending one draws an "unrecognized parameters: [dst]" warning on
+	// every proof-of-possession. Only the generic /sign endpoint takes a dst.
+	if endpoint == "sign" {
+		data["dst"] = dstHex
 	}
 	secret, err := b.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {

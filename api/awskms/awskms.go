@@ -12,6 +12,7 @@ package awskms
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -41,7 +42,6 @@ type kmsEncryptor interface {
 type Backend struct {
 	skBytes []byte
 	pkBytes []byte
-	log     *slog.Logger
 }
 
 // Domain separation tags — single source of truth in blstutil,
@@ -89,7 +89,12 @@ func backendFromBytes(skBytes []byte, log *slog.Logger) (*Backend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("BLS public key derivation: %w", err)
 	}
-	return &Backend{skBytes: skBytes, pkBytes: pkBytes, log: log}, nil
+	// Log the loaded identity so an operator can confirm it against the
+	// on-chain registration (public keys are public — safe to log).
+	if log != nil {
+		log.Info("aws-kms backend initialized", "public_key", hex.EncodeToString(pkBytes))
+	}
+	return &Backend{skBytes: skBytes, pkBytes: pkBytes}, nil
 }
 
 // PublicKey returns the 48-byte compressed BLS public key.

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -19,6 +20,11 @@ import (
 	"github.com/ava-labs/avalanche-remote-signer/api"
 	pb "github.com/ava-labs/avalanche-remote-signer/spec/pb/signer"
 )
+
+// shutdownGracePeriod bounds how long GracefulStop may drain in-flight RPCs
+// before the server is force-stopped, so a wedged backend can't block process
+// exit indefinitely.
+const shutdownGracePeriod = 10 * time.Second
 
 // Server wraps a Backend and exposes it over gRPC.
 type Server struct {
@@ -74,11 +80,22 @@ func ListenAndServe(ctx context.Context, addr string, srv *Server) error {
 	grpcSrv := grpc.NewServer()
 	pb.RegisterSignerServer(grpcSrv, srv)
 
-	// Shut down cleanly when the context is cancelled.
+	// Shut down cleanly when the context is cancelled. GracefulStop drains
+	// in-flight RPCs but waits indefinitely — a network-backed backend
+	// (vault/nitro) wedged mid-request would block shutdown forever, so
+	// SIGTERM never terminates the process (and Close()'s key zeroization
+	// never runs). Bound the graceful drain, then force-stop.
 	go func() {
 		<-ctx.Done()
 		srv.log.Info("context cancelled, stopping gRPC server")
-		grpcSrv.GracefulStop()
+		stopped := make(chan struct{})
+		go func() { grpcSrv.GracefulStop(); close(stopped) }()
+		select {
+		case <-stopped:
+		case <-time.After(shutdownGracePeriod):
+			srv.log.Warn("graceful stop timed out, forcing shutdown", "after", shutdownGracePeriod)
+			grpcSrv.Stop()
+		}
 	}()
 
 	srv.log.Info("gRPC signer server listening", "addr", addr)
