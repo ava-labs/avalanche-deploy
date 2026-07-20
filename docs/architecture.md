@@ -160,6 +160,17 @@ This is intentionally minimal: the KMS key ID is stored in config, not in the bl
 - **Compromised KMS credentials**: if the IAM role / service account credentials are stolen, an attacker can decrypt the blob. Use short-lived credentials (instance profiles, workload identity) to limit exposure. This applies to the `aws-nitro` backend too — the enclave protects the *running* key's memory, but its KMS decrypt is authorized by IAM alone (no attestation document is sent), so stolen instance credentials still decrypt the blob. See the [attestation hardening roadmap](aws-nitro.md#hardening-roadmap-cryptographic-attestation).
 - **Side-channel attacks**: blst uses constant-time arithmetic, but the signer does not provide timing-attack mitigations at the process level.
 
+### Availability coupling
+
+The signer sits on the validator's signing path: if it is down, unreachable, or
+producing signatures the network rejects, the node stays up but stops
+contributing signatures (peer handshakes and warp/ICM), and nothing in the node
+process errors. This is a new operational failure mode a stock validator does
+not have. See **[docs/monitoring.md](monitoring.md)** for what to watch and how
+to alert, plus how each backend differs in what a signature depends on at
+runtime (cloud KMS: only at startup; Vault: every signature; Nitro: the local
+enclave).
+
 ---
 
 ## Testing approach

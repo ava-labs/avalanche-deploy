@@ -351,6 +351,11 @@ AvalancheGo's gRPC client reconnects on its own — the node does not need to
 restart. The signer likewise reconnects to an already-running enclave, so a
 signer restart does not bounce the enclave.
 
+`Restart=always` means a crashed unit self-heals, but a deliberate
+`systemctl stop` stays stopped until started again — monitor the signer's
+liveness and the node's signing health so a stopped signer does not go
+unnoticed. See **[monitoring.md](monitoring.md)**.
+
 ---
 
 ## Updating the enclave image

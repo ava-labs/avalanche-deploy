@@ -275,6 +275,7 @@ All config fields can be set via environment variables:
 | HashiCorp Vault | [docs/vault.md](docs/vault.md) |
 | AWS Nitro Enclave | [docs/aws-nitro.md](docs/aws-nitro.md) |
 | End-to-end tests | [docs/e2e.md](docs/e2e.md) — `./scripts/e2e-aws.sh`, `e2e-gcp.sh`, `e2e-azure.sh`, `e2e-vault.sh`, `e2e-aws-nitro.sh` |
+| Monitoring & availability | [docs/monitoring.md](docs/monitoring.md) — what to watch, alerting, per-backend availability |
 
 Annotated config reference: [`config/config.example.yaml`](config/config.example.yaml).
 
