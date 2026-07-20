@@ -81,3 +81,85 @@ vault:
 			cfg.Vault.MountPath, cfg.Nitro.EnclaveCID)
 	}
 }
+
+// TestLoadAcceptsEmptyOrCommentsOnly guards against the strict-decoder EOF
+// regression: a zero-byte file or one with every line commented out is a valid
+// "all defaults" config, not a parse error (yaml.Decoder reports it as io.EOF
+// where yaml.Unmarshal accepted it silently).
+func TestLoadAcceptsEmptyOrCommentsOnly(t *testing.T) {
+	for name, contents := range map[string]string{
+		"empty":         "",
+		"comments-only": "# backend: aws-kms\n# port: 50051\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Load(writeTemp(t, contents))
+			if err != nil {
+				t.Fatalf("Load(%s config) failed: %v", name, err)
+			}
+			if cfg.Backend != BackendMemory || cfg.Port != 50051 {
+				t.Fatalf("expected defaults, got backend=%q port=%d", cfg.Backend, cfg.Port)
+			}
+		})
+	}
+}
+
+// TestAddrIPv6 — Addr must produce a dialable address for IPv6 listens.
+func TestAddrIPv6(t *testing.T) {
+	cfg := Config{Listen: "::1", Port: 50051}
+	if got, want := cfg.Addr(), "[::1]:50051"; got != want {
+		t.Fatalf("Addr() = %q, want %q", got, want)
+	}
+	cfg = Config{Listen: "127.0.0.1", Port: 50051}
+	if got, want := cfg.Addr(), "127.0.0.1:50051"; got != want {
+		t.Fatalf("Addr() = %q, want %q", got, want)
+	}
+}
+
+// TestInvalidPortEnvIsAnError — a malformed PORT must fail loudly, not fall
+// back to the default port with AvalancheGo dialing into the void.
+func TestInvalidPortEnvIsAnError(t *testing.T) {
+	for _, bad := range []string{"5O051", "0", "-1", "70000"} {
+		t.Setenv("PORT", bad)
+		if _, err := Load(""); err == nil {
+			t.Fatalf("PORT=%q: expected error, got nil", bad)
+		}
+	}
+	t.Setenv("PORT", "50052")
+	cfg, err := Load("")
+	if err != nil || cfg.Port != 50052 {
+		t.Fatalf("PORT=50052: got port=%d err=%v", cfg.Port, err)
+	}
+}
+
+// TestBackendCaseInsensitive — the backend name must select the same backend
+// from every config source regardless of case.
+func TestBackendCaseInsensitive(t *testing.T) {
+	f := writeTemp(t, "backend: AWS-KMS\n")
+	cfg, err := Load(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Backend != BackendAWSKMS {
+		t.Fatalf("YAML backend AWS-KMS: got %q", cfg.Backend)
+	}
+	t.Setenv("BACKEND", " Vault ")
+	if cfg, _ = Load(""); cfg.Backend != BackendVault {
+		t.Fatalf("env BACKEND=' Vault ': got %q", cfg.Backend)
+	}
+	if got := ParseBackend("Aws-Nitro"); got != BackendAWSNitro {
+		t.Fatalf("ParseBackend(Aws-Nitro) = %q", got)
+	}
+}
+
+// TestVaultKubernetesJWTPathEnv — the one VaultConfig field that was missing
+// from applyEnv (and the one Kubernetes deployments configure via env).
+func TestVaultKubernetesJWTPathEnv(t *testing.T) {
+	t.Setenv("VAULT_KUBERNETES_JWT_PATH", "/var/run/secrets/custom/token")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Vault.KubernetesJWTPath != "/var/run/secrets/custom/token" {
+		t.Fatalf("KubernetesJWTPath = %q", cfg.Vault.KubernetesJWTPath)
+	}
+}

@@ -10,13 +10,12 @@ This package is the single source of truth for runtime configuration. Both `serv
 - `config.example.yaml` — annotated reference config covering every backend and the gRPC address.
 
 ## How it works
-`Load(path)` starts from `Defaults()` (`backend: memory`, `listen: 127.0.0.1`, `port: 50051`), `yaml.Unmarshal`s the file if `path != ""`, then calls `applyEnv` to overlay env vars. CLI flags are applied afterward by callers in `main`, so they win. `applyEnv` maps an upper-cased, `_`-joined key onto each field (`BACKEND`, `PORT`, `AWS_REGION`, `AWS_KMS_KEY_ID`, `GCP_*`, `AZURE_*`, `VAULT_*`). `BackendType` values are `memory`, `aws-kms`, `gcp-kms`, `azure-kv`, `vault`, `aws-nitro`. `Addr()` returns `Listen:Port`. Provider structs (`AWSConfig`, `GCPConfig`, `AzureConfig`, `VaultConfig`, `AWSNitroConfig`) carry only their own fields, e.g. `AWS.EncryptedBLSKeyPath`, `Vault.MountPath` (default `bls`).
+`Load(path)` starts from `Defaults()` (`backend: memory`, `listen: 127.0.0.1`, `port: 50051`), strictly decodes the file if `path != ""` (`KnownFields` — unknown keys are errors; an empty or fully commented-out file is fine), then calls `applyEnv` to overlay env vars. CLI flags are applied afterward by callers in `main`, so they win. `applyEnv` maps an upper-cased, `_`-joined key onto each field (`BACKEND`, `PORT`, `AWS_REGION`, `AWS_KMS_KEY_ID`, `GCP_*`, `AZURE_*`, `VAULT_*`). `BackendType` values are `memory`, `aws-kms`, `gcp-kms`, `azure-kv`, `vault`, `aws-nitro`. `Addr()` returns `Listen:Port`. Provider structs (`AWSConfig`, `GCPConfig`, `AzureConfig`, `VaultConfig`, `AWSNitroConfig`) carry only their own fields, e.g. `AWS.EncryptedBLSKeyPath`, `Vault.MountPath` (default `bls`).
 
 ## Troubleshooting
 - Env var ignored: `applyEnv` only sets a field when the value is non-empty, and `PORT` is silently dropped if `strconv.Atoi` fails. Check the exact name (e.g. `AWS_ENCRYPTED_BLS_KEY_PATH`, not `AWS_KEY_PATH`).
 - Backend silently defaults to `memory`: no `backend:` in YAML and no `BACKEND`/`--backend`. `Defaults()` seeds `memory`.
-- `config.example.yaml` `vault:` block doesn't load: it predates the Go struct — the struct expects `mount_path` and `key_name` (and `auth_method: token|kubernetes|aws-iam`), not the example's `path:`. Use the field names in `config.go`.
-- `parsing config file ...`: malformed YAML; `Load` wraps the `yaml.Unmarshal` error with the file path.
+- `parsing config file ...`: malformed YAML or an unknown/misspelled key (strict decoding); `Load` wraps the decoder error with the file path.
 
 ## Related
 - [../main/](../main/) — applies CLI-flag overrides on top of `Load`.

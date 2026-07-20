@@ -75,7 +75,7 @@ func serveCmd(log *slog.Logger) *cobra.Command {
 				return fmt.Errorf("loading config: %w", err)
 			}
 			if backendFlag != "" {
-				cfg.Backend = config.BackendType(backendFlag)
+				cfg.Backend = config.ParseBackend(backendFlag)
 			}
 			if port != 0 {
 				cfg.Port = port
@@ -179,7 +179,7 @@ func resolveKMSConfig(cmd *cobra.Command) (config.Config, error) {
 	}
 
 	if v, _ := cmd.Flags().GetString("backend"); v != "" {
-		cfg.Backend = config.BackendType(v)
+		cfg.Backend = config.ParseBackend(v)
 	}
 
 	// AWS overrides.

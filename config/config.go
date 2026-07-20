@@ -22,7 +22,10 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -159,8 +162,17 @@ func Defaults() Config {
 }
 
 // Addr returns the combined listen address for the gRPC server.
+// net.JoinHostPort so IPv6 listen addresses (e.g. "::1") come out bracketed
+// the way net.Listen requires.
 func (c *Config) Addr() string {
-	return fmt.Sprintf("%s:%d", c.Listen, c.Port)
+	return net.JoinHostPort(c.Listen, strconv.Itoa(c.Port))
+}
+
+// ParseBackend normalizes a user-supplied backend name to its canonical
+// BackendType, so "AWS-KMS", " aws-kms " and "aws-kms" all select the same
+// backend regardless of whether they arrived via flag, env var, or YAML.
+func ParseBackend(s string) BackendType {
+	return BackendType(strings.ToLower(strings.TrimSpace(s)))
 }
 
 // Load merges a YAML file (if path is non-empty) and then applies
@@ -178,12 +190,20 @@ func Load(path string) (Config, error) {
 		// its default and starts a dev in-memory signer unnoticed.
 		dec := yaml.NewDecoder(bytes.NewReader(data))
 		dec.KnownFields(true)
-		if err := dec.Decode(&cfg); err != nil {
+		// io.EOF means the file holds no YAML document at all (empty, or every
+		// line commented out) — that's a valid "all defaults" config, not an
+		// error. yaml.Unmarshal accepted it; the Decoder API reports it as EOF.
+		if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 			return cfg, fmt.Errorf("parsing config file %q: %w", path, err)
 		}
 	}
 
-	applyEnv(&cfg)
+	if err := applyEnv(&cfg); err != nil {
+		return cfg, err
+	}
+	// Normalize the backend name whatever its source (YAML or env); flag
+	// overrides in main normalize via ParseBackend at the call site.
+	cfg.Backend = ParseBackend(string(cfg.Backend))
 	return cfg, nil
 }
 
@@ -196,17 +216,21 @@ func Load(path string) (Config, error) {
 //	PORT            → cfg.Port
 //	AWS_REGION      → cfg.AWS.Region
 //	AWS_KMS_KEY_ID  → cfg.AWS.KMSKeyID
-func applyEnv(cfg *Config) {
+func applyEnv(cfg *Config) error {
 	if v := os.Getenv("BACKEND"); v != "" {
-		cfg.Backend = BackendType(strings.ToLower(v))
+		cfg.Backend = ParseBackend(v)
 	}
 	if v := os.Getenv("LISTEN"); v != "" {
 		cfg.Listen = v
 	}
 	if v := os.Getenv("PORT"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil {
-			cfg.Port = p
+		// A malformed PORT must be a hard error, not a silent fallback to the
+		// default — AvalancheGo would dial the wrong port with no hint why.
+		p, err := strconv.Atoi(v)
+		if err != nil || p < 1 || p > 65535 {
+			return fmt.Errorf("invalid PORT environment variable %q: must be an integer in 1-65535", v)
 		}
+		cfg.Port = p
 	}
 
 	// AWS
@@ -270,7 +294,11 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("VAULT_KUBERNETES_ROLE"); v != "" {
 		cfg.Vault.KubernetesRole = v
 	}
+	if v := os.Getenv("VAULT_KUBERNETES_JWT_PATH"); v != "" {
+		cfg.Vault.KubernetesJWTPath = v
+	}
 	if v := os.Getenv("VAULT_AWS_ROLE"); v != "" {
 		cfg.Vault.AWSRole = v
 	}
+	return nil
 }
