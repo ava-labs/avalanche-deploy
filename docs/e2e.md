@@ -136,7 +136,7 @@ E2E_INSTANCE_PROFILE=bls-validator \
 export AWS_PROFILE=my-sso-profile
 AWS_REGION=us-east-2 \
 E2E_KMS_KEY_ARN=arn:aws:kms:us-east-2:123456789012:key/abc-def \
-E2E_HOST=<validator-host> \
+E2E_HOST=<your-validator-host> \
 E2E_SSH_KEY=~/.ssh/bls-validator.pem \
 E2E_SSH_USER=ec2-user \
   ./scripts/e2e-aws.sh
