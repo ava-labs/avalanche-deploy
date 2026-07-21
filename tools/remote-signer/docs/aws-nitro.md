@@ -119,8 +119,8 @@ Attach this inline policy to the instance's IAM role:
 ## Step 5 — Clone and build
 
 ```bash
-git clone https://github.com/ava-labs/avalanche-deploy/tools/remote-signer.git
-cd avalanche-remote-signer
+git clone https://github.com/ava-labs/avalanche-deploy.git
+cd avalanche-deploy/tools/remote-signer
 CGO_ENABLED=1 go build -o ~/avalanche-remote-signer ./main/
 ```
 
@@ -151,7 +151,7 @@ vsock-proxy 8443 kms.us-east-2.amazonaws.com 443 &
 # default glibc-dynamic binary cannot exec inside it. The failure is silent —
 # the enclave boots and dies, and the host signer times out dialing vsock
 # init port 5001.
-cd ~/avalanche-remote-signer/enclave
+cd ~/avalanche-deploy/tools/remote-signer/enclave
 sudo dnf install -y glibc-static
 CGO_ENABLED=1 go build -ldflags="-linkmode external -extldflags '-static'" -o enclave-bin .
 file enclave-bin   # must say "statically linked"

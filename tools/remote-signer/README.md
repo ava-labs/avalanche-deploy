@@ -85,8 +85,8 @@ cd tests && go test ./...
 ### 1. Build
 
 ```bash
-git clone https://github.com/ava-labs/avalanche-deploy/tools/remote-signer
-cd avalanche-remote-signer
+git clone https://github.com/ava-labs/avalanche-deploy
+cd avalanche-deploy/tools/remote-signer
 CGO_ENABLED=1 go build -o avalanche-remote-signer ./main/
 ```
 
