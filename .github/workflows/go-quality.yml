@@ -31,6 +31,10 @@ jobs:
         tool:
           - create-l1
           - initialize-validator-manager
+          - remote-signer
+          - remote-signer/enclave
+          - remote-signer/vault-plugin
+          - remote-signer/tests
 
     defaults:
       run:
@@ -56,4 +60,4 @@ jobs:
           fi
 
       - name: go vet
-        run: go vet ./...
+        run: CGO_ENABLED=1 go vet ./...

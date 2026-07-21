@@ -1,6 +1,8 @@
-name: E2E (AWS)
+name: remote-signer E2E (AWS)
 
-# Manual only — this provisions real AWS infrastructure (EC2 + KMS) and costs money.
+# Manual only — this provisions real AWS infrastructure (EC2 + KMS) and costs
+# money. Requires the E2E_AWS_ROLE_ARN repository variable (an OIDC-assumable
+# role with the permissions listed in tools/remote-signer/docs/e2e.md).
 on:
   workflow_dispatch:
     inputs:
@@ -29,11 +31,15 @@ jobs:
     # normal run takes ~15-20 min; on timeout/cancel the runner signals the
     # step and e2e-aws.sh's signal traps run the teardown.
     timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: tools/remote-signer
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c # v4
         with:
           role-to-assume: ${{ vars.E2E_AWS_ROLE_ARN }}
           aws-region: ${{ inputs.region }}

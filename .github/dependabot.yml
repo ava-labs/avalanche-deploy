@@ -1,18 +1,19 @@
-# Keep all four Go modules and the workflow actions patched.
+# Keep the remote-signer Go modules and the workflow actions patched.
 # Minor/patch bumps are grouped into one PR per module per week to keep the
 # noise down; majors stay separate so breaking changes get their own review.
+# (Maintainers: extend `directories` to the other tools/ modules as desired.)
 version: 2
 updates:
   - package-ecosystem: gomod
     directories:
-      - "/"
-      - "/enclave"
-      - "/vault-plugin"
-      - "/tests"
+      - "/tools/remote-signer"
+      - "/tools/remote-signer/enclave"
+      - "/tools/remote-signer/vault-plugin"
+      - "/tools/remote-signer/tests"
     schedule:
       interval: weekly
     groups:
-      go-deps:
+      remote-signer-go-deps:
         applies-to: version-updates
         update-types: [minor, patch]
 
