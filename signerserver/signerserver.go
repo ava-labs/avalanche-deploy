@@ -8,6 +8,7 @@ package signerserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -99,7 +100,10 @@ func ListenAndServe(ctx context.Context, addr string, srv *Server) error {
 	}()
 
 	srv.log.Info("gRPC signer server listening", "addr", addr)
-	if err := grpcSrv.Serve(lis); err != nil {
+	// ErrServerStopped is a clean shutdown, not a failure: if the context is
+	// cancelled before Serve begins (e.g. SIGTERM during startup), the
+	// shutdown goroutine's GracefulStop wins the race and Serve returns it.
+	if err := grpcSrv.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 		return fmt.Errorf("grpc serve: %w", err)
 	}
 	return nil

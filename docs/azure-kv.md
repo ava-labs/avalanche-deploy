@@ -250,7 +250,7 @@ metadata:
 
 ```ini
 [Unit]
-Description=Avalanche KMS Signer
+Description=Avalanche remote signer (BLS signing sidecar)
 After=network.target
 Before=avalanchego.service
 
@@ -259,7 +259,7 @@ Type=simple
 User=avalanche
 Environment=CGO_ENABLED=1
 ExecStart=/usr/local/bin/avalanche-remote-signer serve --config-file /etc/avalanche/config.yaml
-Restart=on-failure
+Restart=always
 RestartSec=5s
 NoNewPrivileges=true
 PrivateTmp=true

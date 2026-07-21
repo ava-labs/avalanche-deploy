@@ -9,7 +9,7 @@ The implementation half of the standalone `vault-plugin/` module (a **separate G
 ## Contents
 
 - `backend.go` — `Factory` (the function `main.go` registers) and the `backend` struct; assembles the path list and the help text.
-- `path_keys.go` — the `keys/<name>/{generate, import, public-key}` paths plus storage helpers (`loadKey`) and existence checks.
+- `path_keys.go` — the `keys/<name>/{generate, import, public-key}` paths, DELETE on bare `keys/<name>` (rotation), plus storage helpers (`loadKey`) and existence checks.
 - `path_sign.go` — the `keys/<name>/{sign, sign-pop}` paths and the hardcoded AvalancheGo DSTs.
 - `bls.go` — blst (BLS12-381) primitives: `generateKey`, `publicKeyHex`, `sign`, `deserialize`.
 

@@ -6,7 +6,7 @@
 This folder contains `signer.proto`, a verbatim copy of avalanchego's [`proto/signer/signer.proto`](https://github.com/ava-labs/avalanchego/blob/master/proto/signer/signer.proto). It is the source of truth for the wire format between AvalancheGo and any BLS signing backend. The generated Go bindings in `../pb/signer/` are derived from this file; this file is never auto-generated and is the only proto you edit.
 
 ## Contents
-- `signer.proto` — proto3 definition of the `Signer` service and its four message pairs
+- `signer.proto` — proto3 definition of the `Signer` service and its three request/response message pairs
 
 ## How it works
 `signer.proto` declares `package signer` and three unary RPCs on the `Signer` service:

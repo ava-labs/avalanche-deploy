@@ -127,8 +127,8 @@ func New(cfg signerconfig.VaultConfig, log *slog.Logger) (*Backend, error) {
 type tokenAction int
 
 const (
-	// tokenActionNone: the token never expires (root tokens report ttl 0) —
-	// no renewal needed, the loop can exit.
+	// tokenActionNone: the token never expires (lookup-self reports no
+	// expire_time) — no renewal needed, the loop can exit.
 	tokenActionNone tokenAction = iota
 	// tokenActionStop: the token expires and cannot be refreshed — a static
 	// token (auth_method=token) that is non-renewable. Re-login would just
@@ -143,9 +143,14 @@ const (
 	tokenActionReauth
 )
 
-func classifyToken(ttl time.Duration, renewable bool, authMethod string) tokenAction {
+// classifyToken decides from lookup-self facts. "Never expires" is judged by
+// the expires flag (expire_time present in lookup-self), NOT by ttl == 0:
+// Vault reports TTL in whole seconds rounded down, so a live expiring token in
+// its final sub-second also reads ttl=0 — classifying on TTL would exit the
+// renewal loop permanently for a token that very much needs refreshing.
+func classifyToken(expires, renewable bool, authMethod string) tokenAction {
 	switch {
-	case ttl <= 0:
+	case !expires:
 		return tokenActionNone
 	case renewable:
 		return tokenActionRenew
@@ -161,7 +166,7 @@ func classifyToken(ttl time.Duration, renewable bool, authMethod string) tokenAc
 // replaced by a fresh login, and failures re-authenticate with backoff.
 func (b *Backend) renewTokenLoop(ctx context.Context) {
 	for {
-		ttl, renewable, err := b.tokenTTL()
+		ttl, renewable, expires, err := b.tokenTTL()
 		if err != nil {
 			// A failed lookup usually means the token has expired or been
 			// revoked — renewal cannot recover that, only a fresh login can.
@@ -187,7 +192,7 @@ func (b *Backend) renewTokenLoop(ctx context.Context) {
 			continue
 		}
 
-		switch classifyToken(ttl, renewable, b.cfg.AuthMethod) {
+		switch classifyToken(expires, renewable, b.cfg.AuthMethod) {
 		case tokenActionNone:
 			b.logf("debug", "Vault token does not expire — renewal not needed")
 			return
@@ -199,7 +204,9 @@ func (b *Backend) renewTokenLoop(ctx context.Context) {
 			return
 		}
 
-		// Sleep until renewFraction of the TTL has elapsed.
+		// Sleep until renewFraction of the TTL has elapsed. A nearly-expired
+		// token (ttl rounding down to 0) sleeps 0s — an immediate refresh,
+		// which is exactly what it needs.
 		sleepFor := time.Duration(float64(ttl) * renewFraction)
 		b.logf("debug", "Vault token refresh scheduled", "ttl", ttl, "refresh_in", sleepFor, "renewable", renewable)
 
@@ -232,23 +239,26 @@ func (b *Backend) renewTokenLoop(ctx context.Context) {
 	}
 }
 
-// tokenTTL returns the remaining TTL and whether the token is renewable.
-func (b *Backend) tokenTTL() (time.Duration, bool, error) {
+// tokenTTL returns the remaining TTL, whether the token is renewable, and
+// whether it expires at all (root/periodic-orphan tokens report no
+// expire_time — that flag, not ttl==0, is the "never expires" signal).
+func (b *Backend) tokenTTL() (time.Duration, bool, bool, error) {
 	secret, err := b.client.Auth().Token().LookupSelf()
 	if err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	ttl, err := secret.TokenTTL()
 	if err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	renewable, err := secret.TokenIsRenewable()
 	if err != nil {
 		// Don't guess: treating a parse hiccup as "non-renewable" would
 		// permanently disable renewal for a genuinely renewable token.
-		return 0, false, fmt.Errorf("token renewable lookup: %w", err)
+		return 0, false, false, fmt.Errorf("token renewable lookup: %w", err)
 	}
-	return ttl, renewable, nil
+	expires := secret.Data["expire_time"] != nil
+	return ttl, renewable, expires, nil
 }
 
 // logf logs at the given level if a logger is configured.

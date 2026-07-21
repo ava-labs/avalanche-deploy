@@ -3,7 +3,7 @@
 > Cobra CLI entry point that selects a KMS backend and either serves gRPC or manages keys.
 
 ## What this is
-This is the executable `main` package for `avalanche-kms-signer`. It wires command-line flags, environment variables, and the YAML config file into a single `config.Config`, picks a signing backend, and dispatches to either the gRPC signing server (`serve`) or the offline key-management commands (`keytool`). It is the only place that imports every concrete backend, so adding a provider means adding one `case` to `buildBackend`.
+This is the executable `main` package for `avalanche-remote-signer`. It wires command-line flags, environment variables, and the YAML config file into a single `config.Config`, picks a signing backend, and dispatches to either the gRPC signing server (`serve`) or the offline key-management commands (`keytool`). It is the only place that imports every concrete backend, so adding a provider means adding one `case` to `buildBackend`.
 
 ## Contents
 - `main.go` — `rootCmd`, the `serve` and `keytool generate`/`keytool migrate` subcommands, flag wiring, and the `buildBackend` factory.

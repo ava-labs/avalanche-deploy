@@ -28,14 +28,16 @@ vault-plugin-bls    ← custom Vault secrets plugin (separate binary)
 api/vault/          ← signer backend that calls the plugin API
 ```
 
-The plugin exposes four endpoints under its mount path (default: `bls/`):
+The plugin exposes six endpoints under its mount path (default: `bls/`):
 
 | Endpoint | Method | Description |
 |---|---|---|
 | `bls/keys/:name/generate` | POST | Generate a new BLS key |
+| `bls/keys/:name/import` | POST | Import an existing 32-byte scalar (used by `keytool migrate`) |
 | `bls/keys/:name/public-key` | GET | Return the compressed public key (hex) |
-| `bls/keys/:name/sign` | POST | Sign a message with configurable DST |
+| `bls/keys/:name/sign` | POST | Sign a message (DST restricted to the two Avalanche DSTs) |
 | `bls/keys/:name/sign-pop` | POST | Sign with the AvalancheGo PoP DST |
+| `bls/keys/:name` | DELETE | Delete a stored key (destroys the identity — for rotation) |
 
 ---
 
@@ -318,7 +320,7 @@ spec:
 
 ```ini
 [Unit]
-Description=Avalanche KMS Signer (Vault backend)
+Description=Avalanche remote signer (BLS signing sidecar, Vault backend)
 After=network.target vault.service
 Before=avalanchego.service
 
@@ -328,7 +330,7 @@ User=avalanche
 Environment=CGO_ENABLED=1
 Environment=VAULT_ADDR=http://127.0.0.1:8200
 ExecStart=/usr/local/bin/avalanche-remote-signer serve --config-file /etc/avalanche/config.yaml
-Restart=on-failure
+Restart=always
 RestartSec=5s
 NoNewPrivileges=true
 PrivateTmp=true

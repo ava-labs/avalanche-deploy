@@ -39,8 +39,11 @@ Alert on **signing health**, not just process liveness.
 
 ### 1. Signer process liveness
 
-The production systemd units (see [aws-nitro.md](aws-nitro.md#systemd-units)
-and the other backend guides) use `Restart=always`, so a **crash self-heals**.
+The example systemd units use `Restart=always` (see
+[aws-nitro.md](aws-nitro.md#systemd-units) and the per-backend guides), so a
+**crash self-heals**. Note the unit name differs by guide: the Nitro guide
+uses `remote-signer.service`; the cloud-KMS/Vault guides use
+`avalanche-remote-signer.service` — adjust the checks below to yours.
 What that does **not** cover is a deliberate `systemctl stop` that is never
 undone — systemd treats a clean stop as intentional and leaves it down. Watch
 for that:
@@ -57,8 +60,11 @@ proves the signer is reachable **and** serving the right identity — it would
 have caught a signer accidentally started against the wrong key blob:
 
 ```bash
-# grpcurl example — PublicKey takes no arguments and has no side effects
-grpcurl -plaintext -d '{}' 127.0.0.1:50051 signer.Signer/PublicKey \
+# grpcurl example — PublicKey takes no arguments and has no side effects.
+# The server does not expose gRPC reflection, so point grpcurl at the proto
+# (copy spec/signer/signer.proto to the box, or run from a repo checkout):
+grpcurl -import-path spec/signer -proto signer.proto \
+  -plaintext -d '{}' 127.0.0.1:50051 signer.Signer/PublicKey \
   | jq -r '.publicKey'          # base64; compare against your known key
 ```
 
@@ -112,10 +118,11 @@ availability checklist:
 - **`enable`d** → a reboot brings the whole chain back in order
   (vsock-proxy → signer → node).
 - **`Wants=remote-signer.service`** on the node unit (soft dependency, not
-  `Requires=`): the node starts the signer if it isn't up, but a signer
-  *restart* does not bounce the node — avalanchego's gRPC client reconnects on
-  its own. Using `Requires=` instead would needlessly restart the node every
-  time the signer cycles.
+  `Requires=`), as shown in the Nitro guide — apply the same to your
+  avalanchego unit whichever backend you run: the node starts the signer if it
+  isn't up, but a signer *restart* does not bounce the node — avalanchego's
+  gRPC client reconnects on its own. Using `Requires=` instead would
+  needlessly restart the node every time the signer cycles.
 
 A deliberate `systemctl stop` is the one thing systemd will not auto-recover;
 that is what monitoring (section 1) is for.

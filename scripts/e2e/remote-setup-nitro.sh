@@ -119,7 +119,6 @@ if [[ "${E2E_SKIP_EIF_REBUILD:-0}" != "1" ]]; then
   CGO_ENABLED=1 go build -ldflags="-linkmode external -extldflags '-static'" -o enclave-bin .
   cp "$BLOB_PATH" ./bls.key.enc
   docker build \
-    --build-arg KEY_PATH=bls.key.enc \
     --build-arg KMS_KEY_ID="$KMS_KEY_ARN" \
     -t remote-signer-enclave .
   nitro-cli build-enclave --docker-uri remote-signer-enclave --output-file "$EIF_PATH"

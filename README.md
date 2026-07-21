@@ -243,7 +243,7 @@ See [`config/config.example.yaml`](config/config.example.yaml) for a full annota
 
 ### Environment variables
 
-All config fields can be set via environment variables:
+Most config fields can be set via environment variables (exception: the `nitro.*` block is config-file/flags only):
 
 | Variable | Config field |
 |---|---|
@@ -252,6 +252,7 @@ All config fields can be set via environment variables:
 | `PORT` | `port` |
 | `AWS_REGION` | `aws.region` |
 | `AWS_KMS_KEY_ID` | `aws.kms_key_id` |
+| `AWS_ENDPOINT_URL` | `aws.endpoint_url` |
 | `AWS_ENCRYPTED_BLS_KEY_PATH` | `aws.encrypted_bls_key_path` |
 | `GCP_PROJECT` | `gcp.project` |
 | `GCP_LOCATION` | `gcp.location` |
@@ -261,6 +262,14 @@ All config fields can be set via environment variables:
 | `AZURE_VAULT_URL` | `azure.vault_url` |
 | `AZURE_KEY_NAME` | `azure.key_name` |
 | `AZURE_ENCRYPTED_BLS_KEY_PATH` | `azure.encrypted_bls_key_path` |
+| `VAULT_ADDR` | `vault.address` |
+| `VAULT_MOUNT_PATH` | `vault.mount_path` |
+| `VAULT_KEY_NAME` | `vault.key_name` |
+| `VAULT_AUTH_METHOD` | `vault.auth_method` |
+| `VAULT_TOKEN` | `vault.token` |
+| `VAULT_KUBERNETES_ROLE` | `vault.kubernetes_role` |
+| `VAULT_KUBERNETES_JWT_PATH` | `vault.kubernetes_jwt_path` |
+| `VAULT_AWS_ROLE` | `vault.aws_role` |
 
 ---
 

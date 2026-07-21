@@ -15,7 +15,7 @@ A custom HashiCorp Vault secrets-engine plugin, built as its **own Go module and
 
 ## How it works
 
-`main.go` calls `plugin.ServeMultiplex` with `BackendFactoryFunc: blssigner.Factory`; Vault launches the binary as a subprocess and speaks to it over go-plugin RPC. The factory builds a `logical.TypeLogical` backend whose paths (`keys/<name>/generate`, `/import`, `/public-key`, `/sign`, `/sign-pop`) are defined in `backend/`. Keys are persisted under the `keys/` storage prefix as a hex-encoded 32-byte scalar; only the 48-byte compressed G1 public key and 96-byte compressed G2 signatures are ever returned. blst (BLS12-381) requires **cgo**, so this binary must be built with `CGO_ENABLED=1`.
+`main.go` calls `plugin.ServeMultiplex` with `BackendFactoryFunc: blssigner.Factory`; Vault launches the binary as a subprocess and speaks to it over go-plugin RPC. The factory builds a `logical.TypeLogical` backend whose paths (`keys/<name>/generate`, `/import`, `/public-key`, `/sign`, `/sign-pop`, and DELETE on bare `keys/<name>` for rotation) are defined in `backend/`. Keys are persisted under the `keys/` storage prefix as a hex-encoded 32-byte scalar; only the 48-byte compressed G1 public key and 96-byte compressed G2 signatures are ever returned. blst (BLS12-381) requires **cgo**, so this binary must be built with `CGO_ENABLED=1`.
 
 ## Build & run
 
@@ -60,6 +60,6 @@ vault write -f bls/keys/validator-1/generate   # returns public_key; scalar stay
 ## Related
 
 - [`../api/vault/`](../api/vault/) — the signer-side client of this plugin; makes the `public-key` / `sign` / `sign-pop` HTTP calls and never holds key material.
-- [`backend/`](./backend/) — endpoint implementations (generate, import, public-key, sign, sign-pop).
+- [`backend/`](./backend/) — endpoint implementations (generate, import, public-key, sign, sign-pop, delete).
 - [`../docs/vault.md`](../docs/vault.md) — full setup guide: install Vault, build/register the plugin, generate a key, auth methods (token / kubernetes / aws-iam), and the security model.
 - [`../AGENTS.md`](../AGENTS.md) — repo map and the four-module layout.

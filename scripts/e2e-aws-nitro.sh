@@ -36,6 +36,7 @@ nitro_env="AWS_REGION=$AWS_REGION KMS_KEY_ARN=$E2E_KMS_KEY_ARN"
 [[ -n "${E2E_EIF_PATH:-}" ]] && nitro_env="$nitro_env E2E_EIF_PATH=$E2E_EIF_PATH"
 [[ -n "${E2E_SKIP_EIF_REBUILD:-}" ]] && nitro_env="$nitro_env E2E_SKIP_EIF_REBUILD=$E2E_SKIP_EIF_REBUILD"
 [[ -n "${E2E_ENCLAVE_CID:-}" ]] && nitro_env="$nitro_env E2E_ENCLAVE_CID=$E2E_ENCLAVE_CID"
+[[ -n "${E2E_ALLOW_EIF_OVERWRITE:-}" ]] && nitro_env="$nitro_env E2E_ALLOW_EIF_OVERWRITE=$E2E_ALLOW_EIF_OVERWRITE"
 
 e2e_run_remote "$ssh" "remote-setup-nitro.sh" "$nitro_env"
 rm -rf "$WORKDIR"

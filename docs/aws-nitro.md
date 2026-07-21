@@ -161,7 +161,6 @@ cp ~/bls.key.enc .
 
 # Build the Docker image (bakes in the key blob and KMS key ID)
 docker build \
-  --build-arg KEY_PATH=bls.key.enc \
   --build-arg KMS_KEY_ID=arn:aws:kms:us-east-2:YOUR-ACCOUNT:key/YOUR-KEY-ID \
   -t remote-signer-enclave .
 

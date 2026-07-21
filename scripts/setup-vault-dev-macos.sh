@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Local Vault dev setup on macOS (smoke test only — E2E still needs Vault on the remote host).
 #
-#   cd /path/to/avalanche-kms-signer && bash scripts/setup-vault-dev-macos.sh
+#   cd /path/to/avalanche-remote-signer && bash scripts/setup-vault-dev-macos.sh
 set -o errexit
 set -o nounset
 set -o pipefail
