@@ -24,16 +24,16 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ava-labs/avalanche-remote-signer/api"
-	"github.com/ava-labs/avalanche-remote-signer/api/awskms"
-	"github.com/ava-labs/avalanche-remote-signer/api/awsnitro"
-	"github.com/ava-labs/avalanche-remote-signer/api/azurekv"
-	"github.com/ava-labs/avalanche-remote-signer/api/gcpkms"
-	vaultbackend "github.com/ava-labs/avalanche-remote-signer/api/vault"
-	"github.com/ava-labs/avalanche-remote-signer/config"
-	"github.com/ava-labs/avalanche-remote-signer/keytool"
-	"github.com/ava-labs/avalanche-remote-signer/mockapi"
-	"github.com/ava-labs/avalanche-remote-signer/signerserver"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/api"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/api/awskms"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/api/awsnitro"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/api/azurekv"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/api/gcpkms"
+	vaultbackend "github.com/ava-labs/avalanche-deploy/tools/remote-signer/api/vault"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/config"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/keytool"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/mockapi"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/signerserver"
 )
 
 func main() {

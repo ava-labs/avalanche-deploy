@@ -16,7 +16,7 @@ These files are produced by `protoc` (via `scripts/gen-proto.sh`) from `../../si
 - You edited a `.pb.go` by hand → changes are lost on regen and break the "do not edit" contract → make the change in `../../signer/signer.proto` and run `./scripts/gen-proto.sh`.
 - `EnforceVersion` / `SupportPackageIsVersion9` compile error → generated code is older/newer than the `google.golang.org/protobuf` or `google.golang.org/grpc` in `go.mod` → reinstall the generator plugins and regenerate, then `go mod tidy`.
 - `undefined: pb.RegisterSignerServer` or a missing message field → bindings out of sync with the proto → regenerate; commit `signer.pb.go` and `signer_grpc.pb.go` together.
-- Package import fails → wrong path → import `github.com/ava-labs/avalanche-remote-signer/spec/pb/signer` (set by `go_package` in the proto).
+- Package import fails → wrong path → import `github.com/ava-labs/avalanche-deploy/tools/remote-signer/spec/pb/signer` (set by `go_package` in the proto).
 
 ## Related
 - [`../../signer/`](../../signer/) — the `signer.proto` source these are generated from

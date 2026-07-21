@@ -1,9 +1,9 @@
-module github.com/ava-labs/avalanche-remote-signer/tests
+module github.com/ava-labs/avalanche-deploy/tools/remote-signer/tests
 
 go 1.25.12
 
 require (
-	github.com/ava-labs/avalanche-remote-signer v0.0.0
+	github.com/ava-labs/avalanche-deploy/tools/remote-signer v0.0.0
 	github.com/ava-labs/avalanchego v1.14.2
 	google.golang.org/grpc v1.82.0
 )
@@ -17,4 +17,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/ava-labs/avalanche-remote-signer => ../
+replace github.com/ava-labs/avalanche-deploy/tools/remote-signer => ../

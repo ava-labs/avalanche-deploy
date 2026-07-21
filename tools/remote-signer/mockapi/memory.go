@@ -13,7 +13,7 @@ import (
 	"crypto/rand"
 	"fmt"
 
-	"github.com/ava-labs/avalanche-remote-signer/internal/blstutil"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/internal/blstutil"
 )
 
 // Domain separation tags — single source of truth in blstutil,

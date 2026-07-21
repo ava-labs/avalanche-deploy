@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	pb "github.com/ava-labs/avalanche-remote-signer/spec/pb/signer"
+	pb "github.com/ava-labs/avalanche-deploy/tools/remote-signer/spec/pb/signer"
 )
 
 func main() {

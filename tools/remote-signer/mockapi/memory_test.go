@@ -7,7 +7,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ava-labs/avalanche-remote-signer/mockapi"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/mockapi"
 )
 
 func TestNew(t *testing.T) {

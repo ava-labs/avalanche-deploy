@@ -12,7 +12,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ava-labs/avalanche-remote-signer/internal/blstutil"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/internal/blstutil"
 )
 
 func TestSignUsesCorrectDSTs(t *testing.T) {

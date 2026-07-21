@@ -18,8 +18,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/ava-labs/avalanche-remote-signer/api"
-	pb "github.com/ava-labs/avalanche-remote-signer/spec/pb/signer"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/api"
+	pb "github.com/ava-labs/avalanche-deploy/tools/remote-signer/spec/pb/signer"
 )
 
 // shutdownGracePeriod bounds how long GracefulStop may drain in-flight RPCs

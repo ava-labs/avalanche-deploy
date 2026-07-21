@@ -3,7 +3,7 @@
 > The BLS signing binary that runs **inside** an AWS Nitro Enclave, so the plaintext key never touches the host.
 
 ## What this is
-A separate Go module (`github.com/ava-labs/avalanche-remote-signer/enclave`, own `go.mod` with `replace ... => ../`) that builds the program packaged into the enclave image. It is its own module because it has a distinct dependency set (AWS SDK, `mdlayher/vsock`, `blst`) and is cross-compiled/statically linked independently of the host signer. It is the enclave half of the `awsnitro` backend: the host (`api/awsnitro`) launches it and talks to it over vsock; this binary decrypts the BLS key via KMS and serves signatures.
+A separate Go module (`github.com/ava-labs/avalanche-deploy/tools/remote-signer/enclave`, own `go.mod` with `replace ... => ../`) that builds the program packaged into the enclave image. It is its own module because it has a distinct dependency set (AWS SDK, `mdlayher/vsock`, `blst`) and is cross-compiled/statically linked independently of the host signer. It is the enclave half of the `awsnitro` backend: the host (`api/awsnitro`) launches it and talks to it over vsock; this binary decrypts the BLS key via KMS and serves signatures.
 
 ## Contents
 - `main.go` — the full enclave program: vsock init handshake, KMS decrypt, BLS sign/PoP server.

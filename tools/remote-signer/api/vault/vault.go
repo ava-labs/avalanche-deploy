@@ -32,8 +32,8 @@ import (
 	awsauth "github.com/hashicorp/vault/api/auth/aws"
 	k8sauth "github.com/hashicorp/vault/api/auth/kubernetes"
 
-	signerconfig "github.com/ava-labs/avalanche-remote-signer/config"
-	"github.com/ava-labs/avalanche-remote-signer/internal/blstutil"
+	signerconfig "github.com/ava-labs/avalanche-deploy/tools/remote-signer/config"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/internal/blstutil"
 )
 
 // Domain separation tags — single source of truth in blstutil,

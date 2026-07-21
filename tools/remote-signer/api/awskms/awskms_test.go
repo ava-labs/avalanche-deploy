@@ -12,8 +12,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 
-	signerconfig "github.com/ava-labs/avalanche-remote-signer/config"
-	"github.com/ava-labs/avalanche-remote-signer/internal/blstutil"
+	signerconfig "github.com/ava-labs/avalanche-deploy/tools/remote-signer/config"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/internal/blstutil"
 )
 
 // mockKMS applies XOR "encryption" for unit tests only — not cryptographically secure.

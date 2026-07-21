@@ -36,8 +36,8 @@ import (
 	"github.com/mdlayher/vsock"
 	blst "github.com/supranational/blst/bindings/go"
 
-	blstutil "github.com/ava-labs/avalanche-remote-signer/internal/blstutil"
-	enclaveproto "github.com/ava-labs/avalanche-remote-signer/internal/enclaveproto"
+	blstutil "github.com/ava-labs/avalanche-deploy/tools/remote-signer/internal/blstutil"
+	enclaveproto "github.com/ava-labs/avalanche-deploy/tools/remote-signer/internal/enclaveproto"
 )
 
 // Domain separation tags come from blstutil — the single source of truth that

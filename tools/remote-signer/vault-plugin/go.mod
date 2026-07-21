@@ -1,4 +1,4 @@
-module github.com/ava-labs/avalanche-remote-signer/vault-plugin
+module github.com/ava-labs/avalanche-deploy/tools/remote-signer/vault-plugin
 
 go 1.25.12
 

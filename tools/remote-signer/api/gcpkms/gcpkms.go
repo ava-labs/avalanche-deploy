@@ -15,8 +15,8 @@ import (
 	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
 	gax "github.com/googleapis/gax-go/v2"
 
-	signerconfig "github.com/ava-labs/avalanche-remote-signer/config"
-	"github.com/ava-labs/avalanche-remote-signer/internal/blstutil"
+	signerconfig "github.com/ava-labs/avalanche-deploy/tools/remote-signer/config"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/internal/blstutil"
 )
 
 // Domain separation tags — single source of truth in blstutil,

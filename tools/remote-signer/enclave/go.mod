@@ -1,9 +1,9 @@
-module github.com/ava-labs/avalanche-remote-signer/enclave
+module github.com/ava-labs/avalanche-deploy/tools/remote-signer/enclave
 
 go 1.25.12
 
 require (
-	github.com/ava-labs/avalanche-remote-signer v0.0.0
+	github.com/ava-labs/avalanche-deploy/tools/remote-signer v0.0.0
 	github.com/aws/aws-sdk-go-v2 v1.42.1
 	github.com/aws/aws-sdk-go-v2/config v1.32.30
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.29
@@ -30,4 +30,4 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 )
 
-replace github.com/ava-labs/avalanche-remote-signer => ../
+replace github.com/ava-labs/avalanche-deploy/tools/remote-signer => ../

@@ -1,4 +1,4 @@
-module github.com/ava-labs/avalanche-remote-signer
+module github.com/ava-labs/avalanche-deploy/tools/remote-signer
 
 go 1.25.12
 

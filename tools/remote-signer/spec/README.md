@@ -11,12 +11,12 @@
 - `pb/signer/signer_grpc.pb.go` — generated gRPC client/server stubs (do not edit)
 
 ## How it works
-The `.proto` declares the service and its request/response messages. Running `scripts/gen-proto.sh` invokes `protoc` with `paths=source_relative`, reading `spec/signer/signer.proto` and writing both `.pb.go` files into `spec/pb/signer/`. The `option go_package` in the proto fixes the import path to `github.com/ava-labs/avalanche-remote-signer/spec/pb/signer`, which `signerserver/` imports as `pb`. The proto and the bindings must always stay in sync: edit the proto, then regenerate — never the reverse.
+The `.proto` declares the service and its request/response messages. Running `scripts/gen-proto.sh` invokes `protoc` with `paths=source_relative`, reading `spec/signer/signer.proto` and writing both `.pb.go` files into `spec/pb/signer/`. The `option go_package` in the proto fixes the import path to `github.com/ava-labs/avalanche-deploy/tools/remote-signer/spec/pb/signer`, which `signerserver/` imports as `pb`. The proto and the bindings must always stay in sync: edit the proto, then regenerate — never the reverse.
 
 ## Troubleshooting
 - Build/runtime mismatch (unknown field, wrong message shape) → bindings out of sync with the proto → re-run `./scripts/gen-proto.sh` and commit both folders together.
 - Hand-edited a `.pb.go` and it later reverted → generated files are overwritten on regen → make the change in `signer/signer.proto` instead, then regenerate.
-- Import path won't resolve → the `go_package` option or module path drifted → confirm `option go_package` matches `module` in `go.mod` (`github.com/ava-labs/avalanche-remote-signer`).
+- Import path won't resolve → the `go_package` option or module path drifted → confirm `option go_package` matches `module` in `go.mod` (`github.com/ava-labs/avalanche-deploy/tools/remote-signer`).
 
 ## Related
 - [`signer/`](./signer/) — the `.proto` source

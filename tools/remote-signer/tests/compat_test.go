@@ -20,7 +20,7 @@ import (
 
 	avabls "github.com/ava-labs/avalanchego/utils/crypto/bls"
 
-	"github.com/ava-labs/avalanche-remote-signer/internal/blstutil"
+	"github.com/ava-labs/avalanche-deploy/tools/remote-signer/internal/blstutil"
 )
 
 // TestDSTsMatchAvalancheGo pins our DST constants to AvalancheGo's
