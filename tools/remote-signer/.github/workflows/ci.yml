@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod   # track the toolchain the module declares
+          cache: false
+
+      - name: Install C build tools
+        run: sudo apt-get install -y gcc
+
+      # Formatting must be clean across every module (root + submodules).
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: Build
+        run: CGO_ENABLED=1 go build ./...
+
+      - name: Vet
+        run: CGO_ENABLED=1 go vet ./...
+
+      # Race detector on the root module — the gRPC server signs concurrently.
+      - name: Test (race)
+        run: CGO_ENABLED=1 go test -race ./...
+
+      # Cross-checks BLS signing (DSTs and real signatures) against
+      # avalanchego's own bls package — catches the failure mode where
+      # PoP/registration works but every warp signature is rejected.
+      - name: BLS compatibility tests (tests module)
+        run: cd tests && CGO_ENABLED=1 go test -race ./...
+
+      # The enclave and vault-plugin are separate modules the root
+      # go test cannot see — vet + build them so drift is caught.
+      - name: Enclave module (vet + build)
+        run: cd enclave && CGO_ENABLED=1 go vet ./... && CGO_ENABLED=1 go build ./...
+
+      - name: Vault-plugin module (vet + build + test)
+        run: cd vault-plugin && CGO_ENABLED=1 go vet ./... && CGO_ENABLED=1 go build ./... && CGO_ENABLED=1 go test -race ./...
+
+  # The vault-plugin Dockerfile is not exercised by any build or E2E path
+  # (those use a bare `go build`), so build it here or it rots unnoticed.
+  vault-plugin-docker:
+    name: vault-plugin Dockerfile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build image
+        run: docker build -t vault-plugin-bls ./vault-plugin/
+
+      - name: Binary is extractable and statically linked
+        run: |
+          docker create --name tmp vault-plugin-bls
+          docker cp tmp:/vault-plugin-bls ./vault-plugin-bls-out
+          docker rm tmp
+          file ./vault-plugin-bls-out | tee /dev/stderr | grep -q 'statically linked'
+
+  # Fails on known vulnerabilities that the code actually calls (plus any
+  # affecting the toolchain in go.mod). Scans all four modules.
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install C build tools
+        run: sudo apt-get install -y gcc
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Scan all modules
+        run: |
+          for mod in . enclave vault-plugin tests; do
+            echo "=== govulncheck: $mod ==="
+            (cd "$mod" && CGO_ENABLED=1 govulncheck ./...)
+          done

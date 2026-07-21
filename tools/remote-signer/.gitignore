@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Compiled binaries / build artifacts.
+# These are built from source via `go build` and the Dockerfiles —
+# never commit them.
+/avalanche-remote-signer
+/avalanche-kms-signer
+/avalanche-kms-signer-bin
+/vault-plugin-bls
+/vault-plugin/vault-plugin-bls
+# Enclave build outputs (statically-linked binary + packaged image)
+/enclave/enclave
+/enclave/enclave-bin
+*.eif
+
+# Go test & coverage output
+*.out
+*.test
+coverage.html
+
+# Encrypted key blobs (local testing only — never commit key material)
+*.key.enc
+
+# Editor / IDE
+*.swp
+*.swo
+.idea/
+.vscode/

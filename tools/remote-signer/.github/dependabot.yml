@@ -1,0 +1,22 @@
+# Keep all four Go modules and the workflow actions patched.
+# Minor/patch bumps are grouped into one PR per module per week to keep the
+# noise down; majors stay separate so breaking changes get their own review.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directories:
+      - "/"
+      - "/enclave"
+      - "/vault-plugin"
+      - "/tests"
+    schedule:
+      interval: weekly
+    groups:
+      go-deps:
+        applies-to: version-updates
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

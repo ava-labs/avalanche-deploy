@@ -1,0 +1,304 @@
+// Copyright (C) 2024, Ava Labs, Inc. All rights reserved.
+// See the file LICENSE for licensing terms.
+
+// Package config defines the top-level configuration for avalanche-remote-signer.
+//
+// Precedence (highest to lowest):
+//  1. CLI flags
+//  2. Environment variables  (KEY becomes --key, e.g. BACKEND → --backend)
+//  3. Config file (YAML)
+//
+// Example config file:
+//
+//	backend: memory      # memory | aws-kms | gcp-kms | azure-kv | vault | aws-nitro
+//	port:    50051
+//	listen:  127.0.0.1
+//
+//	aws:
+//	  region:                 us-east-1
+//	  kms_key_id:             arn:aws:kms:us-east-1:123456789:key/abc-def
+//	  encrypted_bls_key_path: /etc/avalanche/bls.key.enc
+package config
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+// BackendType enumerates the supported signing backends.
+type BackendType string
+
+const (
+	BackendMemory   BackendType = "memory"    // in-process, dev/test only
+	BackendAWSKMS   BackendType = "aws-kms"   // KMS-encrypted blob; decrypt at startup
+	BackendGCPKMS   BackendType = "gcp-kms"   // KMS-encrypted blob; decrypt at startup
+	BackendAzureKV  BackendType = "azure-kv"  // KMS-encrypted blob; decrypt at startup
+	BackendVault    BackendType = "vault"     // signing inside Vault plugin
+	BackendAWSNitro BackendType = "aws-nitro" // signing inside Nitro Enclave
+)
+
+// Config is the root configuration object.
+type Config struct {
+	// Backend selects which signing backend to use.
+	Backend BackendType `yaml:"backend"`
+
+	// Listen is the IP address the gRPC server binds to.
+	Listen string `yaml:"listen"`
+
+	// Port is the TCP port the gRPC server listens on.
+	Port int `yaml:"port"`
+
+	// AWS holds configuration for the aws-kms backend.
+	AWS AWSConfig `yaml:"aws"`
+
+	// Nitro holds configuration for the aws-nitro backend.
+	Nitro AWSNitroConfig `yaml:"nitro"`
+
+	// GCP holds configuration for the gcp-kms backend.
+	GCP GCPConfig `yaml:"gcp"`
+
+	// Azure holds configuration for the azure-kv backend.
+	Azure AzureConfig `yaml:"azure"`
+
+	// Vault holds configuration for the vault backend.
+	Vault VaultConfig `yaml:"vault"`
+}
+
+// AWSConfig holds AWS-specific settings.
+type AWSConfig struct {
+	Region              string `yaml:"region"`
+	KMSKeyID            string `yaml:"kms_key_id"`
+	EncryptedBLSKeyPath string `yaml:"encrypted_bls_key_path"`
+	// EndpointURL overrides the AWS KMS endpoint. Used for LocalStack and other
+	// local testing environments. Leave empty in production.
+	EndpointURL string `yaml:"endpoint_url"`
+}
+
+// AWSNitroConfig holds AWS Nitro Enclave-specific settings.
+type AWSNitroConfig struct {
+	// Region is the AWS region for KMS calls.
+	Region string `yaml:"region"`
+
+	// EIFPath is the path to the Enclave Image File on the host.
+	EIFPath string `yaml:"eif_path"`
+
+	// KMSKeyID is the ARN of the KMS key used to encrypt the BLS key blob.
+	KMSKeyID string `yaml:"kms_key_id"`
+
+	// EncryptedBLSKeyPath is the path to the encrypted BLS key blob on the host.
+	// This file is read by the enclave process (passed in via the EIF build).
+	EncryptedBLSKeyPath string `yaml:"encrypted_bls_key_path"`
+
+	// CPUCount is the number of vCPUs to allocate to the enclave (minimum 2).
+	CPUCount int `yaml:"cpu_count"`
+
+	// MemoryMiB is the amount of memory to allocate to the enclave in MiB (minimum 512).
+	MemoryMiB int `yaml:"memory_mib"`
+
+	// EnclaveCID is the vsock CID to assign to the enclave.
+	// Must be >= 4 (CIDs 0-3 are reserved).
+	EnclaveCID uint32 `yaml:"enclave_cid"`
+}
+
+// GCPConfig holds GCP-specific settings.
+type GCPConfig struct {
+	Project             string `yaml:"project"`
+	Location            string `yaml:"location"`
+	KeyRing             string `yaml:"key_ring"`
+	KeyName             string `yaml:"key_name"`
+	EncryptedBLSKeyPath string `yaml:"encrypted_bls_key_path"`
+}
+
+// AzureConfig holds Azure-specific settings.
+type AzureConfig struct {
+	VaultURL            string `yaml:"vault_url"`
+	KeyName             string `yaml:"key_name"`
+	EncryptedBLSKeyPath string `yaml:"encrypted_bls_key_path"`
+}
+
+// VaultConfig holds HashiCorp Vault settings.
+type VaultConfig struct {
+	// Address is the Vault server URL, e.g. https://vault.internal:8200
+	Address string `yaml:"address"`
+
+	// MountPath is where the BLS plugin is mounted. Defaults to "bls".
+	MountPath string `yaml:"mount_path"`
+
+	// KeyName is the name of the BLS key within the plugin.
+	KeyName string `yaml:"key_name"`
+
+	// AuthMethod selects how to authenticate: token | kubernetes | aws-iam
+	AuthMethod string `yaml:"auth_method"`
+
+	// Token is used when AuthMethod == "token".
+	Token string `yaml:"token"`
+
+	// KubernetesRole is the Vault role name for Kubernetes auth.
+	KubernetesRole string `yaml:"kubernetes_role"`
+
+	// KubernetesJWTPath is the path to the service account JWT token.
+	// Defaults to /var/run/secrets/kubernetes.io/serviceaccount/token.
+	KubernetesJWTPath string `yaml:"kubernetes_jwt_path"`
+
+	// AWSRole is the Vault role name for AWS IAM auth.
+	AWSRole string `yaml:"aws_role"`
+}
+
+// Defaults returns a Config populated with sensible defaults.
+func Defaults() Config {
+	return Config{
+		Backend: BackendMemory,
+		Listen:  "127.0.0.1",
+		Port:    50051,
+	}
+}
+
+// Addr returns the combined listen address for the gRPC server.
+// net.JoinHostPort so IPv6 listen addresses (e.g. "::1") come out bracketed
+// the way net.Listen requires.
+func (c *Config) Addr() string {
+	return net.JoinHostPort(c.Listen, strconv.Itoa(c.Port))
+}
+
+// ParseBackend normalizes a user-supplied backend name to its canonical
+// BackendType, so "AWS-KMS", " aws-kms " and "aws-kms" all select the same
+// backend regardless of whether they arrived via flag, env var, or YAML.
+func ParseBackend(s string) BackendType {
+	return BackendType(strings.ToLower(strings.TrimSpace(s)))
+}
+
+// Load merges a YAML file (if path is non-empty) and then applies
+// environment-variable overrides.  Flags are applied separately in main.
+func Load(path string) (Config, error) {
+	cfg := Defaults()
+
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return cfg, fmt.Errorf("reading config file %q: %w", path, err)
+		}
+		// KnownFields(true) rejects unknown/misspelled keys instead of silently
+		// ignoring them — otherwise a typo'd "backend:" leaves the backend at
+		// its default and starts a dev in-memory signer unnoticed.
+		dec := yaml.NewDecoder(bytes.NewReader(data))
+		dec.KnownFields(true)
+		// io.EOF means the file holds no YAML document at all (empty, or every
+		// line commented out) — that's a valid "all defaults" config, not an
+		// error. yaml.Unmarshal accepted it; the Decoder API reports it as EOF.
+		if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
+			return cfg, fmt.Errorf("parsing config file %q: %w", path, err)
+		}
+	}
+
+	if err := applyEnv(&cfg); err != nil {
+		return cfg, err
+	}
+	// Normalize the backend name whatever its source (YAML or env); flag
+	// overrides in main normalize via ParseBackend at the call site.
+	cfg.Backend = ParseBackend(string(cfg.Backend))
+	return cfg, nil
+}
+
+// applyEnv applies environment-variable overrides.
+// The convention mirrors cube-signer-sidecar: upper-case the YAML key and
+// replace "-" with "_".  Examples:
+//
+//	BACKEND         → cfg.Backend
+//	LISTEN          → cfg.Listen
+//	PORT            → cfg.Port
+//	AWS_REGION      → cfg.AWS.Region
+//	AWS_KMS_KEY_ID  → cfg.AWS.KMSKeyID
+func applyEnv(cfg *Config) error {
+	if v := os.Getenv("BACKEND"); v != "" {
+		cfg.Backend = ParseBackend(v)
+	}
+	if v := os.Getenv("LISTEN"); v != "" {
+		cfg.Listen = v
+	}
+	if v := os.Getenv("PORT"); v != "" {
+		// A malformed PORT must be a hard error, not a silent fallback to the
+		// default — AvalancheGo would dial the wrong port with no hint why.
+		p, err := strconv.Atoi(v)
+		if err != nil || p < 1 || p > 65535 {
+			return fmt.Errorf("invalid PORT environment variable %q: must be an integer in 1-65535", v)
+		}
+		cfg.Port = p
+	}
+
+	// AWS
+	if v := os.Getenv("AWS_REGION"); v != "" {
+		cfg.AWS.Region = v
+	}
+	if v := os.Getenv("AWS_KMS_KEY_ID"); v != "" {
+		cfg.AWS.KMSKeyID = v
+	}
+	if v := os.Getenv("AWS_ENDPOINT_URL"); v != "" {
+		cfg.AWS.EndpointURL = v
+	}
+	if v := os.Getenv("AWS_ENCRYPTED_BLS_KEY_PATH"); v != "" {
+		cfg.AWS.EncryptedBLSKeyPath = v
+	}
+
+	// GCP
+	if v := os.Getenv("GCP_PROJECT"); v != "" {
+		cfg.GCP.Project = v
+	}
+	if v := os.Getenv("GCP_LOCATION"); v != "" {
+		cfg.GCP.Location = v
+	}
+	if v := os.Getenv("GCP_KEY_RING"); v != "" {
+		cfg.GCP.KeyRing = v
+	}
+	if v := os.Getenv("GCP_KEY_NAME"); v != "" {
+		cfg.GCP.KeyName = v
+	}
+	if v := os.Getenv("GCP_ENCRYPTED_BLS_KEY_PATH"); v != "" {
+		cfg.GCP.EncryptedBLSKeyPath = v
+	}
+
+	// Azure
+	if v := os.Getenv("AZURE_VAULT_URL"); v != "" {
+		cfg.Azure.VaultURL = v
+	}
+	if v := os.Getenv("AZURE_KEY_NAME"); v != "" {
+		cfg.Azure.KeyName = v
+	}
+	if v := os.Getenv("AZURE_ENCRYPTED_BLS_KEY_PATH"); v != "" {
+		cfg.Azure.EncryptedBLSKeyPath = v
+	}
+
+	// Vault
+	if v := os.Getenv("VAULT_ADDR"); v != "" {
+		cfg.Vault.Address = v
+	}
+	if v := os.Getenv("VAULT_MOUNT_PATH"); v != "" {
+		cfg.Vault.MountPath = v
+	}
+	if v := os.Getenv("VAULT_KEY_NAME"); v != "" {
+		cfg.Vault.KeyName = v
+	}
+	if v := os.Getenv("VAULT_AUTH_METHOD"); v != "" {
+		cfg.Vault.AuthMethod = v
+	}
+	if v := os.Getenv("VAULT_TOKEN"); v != "" {
+		cfg.Vault.Token = v
+	}
+	if v := os.Getenv("VAULT_KUBERNETES_ROLE"); v != "" {
+		cfg.Vault.KubernetesRole = v
+	}
+	if v := os.Getenv("VAULT_KUBERNETES_JWT_PATH"); v != "" {
+		cfg.Vault.KubernetesJWTPath = v
+	}
+	if v := os.Getenv("VAULT_AWS_ROLE"); v != "" {
+		cfg.Vault.AWSRole = v
+	}
+	return nil
+}
