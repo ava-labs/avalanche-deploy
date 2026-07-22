@@ -2,6 +2,10 @@
 
 Common issues and solutions.
 
+For stable `PASS`/`WARN`/`FAIL`/`SKIP` diagnostics and exact remediation of a
+managed validator-lifecycle Relayer, run `make relayer-doctor` and see the
+[managed Relayer runbook](l1/RELAYER.md#what-doctor-checks).
+
 ## Connection Issues
 
 ### Ansible can't connect to nodes

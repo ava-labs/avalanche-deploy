@@ -9,11 +9,15 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer init-validator-manager initialize-validator-manager primary-infra primary-infra-plan primary-deploy primary-status primary-destroy backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-erpc k8s-faucet k8s-blockscout k8s-graph-node k8s-safe k8s-backup-keys k8s-health-checks k8s-init-validator-manager k8s-reset-l1 k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
+.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer relayer-prereqs relayer-doctor relayer relayer-access relayer-status relayer-logs relayer-upgrade relayer-backup relayer-restore relayer-remove init-validator-manager initialize-validator-manager primary-infra primary-infra-plan primary-deploy primary-status primary-destroy backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-erpc k8s-faucet k8s-blockscout k8s-graph-node k8s-safe k8s-backup-keys k8s-health-checks k8s-init-validator-manager k8s-reset-l1 k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
 
 # Default cloud provider
 CLOUD ?= aws
 NETWORK ?= fuji
+# Deliberately not a published version. Replace this sentinel with the first
+# tested ava-labs/validator-manager-relayer release only after the repository
+# and package transfer and anonymous archive/image pull release gate has passed.
+RELAYER_VERSION ?= v0.0.0-transfer-required
 AUTO_APPROVE ?= false
 TF_INIT_RETRIES ?= 3
 SKIP_TERRAFORM_VALIDATE ?= false
@@ -225,6 +229,40 @@ icm-relayer:
 		-e "l1_chain_id=$(CHAIN_ID)" \
 		-e "relayer_private_key=$(RELAYER_KEY)" \
 		$(if $(NETWORK),-e "icm_relayer_network=$(NETWORK)",)
+
+#
+# ACP-77/99 Validator-Lifecycle Relayer (relayerd)
+#
+relayer-prereqs:
+	@./scripts/l1/relayer.sh prereqs
+
+relayer-doctor:
+	@RELAYER_VERSION="$(RELAYER_VERSION)" ./scripts/l1/relayer.sh doctor
+
+relayer:
+	@RELAYER_VERSION="$(RELAYER_VERSION)" ./scripts/l1/relayer.sh install
+
+relayer-access:
+	@./scripts/l1/relayer.sh access
+
+relayer-status:
+	@./scripts/l1/relayer.sh status
+
+relayer-logs:
+	@./scripts/l1/relayer.sh logs
+
+relayer-upgrade:
+	@RELAYER_VERSION="$(RELAYER_VERSION)" ./scripts/l1/relayer.sh upgrade
+
+relayer-backup:
+	@./scripts/l1/relayer.sh backup
+
+relayer-restore:
+	@if [ -z "$(BACKUP)" ]; then echo "Usage: make relayer-restore BACKUP=/absolute/path/to/relayer-*.tar.gz"; exit 2; fi
+	@BACKUP="$(BACKUP)" ./scripts/l1/relayer.sh restore
+
+relayer-remove:
+	@PURGE="$(PURGE)" ./scripts/l1/relayer.sh remove
 
 #
 # Validator Manager
@@ -670,6 +708,8 @@ test-unit:
 	@cd tools/create-l1 && go test ./...
 	@cd tools/initialize-validator-manager && go test ./...
 	@cd tools/initialize-validator-manager/cmd/init_valset && go test ./...
+	@./tests/relayer-static.sh
+	@./tests/relayer-doctor-fixtures.sh
 	@echo "✓ Unit tests passed"
 
 test-incremental: lint validate test-unit test-e2e-dry
@@ -733,6 +773,14 @@ help-l1:
 	@echo "  make graph-node CHAIN_ID=... [NETWORK_NAME=...]"
 	@echo "  make erpc CHAIN_ID=... EVM_CHAIN_ID=...          (standalone re-deploy)"
 	@echo "  make icm-relayer SUBNET_ID=... CHAIN_ID=... RELAYER_KEY=0x..."
+	@echo "  make relayer-prereqs                              (install local operator software)"
+	@echo "  make relayer-doctor                               (read-only comprehensive diagnostics)"
+	@echo "  make relayer                                      (discover and install/reapply after PoAManager init)"
+	@echo "  make relayer-access | make relayer-status | make relayer-logs"
+	@echo "  make relayer-backup"
+	@echo "  make relayer-restore BACKUP=/absolute/path/to/relayer-....tar.gz"
+	@echo "  make relayer-upgrade RELAYER_VERSION=vX.Y.Z"
+	@echo "  make relayer-remove [PURGE=true]"
 	@echo "  make safe [CHAIN_ID=... EVM_CHAIN_ID=...]  (auto-detects from l1.env)"
 	@echo ""
 	@echo "Ops:"
@@ -829,6 +877,16 @@ help-all:
 	@echo "  make graph-node        Deploy The Graph Node for indexing"
 	@echo "  make erpc              Deploy eRPC load balancer"
 	@echo "  make icm-relayer       Deploy ICM Relayer for cross-chain messaging"
+	@echo "  make relayer-prereqs   Install local Relayer operator software"
+	@echo "  make relayer-doctor    Run read-only comprehensive diagnostics"
+	@echo "  make relayer           Auto-discover and install/reapply daemon + console on rpc[0]"
+	@echo "  make relayer-access    Forward the Relayer console and L1 RPC"
+	@echo "  make relayer-status    Show a quick runtime snapshot"
+	@echo "  make relayer-logs      Follow Relayer logs"
+	@echo "  make relayer-backup    Create a retained consistent backup"
+	@echo "  make relayer-restore BACKUP=/absolute/path/to/relayer-....tar.gz"
+	@echo "  make relayer-upgrade RELAYER_VERSION=vX.Y.Z"
+	@echo "  make relayer-remove [PURGE=true]"
 	@echo ""
 	@echo "Validator Manager:"
 	@echo "  make init-validator-manager      Build the validator manager tool"

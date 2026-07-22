@@ -48,16 +48,16 @@ output "ansible_inventory" {
   value       = <<-EOT
 [validators]
 %{for i, ip in azurerm_public_ip.validators[*].ip_address~}
-validator-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username} node_type=validator
+validator-${i + 1} ansible_host=${ip} private_ip=${azurerm_network_interface.validators[i].private_ip_address} ansible_user=${var.admin_username} node_type=validator
 %{endfor~}
 
 [rpc]
 %{for i, ip in azurerm_public_ip.rpc[*].ip_address~}
-rpc-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username} node_type=rpc
+rpc-${i + 1} ansible_host=${ip} private_ip=${azurerm_network_interface.rpc[i].private_ip_address} ansible_user=${var.admin_username} node_type=rpc
 %{endfor~}
 
 [monitoring]
-monitoring-1 ansible_host=${azurerm_public_ip.monitoring.ip_address} ansible_user=${var.admin_username}
+monitoring-1 ansible_host=${azurerm_public_ip.monitoring.ip_address} private_ip=${azurerm_network_interface.monitoring.private_ip_address} ansible_user=${var.admin_username}
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
@@ -68,16 +68,16 @@ resource "local_file" "ansible_inventory" {
   content  = <<-EOT
 [validators]
 %{for i, ip in azurerm_public_ip.validators[*].ip_address~}
-validator-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username} node_type=validator
+validator-${i + 1} ansible_host=${ip} private_ip=${azurerm_network_interface.validators[i].private_ip_address} ansible_user=${var.admin_username} node_type=validator
 %{endfor~}
 
 [rpc]
 %{for i, ip in azurerm_public_ip.rpc[*].ip_address~}
-rpc-${i + 1} ansible_host=${ip} ansible_user=${var.admin_username} node_type=rpc
+rpc-${i + 1} ansible_host=${ip} private_ip=${azurerm_network_interface.rpc[i].private_ip_address} ansible_user=${var.admin_username} node_type=rpc
 %{endfor~}
 
 [monitoring]
-monitoring-1 ansible_host=${azurerm_public_ip.monitoring.ip_address} ansible_user=${var.admin_username}
+monitoring-1 ansible_host=${azurerm_public_ip.monitoring.ip_address} private_ip=${azurerm_network_interface.monitoring.private_ip_address} ansible_user=${var.admin_username}
 
 [all:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'

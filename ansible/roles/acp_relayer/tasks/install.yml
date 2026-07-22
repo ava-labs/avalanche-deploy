@@ -1,0 +1,17 @@
+---
+- name: Install the checksummed relayerd release binary
+  ansible.builtin.copy:
+    src: "{{ acp_relayer_binary_local_src }}"
+    dest: "{{ acp_relayer_binary_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart relayerd
+
+- name: Record the installed Relayer release
+  ansible.builtin.copy:
+    content: "{{ acp_relayer_version }}\n"
+    dest: "{{ acp_relayer_version_file }}"
+    owner: root
+    group: root
+    mode: "0644"

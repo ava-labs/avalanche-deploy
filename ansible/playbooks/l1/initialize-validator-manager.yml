@@ -245,6 +245,30 @@
         mode: '0644'
       delegate_to: localhost
 
+    - name: Persist ValidatorManager proxy metadata in l1.env
+      ansible.builtin.lineinfile:
+        path: "{{ playbook_dir }}/../../../l1.env"
+        regexp: '^VALIDATOR_MANAGER_PROXY='
+        line: "VALIDATOR_MANAGER_PROXY={{ vm_output.proxy }}"
+        create: false
+        mode: '0600'
+      when:
+        - vm_output.proxy is defined
+        - vm_output.proxy != ''
+      delegate_to: localhost
+
+    - name: Persist PoAManager metadata in l1.env
+      ansible.builtin.lineinfile:
+        path: "{{ playbook_dir }}/../../../l1.env"
+        regexp: '^POA_MANAGER='
+        line: "POA_MANAGER={{ vm_output.poa_manager }}"
+        create: false
+        mode: '0600'
+      when:
+        - vm_output.poa_manager is defined
+        - vm_output.poa_manager != ''
+      delegate_to: localhost
+
 - name: Display Results
   hosts: localhost
   gather_facts: false

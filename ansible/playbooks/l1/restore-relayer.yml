@@ -1,0 +1,239 @@
+---
+- name: Restore retained Relayer state on rpc[0]
+  hosts: rpc[0]
+  become: true
+  gather_facts: true
+  vars:
+    restore_archive_local: "{{ relayer_restore_archive_local }}"
+    restore_utility_local: "{{ relayer_restore_utility_local }}"
+    restore_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    restore_root: "/var/backups/relayerd/restore-{{ restore_timestamp }}"
+    restore_archive_remote: "{{ restore_root }}/selected.tar.gz"
+    restore_stage: "{{ restore_root }}/selected"
+    pre_restore_archive: "/var/backups/relayerd/pre-restore-{{ restore_timestamp }}.tar.gz"
+  tasks:
+    - name: Validate restore inputs
+      ansible.builtin.assert:
+        that:
+          - restore_archive_local | length > 0
+          - restore_utility_local | length > 0
+        fail_msg: "A validated archive and relayer-restore release utility are required."
+
+    - name: Gather installed service state
+      ansible.builtin.service_facts:
+
+    - name: Create the root-only restore workspace
+      ansible.builtin.file:
+        path: "{{ restore_stage }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Upload the selected validated backup
+      ansible.builtin.copy:
+        src: "{{ restore_archive_local }}"
+        dest: "{{ restore_archive_remote }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Upload the checksum-verified restore utility
+      ansible.builtin.copy:
+        src: "{{ restore_utility_local }}"
+        dest: "{{ restore_root }}/relayer-restore"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Stop console and daemon before offline restore
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - relayer-console
+        - relayerd
+      when: "item + '.service' in ansible_facts.services"
+
+    - name: Preserve current recovery material before restore
+      ansible.builtin.command:
+        argv:
+          - tar
+          - -C
+          - /
+          - -czf
+          - "{{ pre_restore_archive }}"
+          - etc/relayerd
+          - var/lib/relayerd
+      changed_when: true
+
+    - name: Extract selected backup into an isolated staging directory
+      ansible.builtin.unarchive:
+        src: "{{ restore_archive_remote }}"
+        dest: "{{ restore_stage }}"
+        remote_src: true
+
+    - name: Verify required restore components exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ restore_stage }}/etc/relayerd/config.json"
+        - "{{ restore_stage }}/etc/relayerd/funding.json"
+        - "{{ restore_stage }}/etc/relayerd/secrets/keystore-password"
+        - "{{ restore_stage }}/etc/relayerd/secrets/console-session-secret"
+        - "{{ restore_stage }}/etc/relayerd/secrets/console.env"
+        - "{{ restore_stage }}/var/lib/relayerd/keystore.json"
+        - "{{ restore_stage }}/var/lib/relayerd/relayer.db"
+        - "{{ restore_stage }}/var/lib/relayerd/tls/staker.crt"
+        - "{{ restore_stage }}/var/lib/relayerd/tls/staker.key"
+      register: restore_required_files
+
+    - name: Reject an incomplete selected backup
+      ansible.builtin.assert:
+        that:
+          - restore_required_files.results | map(attribute='stat.exists') | min
+        fail_msg: "The selected archive is missing matching config, credential, keystore, bbolt state, or TLS identity."
+
+    - name: Restore selected recovery material with automatic rollback
+      block:
+        - name: Validate and replace bbolt state offline
+          ansible.builtin.command:
+            argv:
+              - "{{ restore_root }}/relayer-restore"
+              - --backup
+              - "{{ restore_stage }}/var/lib/relayerd/relayer.db"
+              - --db
+              - /var/lib/relayerd/relayer.db
+          changed_when: true
+
+        - name: Restore matching daemon configuration
+          ansible.builtin.copy:
+            src: "{{ restore_stage }}/etc/relayerd/config.json"
+            dest: /etc/relayerd/config.json
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Restore matching public funding metadata
+          ansible.builtin.copy:
+            src: "{{ restore_stage }}/etc/relayerd/funding.json"
+            dest: /etc/relayerd/funding.json
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Remove current root-only credentials before exact restore
+          ansible.builtin.file:
+            path: /etc/relayerd/secrets
+            state: absent
+
+        - name: Restore matching root-only credentials
+          ansible.builtin.copy:
+            src: "{{ restore_stage }}/etc/relayerd/secrets/"
+            dest: /etc/relayerd/secrets/
+            remote_src: true
+            owner: root
+            group: root
+            mode: preserve
+
+        - name: Restore matching encrypted keystore
+          ansible.builtin.copy:
+            src: "{{ restore_stage }}/var/lib/relayerd/keystore.json"
+            dest: /var/lib/relayerd/keystore.json
+            remote_src: true
+            owner: relayerd
+            group: relayerd
+            mode: "0600"
+
+        - name: Restore matching TLS identity
+          ansible.builtin.copy:
+            src: "{{ restore_stage }}/var/lib/relayerd/tls/"
+            dest: /var/lib/relayerd/tls/
+            remote_src: true
+            owner: relayerd
+            group: relayerd
+            mode: preserve
+
+        - name: Verify restored encrypted-key integrity without printing secrets
+          ansible.builtin.command:
+            argv:
+              - "{{ restore_root }}/relayer-restore"
+              - --check-keystore
+              - /var/lib/relayerd/keystore.json
+              - --password-file
+              - /etc/relayerd/secrets/keystore-password
+          changed_when: false
+          no_log: true
+
+        - name: Restart installed Relayer services
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: started
+          loop:
+            - relayerd
+            - relayer-console
+          when: "item + '.service' in ansible_facts.services"
+
+        - name: Wait for restored daemon readiness
+          ansible.builtin.uri:
+            url: http://127.0.0.1:8080/ready
+            status_code: 200
+          register: restored_ready
+          until: restored_ready.status == 200
+          retries: 60
+          delay: 5
+          when: "'relayerd.service' in ansible_facts.services"
+
+      rescue:
+        - name: Stop services before automatic restore rollback
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: stopped
+          loop:
+            - relayer-console
+            - relayerd
+          failed_when: false
+          when: "item + '.service' in ansible_facts.services"
+
+        - name: Remove partially restored recovery directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/relayerd
+            - /var/lib/relayerd
+
+        - name: Roll back all pre-restore recovery material
+          ansible.builtin.unarchive:
+            src: "{{ pre_restore_archive }}"
+            dest: /
+            remote_src: true
+
+        - name: Restart rolled-back services
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: started
+          loop:
+            - relayerd
+            - relayer-console
+          failed_when: false
+          when: "item + '.service' in ansible_facts.services"
+
+        - name: Report automatic rollback
+          ansible.builtin.fail:
+            msg: >-
+              Restore failed validation or readiness. The pre-restore archive
+              {{ pre_restore_archive }} was automatically reapplied.
+
+    - name: Report restore outcome
+      ansible.builtin.debug:
+        msg: >-
+          Selected backup restored. Pre-restore rollback material is retained at
+          {{ pre_restore_archive }}.
+          {{
+            'Services restarted and passed readiness.'
+            if 'relayerd.service' in ansible_facts.services
+            else 'Workload remains normally removed and is ready for make relayer.'
+          }}

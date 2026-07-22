@@ -236,6 +236,23 @@ message. Two ways to obtain it:
   validator rejects the request, its error reports the expected value
   (`provided conversionID X != expected Y`).
 
+## Optional: Install the Validator-Lifecycle Relayer
+
+After the official PoAManager and ValidatorManager proxy are initialized, use
+the managed Relayer workflow:
+
+```bash
+make relayer-prereqs
+make relayer-doctor
+make relayer
+```
+
+This explicit post-deployment command discovers the managed L1, validates it,
+and installs one tunnel-only daemon/console pair on `rpc[0]`; validators are not
+modified. It is different from the ICM Relayer. See the [managed Relayer
+operator runbook](RELAYER.md) for authorization, funding, access, lifecycle,
+backup/restore, and release details.
+
 ## Genesis Configuration
 
 Use the **[Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain)** to generate your genesis JSON visually, then save it at `configs/l1/genesis/genesis.json`.
@@ -263,6 +280,6 @@ This guide covers the Terraform + Ansible path. To deploy L1 infrastructure on a
 
 ## Next Steps
 
-- [Deploy add-ons](ADD-ONS.md) (Blockscout, faucet, The Graph, ICM Relayer)
+- [Deploy add-ons](ADD-ONS.md) (Blockscout, faucet, The Graph, ICM Relayer, validator-lifecycle relayer)
 - [Operations guide](../OPERATIONS.md) (upgrades, monitoring, health checks)
 - [Troubleshooting](../TROUBLESHOOTING.md)

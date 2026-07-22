@@ -4,6 +4,8 @@ Day-2 operations for your Avalanche infrastructure.
 
 For deployment guides, see [L1 Deployment](l1/DEPLOYMENT.md) or [Primary Network](primary-network/DEPLOYMENT.md).
 For command-focused CLI help, use `make help-l1`, `make help-primary`, `make k8s-help`, or `make help-all`.
+For validator-lifecycle Relayer doctor, access, backup/restore, upgrade, removal,
+and purge, use the [managed Relayer runbook](l1/RELAYER.md).
 
 ## Health Checks
 
