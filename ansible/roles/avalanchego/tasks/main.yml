@@ -102,10 +102,15 @@
     avalanchego_base_node_config: "{{ avalanchego_base_node_config | combine(bootstrap_config) }}"
   when: l1_bootstrap_ids is defined and l1_bootstrap_ids | length > 0
 
+# Validators only: the remote_signer role is gated to validators in
+# deploy-nodes.yml, so an RPC node given this endpoint would dial a signer
+# that doesn't exist and fail to boot.
 - name: Delegate BLS signing to the remote-signer sidecar
   ansible.builtin.set_fact:
     avalanchego_base_node_config: "{{ avalanchego_base_node_config | combine({'staking-rpc-signer-endpoint': remote_signer_endpoint}) }}"
-  when: remote_signer_enabled | default(false) | bool
+  when:
+    - remote_signer_enabled | default(false) | bool
+    - avalanchego_node_type | default('validator') == 'validator'
 
 - name: Merge custom config with base config
   ansible.builtin.set_fact:

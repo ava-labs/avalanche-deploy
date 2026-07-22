@@ -13,6 +13,19 @@
       (got '{{ remote_signer_backend }}'). aws-nitro needs host enclave
       devices and is not supported via this role.
 
+# The KMS backends read an encrypted key blob from disk; without one the
+# signer starts, then fails on first use with a confusing missing-file error.
+# Fail here instead. (vault holds the key server-side and needs no blob.)
+- name: Assert the encrypted BLS key blob is provided for KMS backends
+  ansible.builtin.assert:
+    that:
+      - remote_signer_encrypted_bls_key_src | length > 0
+    fail_msg: >-
+      remote_signer_backend={{ remote_signer_backend }} requires
+      remote_signer_encrypted_bls_key_src (the blob from `keytool generate`);
+      see the role README.
+  when: remote_signer_backend in ['aws-kms', 'gcp-kms', 'azure-kv']
+
 - name: Install Docker
   when: remote_signer_manage_docker | bool
   block:
@@ -63,13 +76,15 @@
     group: root
     mode: "0755"
 
+# Files are owned by uid/gid 1000 because the container runs as
+# --user 1000:1000 (see the systemd template) and must be able to read them.
 - name: Install the KMS-encrypted BLS key blob
   ansible.builtin.copy:
     src: "{{ remote_signer_encrypted_bls_key_src }}"
     dest: "{{ remote_signer_config_dir }}/bls.key.enc"
-    owner: root
-    group: root
-    mode: "0644"   # ciphertext only — useless without the KMS/Vault key
+    owner: "1000"
+    group: "1000"
+    mode: "0400"   # ciphertext only — useless without the KMS/Vault key
   when: remote_signer_encrypted_bls_key_src | length > 0
   notify: Restart remote-signer
 
@@ -77,9 +92,9 @@
   ansible.builtin.template:
     src: config.yaml.j2
     dest: "{{ remote_signer_config_dir }}/config.yaml"
-    owner: root
-    group: root
-    mode: "0640"   # may carry a Vault token
+    owner: "1000"
+    group: "1000"
+    mode: "0400"   # may carry a Vault token
   notify: Restart remote-signer
 
 - name: Pre-pull the signer image (fail fast on a bad digest / no registry access)
