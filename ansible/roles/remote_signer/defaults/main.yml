@@ -1,5 +1,5 @@
 ---
-# remote-signer role defaults
+# remote_signer role defaults
 #
 # Runs avalanche-remote-signer as a container alongside a native avalanchego
 # on the same host, so the validator's BLS key lives behind the signer's

@@ -61,8 +61,8 @@
     # endpoint is up first. Off unless remote_signer_enabled is set; only on
     # validators (RPC nodes don't sign). When on, the avalanchego role adds
     # --staking-rpc-signer-endpoint automatically. See
-    # ansible/roles/remote-signer/README.md.
-    - role: remote-signer
+    # ansible/roles/remote_signer/README.md.
+    - role: remote_signer
       when:
         - remote_signer_enabled | default(false) | bool
         - avalanchego_node_type | default('validator') == 'validator'

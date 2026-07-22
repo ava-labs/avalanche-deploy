@@ -1,4 +1,4 @@
-# remote-signer (Ansible role)
+# remote_signer (Ansible role)
 
 Runs [avalanche-remote-signer](https://github.com/ava-labs/avalanche-remote-signer)
 as a container on the validator host so the BLS key lives behind a KMS/Vault
