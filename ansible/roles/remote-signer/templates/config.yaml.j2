@@ -1,0 +1,31 @@
+# Managed by Ansible (remote-signer role) — do not edit by hand.
+backend: {{ remote_signer_backend }}
+listen: {{ remote_signer_listen }}
+port: {{ remote_signer_port }}
+{% if remote_signer_backend == "aws-kms" %}
+aws:
+  region: {{ remote_signer_aws.region }}
+  kms_key_id: {{ remote_signer_aws.kms_key_id }}
+  encrypted_bls_key_path: {{ remote_signer_blob_container_path }}
+{% elif remote_signer_backend == "gcp-kms" %}
+gcp:
+  project: {{ remote_signer_gcp.project }}
+  location: {{ remote_signer_gcp.location }}
+  key_ring: {{ remote_signer_gcp.key_ring }}
+  key_name: {{ remote_signer_gcp.key_name }}
+  encrypted_bls_key_path: {{ remote_signer_blob_container_path }}
+{% elif remote_signer_backend == "azure-kv" %}
+azure:
+  vault_url: {{ remote_signer_azure.vault_url }}
+  key_name: {{ remote_signer_azure.key_name }}
+  encrypted_bls_key_path: {{ remote_signer_blob_container_path }}
+{% elif remote_signer_backend == "vault" %}
+vault:
+  address: {{ remote_signer_vault.address }}
+  mount_path: {{ remote_signer_vault.mount_path }}
+  key_name: {{ remote_signer_vault.key_name }}
+  auth_method: {{ remote_signer_vault.auth_method }}
+{% if remote_signer_vault.token %}
+  token: {{ remote_signer_vault.token }}
+{% endif %}
+{% endif %}

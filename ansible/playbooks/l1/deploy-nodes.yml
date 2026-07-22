@@ -57,6 +57,15 @@
         - avalanchego_node_type == "validator"
 
   roles:
+    # Optional BLS signing sidecar — runs before avalanchego so the signing
+    # endpoint is up first. Off unless remote_signer_enabled is set; only on
+    # validators (RPC nodes don't sign). When on, the avalanchego role adds
+    # --staking-rpc-signer-endpoint automatically. See
+    # ansible/roles/remote-signer/README.md.
+    - role: remote-signer
+      when:
+        - remote_signer_enabled | default(false) | bool
+        - avalanchego_node_type | default('validator') == 'validator'
     - role: avalanchego
       vars:
         avalanchego_network: "{{ network | default('fuji') }}"

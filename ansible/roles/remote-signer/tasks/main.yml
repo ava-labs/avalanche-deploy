@@ -1,0 +1,129 @@
+---
+# remote-signer: run avalanche-remote-signer as a container next to the native
+# avalanchego, so the BLS key lives behind a KMS/Vault backend, not on disk.
+# Guarded by the caller (deploy-nodes.yml runs this role only when
+# remote_signer_enabled), so no top-level `when` is needed here.
+
+- name: Assert a supported backend
+  ansible.builtin.assert:
+    that:
+      - remote_signer_backend in ['aws-kms', 'gcp-kms', 'azure-kv', 'vault']
+    fail_msg: >-
+      remote_signer_backend must be one of aws-kms|gcp-kms|azure-kv|vault
+      (got '{{ remote_signer_backend }}'). aws-nitro needs host enclave
+      devices and is not supported via this role.
+
+- name: Install Docker
+  when: remote_signer_manage_docker | bool
+  block:
+    - name: Install Docker apt prerequisites
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: true
+
+    - name: Add Docker GPG key
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch={{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker Engine
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+        update_cache: true
+
+- name: Ensure Docker is running
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Create config directory
+  ansible.builtin.file:
+    path: "{{ remote_signer_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the KMS-encrypted BLS key blob
+  ansible.builtin.copy:
+    src: "{{ remote_signer_encrypted_bls_key_src }}"
+    dest: "{{ remote_signer_config_dir }}/bls.key.enc"
+    owner: root
+    group: root
+    mode: "0644"   # ciphertext only — useless without the KMS/Vault key
+  when: remote_signer_encrypted_bls_key_src | length > 0
+  notify: Restart remote-signer
+
+- name: Write the signer config
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ remote_signer_config_dir }}/config.yaml"
+    owner: root
+    group: root
+    mode: "0640"   # may carry a Vault token
+  notify: Restart remote-signer
+
+- name: Pre-pull the signer image (fail fast on a bad digest / no registry access)
+  ansible.builtin.command:
+    cmd: "docker pull {{ remote_signer_image }}@{{ remote_signer_image_digest }}"
+  register: remote_signer_pull
+  changed_when: "'Downloaded newer image' in remote_signer_pull.stdout"
+
+- name: Create the systemd service
+  ansible.builtin.template:
+    src: remote-signer.service.j2
+    dest: /etc/systemd/system/remote-signer.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart remote-signer
+
+- name: Enable and start remote-signer
+  ansible.builtin.systemd:
+    name: remote-signer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# Apply any pending restart now so the readiness check below verifies the
+# process that will actually keep running, not a stale one.
+- name: Apply pending remote-signer restarts before readiness check
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the signer to accept connections on its port
+  ansible.builtin.wait_for:
+    host: "{{ remote_signer_listen }}"
+    port: "{{ remote_signer_port }}"
+    timeout: 60
+
+- name: Read remote-signer service state
+  ansible.builtin.systemd:
+    name: remote-signer
+  register: remote_signer_service_state
+
+- name: Assert remote-signer is running
+  ansible.builtin.assert:
+    that:
+      - remote_signer_service_state.status.ActiveState == 'active'
+    fail_msg: >-
+      remote-signer is
+      {{ remote_signer_service_state.status.ActiveState | default('unknown') }}
+      — check `journalctl -u remote-signer`.

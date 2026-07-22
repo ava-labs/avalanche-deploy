@@ -102,6 +102,11 @@
     avalanchego_base_node_config: "{{ avalanchego_base_node_config | combine(bootstrap_config) }}"
   when: l1_bootstrap_ids is defined and l1_bootstrap_ids | length > 0
 
+- name: Delegate BLS signing to the remote-signer sidecar
+  ansible.builtin.set_fact:
+    avalanchego_base_node_config: "{{ avalanchego_base_node_config | combine({'staking-rpc-signer-endpoint': remote_signer_endpoint}) }}"
+  when: remote_signer_enabled | default(false) | bool
+
 - name: Merge custom config with base config
   ansible.builtin.set_fact:
     avalanchego_final_node_config: "{{ avalanchego_base_node_config | combine(avalanchego_custom_node_config | default({})) }}"
