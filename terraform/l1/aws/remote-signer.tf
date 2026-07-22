@@ -4,28 +4,27 @@
 # When enabled, provisions a dedicated KMS key for the validator's BLS key
 # blob and grants the validator instance role Encrypt (setup) + Decrypt
 # (runtime) on it. The signer runs on the validator hosts via the ansible
-# `remote-signer` role, using the instance profile's credentials — no static
+# `remote_signer` role, using the instance profile's credentials — no static
 # keys. See kubernetes/helm/avalanche-validator/remote-signer.md and the
 # signer repo for the deployment side.
 #
-# DEPENDENCY: this reuses the validator IAM role, which only exists when
-# enable_staking_key_backup = true (see the IAM section in main.tf). So
-# enabling the remote signer requires enable_staking_key_backup = true; the
-# local below enforces that by ANDing on local.enable_key_backup.
+# The validator IAM role/instance profile is shared with the S3 staking-key
+# backup feature; main.tf creates it when either feature is enabled
+# (local.enable_validator_role), so this works with
+# enable_staking_key_backup = false.
 #
 # Everything here is self-contained (variable, locals, resources, output) and
 # gated — with enable_remote_signer_kms = false (the default) this file adds
 # no resources and changes nothing.
 
 variable "enable_remote_signer_kms" {
-  description = "Provision a KMS key + IAM for the BLS remote-signer sidecar. Requires enable_staking_key_backup = true (which creates the validator instance role)."
+  description = "Provision a KMS key + IAM for the BLS remote-signer sidecar. Creates the validator instance role/profile if staking-key backup hasn't already."
   type        = bool
   default     = false
 }
 
 locals {
-  # Reuses local.enable_key_backup from main.tf (validator role + profile).
-  enable_remote_signer = var.enable_remote_signer_kms && local.enable_key_backup
+  enable_remote_signer = var.enable_remote_signer_kms && var.validator_count > 0
 }
 
 resource "aws_kms_key" "remote_signer" {

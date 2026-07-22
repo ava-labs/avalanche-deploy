@@ -38,8 +38,7 @@ remote_signer_encrypted_bls_key_src: ./bls.key.enc
 Generate the blob first with the signer's `keytool generate` (against the same
 KMS key), and register the printed public key on-chain. On AWS, the KMS key +
 instance-role permission can be provisioned by the terraform variable
-`enable_remote_signer_kms` (see `terraform/l1/aws/remote-signer.tf`), which
-requires `enable_staking_key_backup = true`.
+`enable_remote_signer_kms` (see `terraform/l1/aws/remote-signer.tf`).
 
 ## Verify
 
