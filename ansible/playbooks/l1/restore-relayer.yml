@@ -178,7 +178,7 @@
 
         - name: Wait for restored daemon readiness
           ansible.builtin.uri:
-            url: http://127.0.0.1:8080/ready
+            url: http://127.0.0.1:8081/ready
             status_code: 200
           register: restored_ready
           until: restored_ready.status == 200

@@ -8,7 +8,7 @@ ACTION="${1:-install}"
 PINNED_RELAYER_VERSION="v0.0.0-transfer-required"
 RELAYER_VERSION="${RELAYER_VERSION:-$PINNED_RELAYER_VERSION}"
 L1_ENV="$ROOT_DIR/l1.env"
-RELAYER_REPOSITORY="${RELAYER_DEVELOPMENT_REPOSITORY:-ava-labs/validator-manager-relayer}"
+RELAYER_REPOSITORY="${RELAYER_DEVELOPMENT_REPOSITORY:-ava-labs/validator-lifecycle-relayer}"
 RELAYER_DEVELOPMENT_TOKEN="${RELAYER_DEVELOPMENT_TOKEN:-}"
 
 WORK_DIR=""
@@ -243,7 +243,7 @@ doctor_vm() {
       else
         doctor_result FAIL VM.RELEASE.INTEGRITY "installed release metadata, daemon checksum, version, or console digest has drifted" "run make relayer-upgrade RELAYER_VERSION=$RELAYER_VERSION to reapply verified artifacts"
       fi
-      if "${ansible_prefix[@]}" -m ansible.builtin.uri -a 'url=http://127.0.0.1:8080/ready status_code=200' >/dev/null 2>&1; then
+      if "${ansible_prefix[@]}" -m ansible.builtin.uri -a 'url=http://127.0.0.1:8081/ready status_code=200' >/dev/null 2>&1; then
         doctor_result PASS VM.RUNTIME.READY "relayerd readiness endpoint is healthy" none
       else
         doctor_result FAIL VM.RUNTIME.READY "relayerd is installed but not ready" "inspect make relayer-logs and restore or repair the runtime before validator operations"
@@ -260,7 +260,7 @@ doctor_vm() {
       fi
       ensure_work_dir
       local funding_status_file="$WORK_DIR/funding-status.txt"
-      if "${ansible_prefix[@]}" -m ansible.builtin.uri -a 'url=http://127.0.0.1:8080/keys status_code=200 return_content=true' >"$funding_status_file" 2>/dev/null; then
+      if "${ansible_prefix[@]}" -m ansible.builtin.uri -a 'url=http://127.0.0.1:8081/keys status_code=200 return_content=true' >"$funding_status_file" 2>/dev/null; then
         if grep -q 'fundedFloat.*true' "$funding_status_file" && grep -q 'fundedGas.*true' "$funding_status_file"; then
           doctor_result PASS VM.FUNDING.READY "P-Chain float and L1 gas addresses meet daemon funding thresholds" none
         else
@@ -270,14 +270,14 @@ doctor_vm() {
         doctor_result FAIL VM.FUNDING.READY "public funding status could not be read" "repair relayerd readiness and rerun doctor"
       fi
       local listeners_file="$WORK_DIR/listeners.txt"
-      if "${ansible_prefix[@]}" -m ansible.builtin.shell -a "public=\$(ss -ltnH | awk '\$4 ~ /:(8080|3080)$/ {print \$4}' | grep -Ev '^(127\\.0\\.0\\.1|\\[::1\\]):' || true); printf '%s\\n' \"\$public\"" >"$listeners_file" 2>/dev/null; then
-        if grep -Eq '(^|[[:space:]])([^[:space:]]+:)?(8080|3080)($|[[:space:]])' "$listeners_file"; then
+      if "${ansible_prefix[@]}" -m ansible.builtin.shell -a "public=\$(ss -ltnH | awk '\$4 ~ /:(8081|3080)$/ {print \$4}' | grep -Ev '^(127\\.0\\.0\\.1|\\[::1\\]):' || true); printf '%s\\n' \"\$public\"" >"$listeners_file" 2>/dev/null; then
+        if grep -Eq '(^|[[:space:]])([^[:space:]]+:)?(8081|3080)($|[[:space:]])' "$listeners_file"; then
           doctor_result FAIL VM.LISTENERS.LOOPBACK "a Relayer listener is bound beyond loopback" "set daemon and console listeners to 127.0.0.1 and restart"
         else
           doctor_result PASS VM.LISTENERS.LOOPBACK "daemon and console listeners are loopback-only" none
         fi
       else
-        doctor_result WARN VM.LISTENERS.LOOPBACK "listener binding could not be inspected" "run sudo ss -ltnp on rpc[0] and confirm ports 8080/3080 are loopback-only"
+        doctor_result WARN VM.LISTENERS.LOOPBACK "listener binding could not be inspected" "run sudo ss -ltnp on rpc[0] and confirm ports 8081/3080 are loopback-only"
       fi
       local latest_backup_mtime latest_backup_sha manifest_sha now backup_age
       latest_backup_mtime="$(jq -r '.latestBackupMtime // 0 | floor' "$DISCOVERY_FILE")"
@@ -336,7 +336,7 @@ require_command() {
 validate_release_source() {
   [[ "$RELAYER_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || \
     die "invalid Relayer release repository: $RELAYER_REPOSITORY"
-  if [[ "$RELAYER_REPOSITORY" != "ava-labs/validator-manager-relayer" || -n "$RELAYER_DEVELOPMENT_TOKEN" ]]; then
+  if [[ "$RELAYER_REPOSITORY" != "ava-labs/validator-lifecycle-relayer" || -n "$RELAYER_DEVELOPMENT_TOKEN" ]]; then
     [[ "${RELAYER_DEVELOPMENT:-false}" == "true" ]] || \
       die "repository or authentication overrides require RELAYER_DEVELOPMENT=true and are not part of the supported operator flow"
   fi
@@ -780,7 +780,7 @@ run_install() {
     --pchain-rpc-url http://127.0.0.1:9650
     --info-rpc-url http://127.0.0.1:9650
     --evm-rpc-url "http://127.0.0.1:9650/ext/bc/$(jq -r '.blockchainId' "$METADATA_FILE")/rpc"
-    --api-listen-addr 127.0.0.1:8080
+    --api-listen-addr 127.0.0.1:8081
     --output json
   )
   while IFS= read -r peer; do
@@ -800,7 +800,7 @@ run_install() {
     '."tls-cert-path" = $tls_cert |
      ."tls-key-path" = $tls_key |
      ."bbolt-path" = $database |
-     ."api-listen-addr" = "127.0.0.1:8080" |
+     ."api-listen-addr" = "127.0.0.1:8081" |
      ."key-source"."backend" = "encrypted-file" |
      ."key-source"."encrypted-file" = $keystore |
      ."state-backup" = {"dir": $backups, "interval-seconds": 300}' \
@@ -995,11 +995,11 @@ ssh_target() {
     access)
       printf 'Console: http://127.0.0.1:3080\n'
       printf 'L1 RPC: http://127.0.0.1:9650/ext/bc/%s/rpc\n' "$(jq -r '.blockchainId' "$METADATA_FILE")"
-      printf 'Safe UI (when installed): http://127.0.0.1:3081\n'
+      printf 'Safe UI (when installed): https://127.0.0.1:3081 (self-signed certificate; accept the browser warning)\n'
       exec ssh "${args[@]}" -N \
         -L 3080:127.0.0.1:3080 \
         -L 9650:127.0.0.1:9650 \
-        -L 3081:127.0.0.1:8080 \
+        -L 3081:127.0.0.1:443 \
         "$destination"
       ;;
     logs)

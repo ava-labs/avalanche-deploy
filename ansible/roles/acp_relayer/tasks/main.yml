@@ -7,7 +7,7 @@
       - acp_relayer_restore_binary_local_src | length > 0
       - acp_relayer_console_image is match('^ghcr\\.io/.+@sha256:[0-9a-f]{64}$')
       - acp_relayer_blockchain_id | length > 0
-      - acp_relayer_api_port | int == 8080
+      - acp_relayer_api_port | int == 8081
       - acp_relayer_console_port | int == 3080
     fail_msg: >-
       The Relayer role only accepts a verified local release binary, an immutable

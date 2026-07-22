@@ -40,8 +40,24 @@ if grep -Eq 'k8s-relayer-kms|relayer-setup|KEY_SOURCE|FLOAT_KEY|EVM_KEY|PCHAIN_K
     fail "Makefile retains a manual-key, KMS, or manual-manager Relayer entry point"
 fi
 
-if grep -R -E 'from_port[[:space:]]*=[[:space:]]*(3080|8080)|to_port[[:space:]]*=[[:space:]]*(3080|8080)' terraform >/dev/null; then
+# 8080 stays banned even though relayerd moved to 8081: Safe's nginx redirect and
+# the ICM Relayer's host-network API both bind it on rpc[0] and must never be exposed.
+if grep -R -E 'from_port[[:space:]]*=[[:space:]]*(3080|8080|8081)|to_port[[:space:]]*=[[:space:]]*(3080|8080|8081)' terraform >/dev/null; then
     fail "Terraform exposes a Relayer or console port"
+fi
+
+# The Relayer co-locates with Safe (nginx on 8080/443/4443) and the ICM Relayer
+# (host-network API on 8080) on rpc[0]; its ports must stay unclaimed elsewhere.
+if grep -R -E '_port:[[:space:]]*"?(8081|3080)"?([[:space:]]|#|$)' ansible/roles --include='*.yml' | grep -v 'ansible/roles/acp_relayer/' >/dev/null; then
+    fail "another Ansible role claims Relayer port 8081 or console port 3080"
+fi
+if ! grep -Fq -- '--api-listen-addr 127.0.0.1:8081' scripts/l1/relayer.sh; then
+    fail "relayer.sh does not pin the daemon API to loopback port 8081"
+fi
+if grep -R -nE '127\.0\.0\.1:8080' scripts/l1/relayer.sh ansible/roles/acp_relayer \
+    ansible/playbooks/l1/deploy-relayer.yml ansible/playbooks/l1/discover-relayer.yml \
+    ansible/playbooks/l1/manage-relayer.yml ansible/playbooks/l1/restore-relayer.yml >/dev/null; then
+    fail "a Relayer component still references port 8080, which Safe and the ICM Relayer occupy"
 fi
 
 require_file_text scripts/l1/relayer.sh 'Install the relayer and console on %s? [y/N] '
@@ -52,7 +68,7 @@ require_file_text scripts/l1/relayer.sh 'doctor_vm'
 require_file_text scripts/l1/relayer.sh 'BACKUP must be an absolute path'
 require_file_text scripts/l1/relayer.sh 'unsupported link or special archive member'
 require_file_text Makefile 'v0.0.0-transfer-required'
-require_file_text scripts/l1/relayer.sh 'ava-labs/validator-manager-relayer'
+require_file_text scripts/l1/relayer.sh 'ava-labs/validator-lifecycle-relayer'
 if grep -Fq 'k8s-relayer' Makefile || [[ -e kubernetes/scripts/relayer.sh ]] || [[ -e kubernetes/helm/relayerd ]]; then
     fail "Terraform/Ansible PR contains Kubernetes Relayer entry points"
 fi

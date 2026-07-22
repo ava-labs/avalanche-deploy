@@ -36,9 +36,11 @@ acp_relayer_blockchain_id: ""
 acp_relayer_safe_enabled: false
 acp_relayer_safe_address: ""
 acp_relayer_safe_tx_service_url: "http://127.0.0.1:8001"
-acp_relayer_safe_ui_url: "http://127.0.0.1:3081"
+acp_relayer_safe_ui_url: "https://127.0.0.1:3081"
 
-acp_relayer_api_port: 8080
+# 8081 keeps the loopback-only daemon API clear of port 8080, which Safe's
+# Nginx redirect and the ICM Relayer both bind on rpc[0].
+acp_relayer_api_port: 8081
 acp_relayer_console_port: 3080
 acp_relayer_acceptance_timeout_seconds: 180
 acp_relayer_ready_retries: 60

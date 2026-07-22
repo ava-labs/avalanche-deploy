@@ -39,8 +39,10 @@ title is not trusted. The prerequisite commands install local software only.
 They never create cloud credentials, SSH access, or network infrastructure.
 
 The workflow installs one native daemon and one digest-pinned console on
-`rpc[0]`, never on validators. Ports 8080 and 3080 bind to loopback, are not
+`rpc[0]`, never on validators. Ports 8081 and 3080 bind to loopback, are not
 opened by Terraform, and are reached only through the local access tunnel.
+Port 8081 keeps the daemon API clear of 8080, which Safe's Nginx redirect and
+the ICM Relayer bind when co-located on `rpc[0]`.
 
 Private keys, keystore passwords, session secrets, Terraform state, and
 passwords are never printed by the lifecycle scripts or doctor. Normal removal
@@ -174,7 +176,7 @@ TLS identity, configuration, and backups.
 
 ## Release and repository contract
 
-The separate `ava-labs/validator-manager-relayer` repository owns daemon behavior, release
+The separate `ava-labs/validator-lifecycle-relayer` repository owns daemon behavior, release
 artifacts, configuration, APIs, security, and runtime semantics. A tagged
 release publishes `relayerd`, `relayer-setup`, and `relayer-restore` for
 Darwin/Linux on AMD64/ARM64, `checksums.txt`, SBOMs and attestations, and
@@ -188,7 +190,7 @@ version drift.
 The production version pin intentionally remains a transfer sentinel until all
 of these release gates pass:
 
-1. the repository is transferred to public `ava-labs/validator-manager-relayer`;
+1. the repository is transferred to public `ava-labs/validator-lifecycle-relayer`;
 2. OCI packages are public under `ghcr.io/ava-labs`;
 3. a tagged release is published after transfer; and
 4. anonymous archive downloads and image pulls pass for the VM workflow.
@@ -199,4 +201,4 @@ authenticated repository override only for pre-transfer development by setting
 `RELAYER_DEVELOPMENT=true`; that override is not part of the supported operator
 flow.
 
-For runtime details, see the [Relayer technical documentation](https://github.com/ava-labs/validator-manager-relayer/tree/main/docs).
+For runtime details, see the [Relayer technical documentation](https://github.com/ava-labs/validator-lifecycle-relayer/tree/main/docs).

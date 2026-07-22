@@ -15,7 +15,7 @@ SHELL := /bin/bash
 CLOUD ?= aws
 NETWORK ?= fuji
 # Deliberately not a published version. Replace this sentinel with the first
-# tested ava-labs/validator-manager-relayer release only after the repository
+# tested ava-labs/validator-lifecycle-relayer release only after the repository
 # and package transfer and anonymous archive/image pull release gate has passed.
 RELAYER_VERSION ?= v0.0.0-transfer-required
 AUTO_APPROVE ?= false

@@ -61,6 +61,10 @@ server {
     sub_filter_once off;
     sub_filter_types application/javascript;
     sub_filter 'http://{{ ansible_host }}:{{ safe_cgw_port }}' '/cgw';
+    # The built UI bakes the absolute gateway URL (env.production + post-build sed).
+    # Rewrite it to relative so gateway requests stay on whatever origin served the
+    # page - the public HTTPS address or the relayer-access SSH tunnel (127.0.0.1:3081).
+    sub_filter 'https://{{ safe_domain if safe_domain else ansible_host }}/cgw' '/cgw';
 
     # Logging
     access_log /var/log/nginx/safe_access.log;
