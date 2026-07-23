@@ -20,6 +20,13 @@
   vars:
     # No subnet tracking in phase 1
     track_subnets: []
+    # Map node type from inventory groups (same expression as configure.yml).
+    # Without this every host falls back to the role default "validator",
+    # which defeats the validator-only gates below and in the avalanchego
+    # role — RPC hosts would run the remote signer and dial it from
+    # avalanchego. Also lets RPC nodes pick up rpc-node-config.json (indexing)
+    # at deploy time instead of waiting for configure.yml.
+    avalanchego_node_type: "{{ 'rpc' if 'rpc' in group_names else 'validator' }}"
 
   pre_tasks:
     - name: Wait for system to become reachable
