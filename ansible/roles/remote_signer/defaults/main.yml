@@ -33,11 +33,22 @@ remote_signer_config_dir: "/etc/avalanche-remote-signer"
 # Install Docker if absent. Set false if the host already manages Docker.
 remote_signer_manage_docker: true
 
-# Path on the host to the KMS-encrypted BLS key blob for the cloud-KMS
-# backends (produced by `keytool generate`). Mounted read-only into the
-# container at {{ remote_signer_config_dir }}/bls.key.enc. Leave empty to
-# provision it out-of-band.
+# Encrypted BLS key blobs (produced by `keytool generate`, one PER validator —
+# validators must never share a BLS key). Mounted read-only into the container
+# at {{ remote_signer_config_dir }}/bls.key.enc.
+#
+# Multi-validator: set remote_signer_encrypted_bls_key_dir to a directory on
+# the control node containing <inventory_hostname>.key.enc (validator-1.key.enc,
+# validator-2.key.enc, ...). Takes precedence over the single-file var.
+remote_signer_encrypted_bls_key_dir: ""
+# Single-validator convenience: path to the one blob. The role refuses to use
+# this with more than one validator in the inventory.
 remote_signer_encrypted_bls_key_src: ""
+
+# Per-host KMS key ARNs (inventory hostname -> ARN) for the aws-kms backend —
+# feed `terraform output -json remote_signer_kms_key_arns` straight in. Falls
+# back to remote_signer_aws.kms_key_id when a host is not in the map.
+remote_signer_kms_key_arns: {}
 
 # ── Backend settings (fill in the block matching remote_signer_backend) ──
 remote_signer_aws:

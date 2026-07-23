@@ -5,7 +5,7 @@ port: {{ remote_signer_port }}
 {% if remote_signer_backend == "aws-kms" %}
 aws:
   region: {{ remote_signer_aws.region }}
-  kms_key_id: {{ remote_signer_aws.kms_key_id }}
+  kms_key_id: {{ remote_signer_host_kms_key_id }}
   encrypted_bls_key_path: {{ remote_signer_blob_container_path }}
 {% elif remote_signer_backend == "gcp-kms" %}
 gcp:
