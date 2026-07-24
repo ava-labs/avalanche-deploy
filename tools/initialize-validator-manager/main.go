@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -304,6 +305,16 @@ func run() error {
 				fmt.Printf("  WARNING: could not fetch registered validators from P-Chain (%v); using node-reported values\n", err)
 			}
 		}
+
+		// ConvertSubnetToL1Tx canonicalizes validators to ascending NodeID
+		// bytes, so the on-chain conversion data is sorted regardless of the
+		// order they were submitted in. The recomputed hash AND the
+		// initializeValidatorSet calldata must use the same order or both
+		// fail (signing: "provided conversionID X != expected Y"; contract:
+		// InvalidConversionID). Invisible with a single validator.
+		sort.Slice(validatorInfo, func(i, j int) bool {
+			return bytes.Compare(validatorInfo[i].NodeID[:], validatorInfo[j].NodeID[:]) < 0
+		})
 
 		// Get aggregated signature
 		var signedMessage []byte
