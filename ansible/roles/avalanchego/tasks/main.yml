@@ -87,6 +87,12 @@
       plugin-dir: "{{ avalanchego_plugin_dir }}"
       chain-config-dir: "{{ avalanchego_config_dir }}/chains"
       partial-sync-primary-network: "{{ avalanchego_partial_sync_primary_network | default(true) }}"
+      # Advertise the public IP explicitly: NAT discovery fails on EC2, and
+      # without this nodes gossip their private VPC IPs, which other peers
+      # refuse to dial (allow-private-ips=false). Public advertisement is what
+      # lets L1 validators and RPC nodes discover each other via the primary
+      # network's IP gossip — no bootstrap-ids override needed.
+      public-ip: "{{ avalanchego_public_ip | default(ansible_host) }}"
 
 - name: Add subnet tracking to config
   ansible.builtin.set_fact:

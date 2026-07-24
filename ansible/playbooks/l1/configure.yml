@@ -70,10 +70,6 @@
         msg: "subnet_id is required. Run with: -e subnet_id=<YOUR_SUBNET_ID>"
       when: subnet_id is not defined or subnet_id == ""
 
-    - name: Build L1 bootstrap lists
-      ansible.builtin.set_fact:
-        l1_bootstrap_ids: "{{ groups['validators'] | map('extract', hostvars, 'node_id') | list }}"
-        l1_bootstrap_ips: "{{ groups['validators'] | map('extract', hostvars, 'ansible_host') | map('regex_replace', '$', ':9651') | list }}"
 
   tasks:
     - name: Load custom node config from repository config directory
@@ -106,14 +102,17 @@
           partial-sync-primary-network: "{{ avalanchego_partial_sync_primary_network }}"
           track-subnets: "{{ subnet_id }}"
 
-    - name: Add L1 bootstrap info to config
-      vars:
-        bootstrap_config:
-          bootstrap-ids: "{{ l1_bootstrap_ids | join(',') }}"
-          bootstrap-ips: "{{ l1_bootstrap_ips | join(',') }}"
+    # NOTE: no bootstrap-ids/ips override here. Overriding the global
+    # bootstrap list replaced the default Fuji beacons with just the L1
+    # validators, freezing every node's P-Chain after this playbook ran
+    # (issue #29). L1 validators discover each other via primary-network IP
+    # gossip instead — which works because the avalanchego role advertises
+    # each node's public IP explicitly (public-ip in node.json).
+
+    # Advertise the public IP so peers can dial us (see avalanchego role).
+    - name: Add public IP to config
       ansible.builtin.set_fact:
-        avalanchego_base_node_config: "{{ avalanchego_base_node_config | combine(bootstrap_config) }}"
-      when: l1_bootstrap_ids is defined and l1_bootstrap_ids | length > 0
+        avalanchego_base_node_config: "{{ avalanchego_base_node_config | combine({'public-ip': avalanchego_public_ip | default(ansible_host)}) }}"
 
     - name: Merge custom config with base config
       ansible.builtin.set_fact:
