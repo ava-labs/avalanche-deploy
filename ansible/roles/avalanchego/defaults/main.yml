@@ -2,7 +2,11 @@
 # Avalanchego role defaults
 
 # Versions
-avalanchego_version: "v1.14.1"
+# v1.15.0-fuji is REQUIRED on Fuji from the Helicon activation
+# (2026-07-28 15:00 UTC); older versions fork off the network. It is a Fuji
+# pre-release: MAINNET deployments should override to v1.14.2 until the
+# mainnet Helicon release ships.
+avalanchego_version: "v1.15.0-fuji"
 avalanchego_subnet_evm_version: "v0.8.0"
 
 # Install location of the avalanchego binary
@@ -23,6 +27,9 @@ avalanchego_checksums:
   v1.14.2:
     amd64: "daf7f2739f0790c033ad728af6ee29bcd2660baf5265844079eb60f22d101e46"
     arm64: "0c4563c55659fd9923bd1ea9d3dbcd0a85668325091ffc4a259d0a137033ad0b"
+  v1.15.0-fuji:
+    amd64: "aeae28f71499fc55d0e3349fbe8f73dc0c95d62837b6d12f1eb6741efaa575eb"
+    arm64: "d8a326be0fb7183ed7fc95d751f254a4dc61390f53e3112e40aa7dd1eafcb815"
 
 # Checksum override for versions not pinned in avalanchego_checksums.
 # Accepts a literal sha256 value or a URL to a checksum file
