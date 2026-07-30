@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -74,7 +75,7 @@ func BuildWarpMessage(networkID uint32, subnetID, chainID ids.ID, managerAddress
 		return nil, fmt.Errorf("failed to create subnet conversion ID: %w", err)
 	}
 
-	fmt.Printf("  Subnet Conversion ID: %s\n", hex.EncodeToString(subnetConversionID[:]))
+	fmt.Fprintf(os.Stderr, "  Subnet Conversion ID: %s\n", hex.EncodeToString(subnetConversionID[:]))
 
 	// Create addressed call payload
 	addressedCallPayload, err := message.NewSubnetToL1Conversion(subnetConversionID)
@@ -167,8 +168,8 @@ func SignWarpMessageViaAggregator(sigAggURL string, unsignedMsg *warp.UnsignedMe
 	reqBody := fmt.Sprintf(`{"message":"%s","justification":"%s","signing-subnet-id":"%s","quorum-percentage":67}`,
 		msgHex, subnetHex, subnetHex)
 
-	fmt.Printf("  Requesting signature from aggregator...\n")
-	fmt.Printf("  Message (first 100 chars): %s...\n", msgHex[:min(100, len(msgHex))])
+	fmt.Fprintln(os.Stderr, "  Requesting signature from aggregator...")
+	fmt.Fprintf(os.Stderr, "  Message (first 100 chars): %s...\n", msgHex[:min(100, len(msgHex))])
 
 	// Make HTTP request
 	client := &http.Client{Timeout: 120 * time.Second}

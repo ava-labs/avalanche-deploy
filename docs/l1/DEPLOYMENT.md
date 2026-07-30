@@ -201,6 +201,28 @@ Your L1 is now running:
 
 If your genesis includes a ValidatorManager proxy contract:
 
+### Know the two owners
+
+The genesis proxy has two separate authorization paths:
+
+- The **ProxyAdmin owner** controls implementation upgrades. This owner is fixed
+  in the genesis allocation before the L1 is created.
+- `AVALANCHE_PRIVATE_KEY` is the runtime deployer. Its address becomes the
+  initial ValidatorManager administrator and the initial PoAManager owner.
+
+The initializer reads the ProxyAdmin owner on-chain before deploying anything.
+If that owner differs from the runtime deployer, provide its key separately
+through `GENESIS_PROXY_ADMIN_PRIVATE_KEY`; the runtime deployer key remains in
+`AVALANCHE_PRIVATE_KEY`.
+
+> **Development genesis warning:** the repository's sample genesis assigns
+> ProxyAdmin ownership to the public EWOQ test account. That configuration is
+> suitable only for disposable local/Fuji testing. Before creating a production
+> L1, replace the genesis ProxyAdmin owner with a secure deployment
+> administrator. After deploying a Safe, transfer both ProxyAdmin ownership
+> (upgrade authority) and PoAManager ownership (validator-lifecycle authority)
+> to the intended Safe.
+
 ```bash
 # Requires foundry
 curl -L https://foundry.paradigm.xyz | bash && foundryup

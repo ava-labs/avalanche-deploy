@@ -54,6 +54,28 @@ fi
 if ! grep -Fq -- '--api-listen-addr 127.0.0.1:8081' scripts/l1/relayer.sh; then
     fail "relayer.sh does not pin the daemon API to loopback port 8081"
 fi
+[[ "$(bash -c 'source scripts/l1/relayer.sh; managed_info_rpc_url fuji')" == "https://api.avax-test.network" ]] || \
+    fail "Fuji does not select the managed Avalanche Info API"
+[[ "$(bash -c 'source scripts/l1/relayer.sh; managed_info_rpc_url mainnet')" == "https://api.avax.network" ]] || \
+    fail "Mainnet does not select the managed Avalanche Info API"
+if grep -Fq -- '--info-rpc-url http://127.0.0.1:9650' scripts/l1/relayer.sh; then
+    fail "relayer.sh still uses the partial-sync local RPC for Primary bootstrap discovery"
+fi
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'eligibleBootstrapPeerCount'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'is-active'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'safe.service'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'http://127.0.0.1:8001/api/v1/about/'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'safeConsoleEnvComplete'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'SAFE_TX_SERVICE_URL'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'SAFE_UI_URL'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'SAFE_ADDRESS'
+if grep -Fq "ansible_facts.services['safe.service'].state == 'running'" ansible/playbooks/l1/discover-relayer.yml; then
+    fail "Safe discovery still rejects a healthy active (exited) oneshot unit"
+fi
+require_file_text ansible/roles/acp_relayer/tasks/main.yml 'systemctl is-failed --quiet relayerd.service'
+require_file_text ansible/roles/acp_relayer/tasks/main.yml 'until: acp_relayer_ready.rc in [0, 42]'
+require_file_text scripts/l1/relayer.sh '/var/backups/relayerd/relayer.db.bak'
+require_file_text scripts/l1/relayer.sh 'the active daemon holds the live bbolt lock'
 if grep -R -nE '127\.0\.0\.1:8080' scripts/l1/relayer.sh ansible/roles/acp_relayer \
     ansible/playbooks/l1/deploy-relayer.yml ansible/playbooks/l1/discover-relayer.yml \
     ansible/playbooks/l1/manage-relayer.yml ansible/playbooks/l1/restore-relayer.yml >/dev/null; then
@@ -62,6 +84,8 @@ fi
 
 require_file_text scripts/l1/relayer.sh 'Install the relayer and console on %s? [y/N] '
 require_file_text scripts/l1/relayer.sh 'Console password (press Enter for none): '
+require_file_text scripts/l1/relayer.sh 'Confirm console password: '
+require_file_text scripts/l1/relayer.sh 'Console passwords did not match; try again.'
 [[ "$(grep -Fc 'Install the relayer and console on %s? [y/N] ' scripts/l1/relayer.sh)" -eq 1 ]] || fail "VM installer target prompt is not unique"
 [[ "$(grep -Fc 'Console password (press Enter for none): ' scripts/l1/relayer.sh)" -eq 1 ]] || fail "VM installer password prompt is not unique"
 require_file_text scripts/l1/relayer.sh 'doctor_vm'

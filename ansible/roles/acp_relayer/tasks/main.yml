@@ -324,12 +324,22 @@
         - relayerd
         - relayer-console
 
-    - name: Wait for relayerd readiness on loopback
-      ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ acp_relayer_api_port }}/ready"
-        status_code: 200
+    - name: Wait for relayerd readiness or stop on terminal service failure
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -o pipefail
+          if systemctl is-failed --quiet relayerd.service; then
+            systemctl status relayerd.service --no-pager --full >&2 || true
+            journalctl -u relayerd.service -n 40 --no-pager >&2 || true
+            exit 42
+          fi
+          curl --fail --silent --show-error \
+            "http://127.0.0.1:{{ acp_relayer_api_port }}/ready"
       register: acp_relayer_ready
-      until: acp_relayer_ready.status == 200
+      changed_when: false
+      until: acp_relayer_ready.rc in [0, 42]
+      failed_when: acp_relayer_ready.rc != 0
       retries: "{{ acp_relayer_ready_retries }}"
       delay: "{{ acp_relayer_ready_delay }}"
 

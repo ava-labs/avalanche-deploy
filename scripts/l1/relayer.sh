@@ -24,6 +24,7 @@ RELEASE_BINARY=""
 RELEASE_SETUP=""
 RELEASE_RESTORE=""
 CONSOLE_IMAGE=""
+INFO_RPC_URL=""
 
 usage() {
   cat >&2 <<'EOF'
@@ -46,7 +47,94 @@ doctor_command() {
   fi
 }
 
+doctor_safe_integration() {
+  local discovery_file="$1"
+  local owner_type safe_services_detected safe_service_state safe_transaction_status
+  owner_type="$(jq -r '.ownerType // empty' "$discovery_file")"
+  safe_services_detected="$(jq -r '.safeServicesDetected // false' "$discovery_file")"
+  safe_service_state="$(jq -r '.safeServiceState // "unknown"' "$discovery_file")"
+  safe_transaction_status="$(jq -r '.safeTransactionServiceStatus // 0' "$discovery_file")"
+
+  if [[ "$owner_type" == safe && "$safe_services_detected" != true ]]; then
+    doctor_result FAIL VM.SAFE.DISCOVERY \
+      "PoAManager owner is a Safe, but safe.service or its Transaction Service is not healthy (unit=$safe_service_state, HTTP=$safe_transaction_status)" \
+      "run make safe on rpc[0], verify http://127.0.0.1:8001/api/v1/about/ returns HTTP 200, then rerun make relayer-doctor"
+  elif [[ "$owner_type" == safe ]]; then
+    doctor_result PASS VM.SAFE.DISCOVERY \
+      "PoAManager owner is a Safe and the local Safe service integration is healthy" none
+  elif [[ "$owner_type" == eoa ]]; then
+    doctor_result PASS VM.SAFE.DISCOVERY "PoAManager owner is a supported EOA" none
+  else
+    doctor_result FAIL VM.SAFE.DISCOVERY \
+      "PoAManager owner type was not reported by discovery" \
+      "rerun the Ansible discovery playbook and repair owner detection"
+  fi
+}
+
+doctor_safe_console_environment() {
+  local discovery_file="$1"
+  local doctor_scope="$2"
+  local owner_type daemon_installed console_installed console_env_present console_env_complete
+  owner_type="$(jq -r '.ownerType // empty' "$discovery_file")"
+  daemon_installed="$(jq -r '.daemonInstalled // false' "$discovery_file")"
+  console_installed="$(jq -r '.consoleInstalled // false' "$discovery_file")"
+  console_env_present="$(jq -r '.safeConsoleEnvPresent // false' "$discovery_file")"
+  console_env_complete="$(jq -r '.safeConsoleEnvComplete // false' "$discovery_file")"
+
+  if [[ "$owner_type" != safe ]]; then
+    doctor_result SKIP VM.SAFE.CONSOLE_ENV \
+      "Safe console variables do not apply to an EOA-owned PoAManager" none
+  elif [[ "$daemon_installed" != true && "$console_installed" != true ]]; then
+    doctor_result SKIP VM.SAFE.CONSOLE_ENV \
+      "Safe console variables do not apply while the Relayer workload is absent" \
+      "the installer will render SAFE_TX_SERVICE_URL, SAFE_UI_URL, and SAFE_ADDRESS"
+  elif [[ "$console_env_present" == true && "$console_env_complete" == true ]]; then
+    doctor_result PASS VM.SAFE.CONSOLE_ENV \
+      "installed console.env contains all required Safe integration keys" none
+  elif [[ "$doctor_scope" == install ]]; then
+    doctor_result WARN VM.SAFE.CONSOLE_ENV \
+      "installed Safe-owned Relayer console.env is absent or missing required Safe integration keys" \
+      "this install/reapply will render SAFE_TX_SERVICE_URL, SAFE_UI_URL, and SAFE_ADDRESS"
+  else
+    doctor_result FAIL VM.SAFE.CONSOLE_ENV \
+      "installed Safe-owned Relayer console.env is absent or missing required Safe integration keys" \
+      "run make relayer to reapply the managed Safe integration"
+  fi
+}
+
+relayer_remote_check() {
+  "$@"
+}
+
+doctor_state_integrity() {
+  local runtime_ready="$1"
+  shift
+  local -a ansible_prefix=("$@")
+
+  if [[ "$runtime_ready" == true ]] && \
+    relayer_remote_check "${ansible_prefix[@]}" -m ansible.builtin.command -a '/usr/bin/test -f /var/backups/relayerd/relayer.db.bak' >/dev/null 2>&1; then
+    if relayer_remote_check "${ansible_prefix[@]}" -m ansible.builtin.command -a '/usr/local/bin/relayer-restore --check-db /var/backups/relayerd/relayer.db.bak' >/dev/null 2>&1; then
+      doctor_result PASS VM.STATE.INTEGRITY "the daemon-opened bbolt state has a structurally valid rolling hot backup" none
+    else
+      doctor_result FAIL VM.STATE.INTEGRITY "the rolling bbolt hot backup failed its read-only integrity check" "inspect relayerd backup logs and create a validated make relayer-backup before lifecycle operations"
+    fi
+  elif [[ "$runtime_ready" == true ]]; then
+    doctor_result WARN VM.STATE.INTEGRITY "relayerd opened the live database but its first rolling hot backup is not available yet" "wait one five-minute backup interval, then rerun doctor"
+  elif relayer_remote_check "${ansible_prefix[@]}" -m ansible.builtin.command -a '/usr/bin/systemctl is-active --quiet relayerd.service' >/dev/null 2>&1; then
+    doctor_result WARN VM.STATE.INTEGRITY "the active daemon holds the live bbolt lock and is not ready enough to verify its rolling backup" "repair runtime readiness, wait for a hot backup, then rerun doctor"
+  elif relayer_remote_check "${ansible_prefix[@]}" -m ansible.builtin.command -a '/usr/local/bin/relayer-restore --check-db /var/lib/relayerd/relayer.db' >/dev/null 2>&1; then
+    doctor_result PASS VM.STATE.INTEGRITY "offline bbolt state passes a read-only integrity check" none
+  else
+    doctor_result FAIL VM.STATE.INTEGRITY "bbolt state integrity check failed" "restore a validated make relayer-backup archive"
+  fi
+}
+
 doctor_vm() {
+  local doctor_scope="${1:-operations}"
+  case "$doctor_scope" in
+    operations|install) ;;
+    *) die "internal error: unsupported Relayer doctor scope '$doctor_scope'" ;;
+  esac
   DOCTOR_FAILURES=0
   DOCTOR_WARNINGS=0
   if [[ -n "${RELAYER_DOCTOR_FIXTURE:-}" ]]; then
@@ -159,16 +247,28 @@ doctor_vm() {
   if [[ -n "$INVENTORY_FILE" && -f "$L1_ENV" ]] && command -v ansible-playbook >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
     ensure_work_dir
     DISCOVERY_FILE="$WORK_DIR/discovery.json"
-    if (run_preflight) >/dev/null 2>&1; then
+    if (run_preflight false) >/dev/null 2>&1; then
       preflight_ok=true
       doctor_result PASS VM.RPC.HEALTH "rpc[0] matches the managed network, subnet, blockchain, and EVM chain" none
       doctor_result PASS VM.PEERS.VISIBLE "rpc[0] sees every deployed validator peer" none
+      local eligible_bootstrap_count bootstrap_info_url
+      eligible_bootstrap_count="$(jq -r '.eligibleBootstrapPeerCount // 0' "$DISCOVERY_FILE")"
+      bootstrap_info_url="$(jq -r '.infoRpcUrl // empty' "$DISCOVERY_FILE")"
+      if [[ "$eligible_bootstrap_count" =~ ^[0-9]+$ ]] && ((eligible_bootstrap_count > 0)); then
+        doctor_result PASS VM.PEERS.BOOTSTRAP \
+          "$bootstrap_info_url exposes $eligible_bootstrap_count current Primary Network bootstrap peer(s)" none
+      else
+        doctor_result FAIL VM.PEERS.BOOTSTRAP \
+          "$bootstrap_info_url exposes no peers that are current Primary Network validators" \
+          "restore access to the managed network Info API and confirm rpc[0] can reach Primary validator P2P endpoints"
+      fi
       doctor_result PASS VM.MANAGER.TOPOLOGY "official PoAManager and initialized owned ValidatorManager topology verified" none
-      doctor_result PASS VM.SAFE.DISCOVERY "manager owner is a supported EOA or compatible Safe" none
+      doctor_safe_integration "$DISCOVERY_FILE"
     else
       doctor_result FAIL VM.PREFLIGHT.REMOTE "remote RPC, peer, topology, or retained-state preflight failed" "run ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook -i ${INVENTORY_FILE#"$ROOT_DIR/"} ansible/playbooks/l1/discover-relayer.yml with the generated discovery variables, or rerun make relayer for detailed output"
       doctor_result SKIP VM.RPC.HEALTH "RPC health was not independently confirmed" "repair the remote preflight"
       doctor_result SKIP VM.PEERS.VISIBLE "validator peer visibility was not independently confirmed" "repair RPC-to-validator peering"
+      doctor_result SKIP VM.PEERS.BOOTSTRAP "Primary Network bootstrap eligibility was not independently confirmed" "repair the remote preflight"
       doctor_result SKIP VM.MANAGER.TOPOLOGY "manager topology was not independently confirmed" "verify official PoAManager ownership and initialization"
       doctor_result SKIP VM.SAFE.DISCOVERY "EOA/Safe ownership was not independently confirmed" "repair the manager topology preflight"
     fi
@@ -176,6 +276,7 @@ doctor_vm() {
     doctor_result SKIP VM.PREFLIGHT.REMOTE "remote preflight prerequisites are incomplete" "repair the earlier tool, l1.env, and state checks"
     doctor_result SKIP VM.RPC.HEALTH "RPC health was not checked" "repair the remote preflight prerequisites"
     doctor_result SKIP VM.PEERS.VISIBLE "validator peer visibility was not checked" "repair the remote preflight prerequisites"
+    doctor_result SKIP VM.PEERS.BOOTSTRAP "Primary Network bootstrap eligibility was not checked" "repair the remote preflight prerequisites"
     doctor_result SKIP VM.MANAGER.TOPOLOGY "manager topology was not checked" "repair the remote preflight prerequisites"
     doctor_result SKIP VM.SAFE.DISCOVERY "EOA/Safe ownership was not checked" "repair the remote preflight prerequisites"
   fi
@@ -211,6 +312,26 @@ doctor_vm() {
     else
       doctor_result FAIL VM.INSTALLATION.STATE "Relayer installation is partial or inconsistent" "restore matching state/config/keys from a retained backup or run make relayer-remove PURGE=true only after separate recovery approval"
     fi
+    doctor_safe_console_environment "$DISCOVERY_FILE" "$doctor_scope"
+
+    local configured_info_rpc_url selected_info_rpc_url
+    configured_info_rpc_url="$(jq -r '.configuredInfoRpcUrl // empty' "$DISCOVERY_FILE")"
+    selected_info_rpc_url="$(jq -r '.infoRpcUrl // empty' "$DISCOVERY_FILE")"
+    if [[ "$daemon_installed" == true && "$configured_info_rpc_url" != "$selected_info_rpc_url" ]]; then
+      if [[ "$doctor_scope" == install ]]; then
+        doctor_result WARN VM.CONFIG.BOOTSTRAP \
+          "installed info-rpc-url differs from the managed $selected_info_rpc_url bootstrap source" \
+          "this install/reapply will render the managed network bootstrap source"
+      else
+        doctor_result FAIL VM.CONFIG.BOOTSTRAP \
+          "installed info-rpc-url differs from the managed $selected_info_rpc_url bootstrap source" \
+          "run make relayer to reapply the managed configuration"
+      fi
+    elif [[ "$daemon_installed" == true ]]; then
+      doctor_result PASS VM.CONFIG.BOOTSTRAP "installed info-rpc-url matches $selected_info_rpc_url" none
+    else
+      doctor_result SKIP VM.CONFIG.BOOTSTRAP "installed bootstrap configuration does not apply while the workload is absent" "the installer will render the managed network Info API"
+    fi
 
     local release_arch version_without_v release_url release_base published_console_image=""
     case "$architecture" in x86_64|amd64) release_arch=amd64 ;; *) release_arch=arm64 ;; esac
@@ -240,11 +361,17 @@ doctor_vm() {
         "$recorded_console" =~ ^ghcr\.io/.+@sha256:[0-9a-f]{64}$ && \
         -n "$published_console_image" && "$recorded_console" == "$published_console_image" ]]; then
         doctor_result PASS VM.RELEASE.INTEGRITY "installed version, daemon checksum, and console digest match recorded and published release metadata" none
+      elif [[ "$doctor_scope" == install ]]; then
+        doctor_result WARN VM.RELEASE.INTEGRITY "installed release metadata, daemon checksum, version, or console digest has drifted" "this install/reapply will restore the verified pinned artifacts"
       else
         doctor_result FAIL VM.RELEASE.INTEGRITY "installed release metadata, daemon checksum, version, or console digest has drifted" "run make relayer-upgrade RELAYER_VERSION=$RELAYER_VERSION to reapply verified artifacts"
       fi
+      local runtime_ready=false
       if "${ansible_prefix[@]}" -m ansible.builtin.uri -a 'url=http://127.0.0.1:8081/ready status_code=200' >/dev/null 2>&1; then
+        runtime_ready=true
         doctor_result PASS VM.RUNTIME.READY "relayerd readiness endpoint is healthy" none
+      elif [[ "$doctor_scope" == install ]]; then
+        doctor_result WARN VM.RUNTIME.READY "relayerd is installed but not ready" "this install/reapply will render configuration and restart the runtime"
       else
         doctor_result FAIL VM.RUNTIME.READY "relayerd is installed but not ready" "inspect make relayer-logs and restore or repair the runtime before validator operations"
       fi
@@ -253,19 +380,19 @@ doctor_vm() {
       else
         doctor_result FAIL VM.KEYS.INTEGRITY "encrypted keystore integrity could not be verified" "restore keystore.json and keystore-password from the same backup"
       fi
-      if "${ansible_prefix[@]}" -m ansible.builtin.command -a '/usr/local/bin/relayer-restore --check-db /var/lib/relayerd/relayer.db' >/dev/null 2>&1; then
-        doctor_result PASS VM.STATE.INTEGRITY "bbolt state passes a read-only integrity check" none
-      else
-        doctor_result FAIL VM.STATE.INTEGRITY "bbolt state integrity check failed" "restore a validated make relayer-backup archive"
-      fi
+      doctor_state_integrity "$runtime_ready" "${ansible_prefix[@]}"
       ensure_work_dir
       local funding_status_file="$WORK_DIR/funding-status.txt"
       if "${ansible_prefix[@]}" -m ansible.builtin.uri -a 'url=http://127.0.0.1:8081/keys status_code=200 return_content=true' >"$funding_status_file" 2>/dev/null; then
         if grep -q 'fundedFloat.*true' "$funding_status_file" && grep -q 'fundedGas.*true' "$funding_status_file"; then
           doctor_result PASS VM.FUNDING.READY "P-Chain float and L1 gas addresses meet daemon funding thresholds" none
+        elif [[ "$doctor_scope" == install ]]; then
+          doctor_result WARN VM.FUNDING.READY "one or both public relayer funding addresses are below threshold" "complete the install/reapply, then fund the addresses printed by make relayer-status"
         else
           doctor_result FAIL VM.FUNDING.READY "one or both public relayer funding addresses are below threshold" "fund the P-Chain float and L1 EVM gas addresses printed by make relayer-status"
         fi
+      elif [[ "$doctor_scope" == install ]]; then
+        doctor_result WARN VM.FUNDING.READY "public funding status could not be read from the unhealthy runtime" "complete the install/reapply, then fund the addresses printed by make relayer-status"
       else
         doctor_result FAIL VM.FUNDING.READY "public funding status could not be read" "repair relayerd readiness and rerun doctor"
       fi
@@ -311,6 +438,8 @@ doctor_vm() {
     doctor_result SKIP VM.TARGET.ARCHITECTURE "target architecture was not checked" "repair the remote preflight"
     doctor_result SKIP VM.TARGET.CAPACITY "target capacity was not checked" "repair the remote preflight"
     doctor_result SKIP VM.INSTALLATION.STATE "installation state was not classified" "repair the remote preflight"
+    doctor_result SKIP VM.SAFE.CONSOLE_ENV "installed Safe console variables were not checked" "repair the remote preflight"
+    doctor_result SKIP VM.CONFIG.BOOTSTRAP "installed bootstrap configuration was not checked" "repair the remote preflight"
     doctor_result SKIP VM.RELEASE.AVAILABLE "release availability was not architecture-matched" "repair the remote preflight"
     doctor_result SKIP VM.RUNTIME.READY "runtime readiness was not checked" "repair the remote preflight"
     doctor_result SKIP VM.KEYS.INTEGRITY "keystore integrity was not checked" "repair the remote preflight"
@@ -331,6 +460,56 @@ die() {
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "$1 is required; install it and rerun"
+}
+
+read_console_password() {
+  local output_name="$1"
+  local entered_password=""
+  local confirmed_password=""
+
+  while true; do
+    printf 'Console password (press Enter for none): ' >&2
+    if ! IFS= read -r -s entered_password; then
+      printf '\n' >&2
+      entered_password=""
+      confirmed_password=""
+      return 1
+    fi
+    printf '\n' >&2
+
+    if [[ -z "$entered_password" ]]; then
+      printf -v "$output_name" '%s' ""
+      return 0
+    fi
+
+    printf 'Confirm console password: ' >&2
+    if ! IFS= read -r -s confirmed_password; then
+      printf '\n' >&2
+      entered_password=""
+      confirmed_password=""
+      return 1
+    fi
+    printf '\n' >&2
+
+    if [[ "$entered_password" == "$confirmed_password" ]]; then
+      printf -v "$output_name" '%s' "$entered_password"
+      entered_password=""
+      confirmed_password=""
+      return 0
+    fi
+
+    entered_password=""
+    confirmed_password=""
+    printf 'Console passwords did not match; try again.\n' >&2
+  done
+}
+
+managed_info_rpc_url() {
+  case "$1" in
+    fuji) printf '%s\n' "https://api.avax-test.network" ;;
+    mainnet) printf '%s\n' "https://api.avax.network" ;;
+    *) return 1 ;;
+  esac
 }
 
 validate_release_source() {
@@ -563,9 +742,12 @@ result["networkId"] = 5 if network == "fuji" else 1
 result["evmChainId"] = evm_chain_id
 json.dump(result, sys.stdout, indent=2)
 PY
+  INFO_RPC_URL="$(managed_info_rpc_url "$(jq -r '.network' "$METADATA_FILE")")" || \
+    die "failed to select the managed Info API for $(jq -r '.network' "$METADATA_FILE")"
 }
 
 run_preflight() {
+  local enforce_bootstrap="${1:-true}"
   local vars_file
   discover_infrastructure
   load_l1_metadata
@@ -579,6 +761,7 @@ run_preflight() {
     --arg chain_name "$(jq -r '.chainName' "$METADATA_FILE")" \
     --arg manager "$(jq -r '.managerAddress' "$METADATA_FILE")" \
     --arg validator_manager "$(jq -r '.validatorManagerAddress' "$METADATA_FILE")" \
+    --arg info_rpc_url "$INFO_RPC_URL" \
     --argjson network_id "$(jq '.networkId' "$METADATA_FILE")" \
     --argjson evm_chain_id "$(jq '.evmChainId' "$METADATA_FILE")" \
     --argjson validator_private_ips "$VALIDATOR_PRIVATE_IPS" \
@@ -590,6 +773,7 @@ run_preflight() {
       acp_relayer_expected_chain_name: $chain_name,
       acp_relayer_expected_manager_address: $manager,
       acp_relayer_expected_validator_manager_address: $validator_manager,
+      acp_relayer_info_rpc_url: $info_rpc_url,
       acp_relayer_expected_network_id: $network_id,
       acp_relayer_expected_evm_chain_id: $evm_chain_id,
       acp_relayer_validator_private_ips: $validator_private_ips
@@ -600,10 +784,16 @@ run_preflight() {
     ANSIBLE_CONFIG="$ROOT_DIR/ansible/ansible.cfg" \
       ansible-playbook -i "$INVENTORY_FILE" playbooks/l1/discover-relayer.yml -e "@$vars_file"
   )
-  jq -e --arg target "$TARGET_NAME" \
-    '.target == $target and (.peers | length > 0) and (.architecture | length > 0)' \
+  jq -e --arg target "$TARGET_NAME" --arg info_rpc_url "$INFO_RPC_URL" \
+    '.target == $target and .infoRpcUrl == $info_rpc_url and
+     (.eligibleBootstrapPeerCount | type) == "number" and
+     (.peers | length > 0) and (.architecture | length > 0)' \
     "$DISCOVERY_FILE" >/dev/null || \
     die "Relayer discovery did not produce a complete result; inspect the Ansible preflight output above"
+  if [[ "$enforce_bootstrap" == true ]]; then
+    jq -e '.eligibleBootstrapPeerCount > 0' "$DISCOVERY_FILE" >/dev/null || \
+      die "the managed Info API has no peers in the current Primary validator set; rerun make relayer-doctor for remediation"
+  fi
 }
 
 sha256_file() {
@@ -757,7 +947,7 @@ run_install() {
   local peer
   local -a setup_args
 
-  if ! doctor_vm; then
+  if ! doctor_vm install; then
     die "Relayer doctor found blockers; apply the printed remediations before installation"
   fi
   run_preflight
@@ -768,8 +958,9 @@ run_install() {
     y | Y | yes | YES | Yes) ;;
     *) printf 'Installation cancelled.\n'; return 0 ;;
   esac
-  IFS= read -r -s -p 'Console password (press Enter for none): ' console_password
-  printf '\n'
+  if ! read_console_password console_password; then
+    die "console password entry was interrupted; installation was not started"
+  fi
 
   prepare_release true
   bundle_dir="$WORK_DIR/generated"
@@ -778,7 +969,7 @@ run_install() {
     --out "$bundle_dir"
     --l1-env "$L1_ENV"
     --pchain-rpc-url http://127.0.0.1:9650
-    --info-rpc-url http://127.0.0.1:9650
+    --info-rpc-url "$INFO_RPC_URL"
     --evm-rpc-url "http://127.0.0.1:9650/ext/bc/$(jq -r '.blockchainId' "$METADATA_FILE")/rpc"
     --api-listen-addr 127.0.0.1:8081
     --output json
@@ -1015,6 +1206,9 @@ validate_release_source
 if [[ ! "$RELAYER_VERSION" =~ ^v[0-9A-Za-z][0-9A-Za-z.+-]*$ ]]; then
   printf 'ERROR: RELAYER_VERSION must be a release tag such as v0.1.0\n' >&2
   usage
+fi
+if [[ "$RELAYER_VERSION" == "$PINNED_RELAYER_VERSION" && "$ACTION" =~ ^(doctor|install)$ ]]; then
+  die "the production Relayer pin is awaiting repository transfer; for an approved prerelease set RELAYER_DEVELOPMENT=true, RELAYER_DEVELOPMENT_REPOSITORY=owner/repository, and RELAYER_VERSION=vX.Y.Z-rc.N"
 fi
 case "$ACTION" in
   prereqs)

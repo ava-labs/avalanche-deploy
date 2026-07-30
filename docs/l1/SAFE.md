@@ -98,6 +98,27 @@ After deployment, access the Safe UI via **HTTPS** (required for wallet connecti
 https://<rpc-node-ip>/
 ```
 
+### Connecting a wallet
+
+Core and MetaMask browser extensions work without additional configuration.
+The deployment compiles a valid-format placeholder WalletConnect project ID so
+Safe Wallet Web can initialize its wallet chooser; the placeholder does not
+enable QR/mobile WalletConnect sessions.
+
+To enable QR/mobile WalletConnect, create a public project ID in Reown
+Cloud and supply it when running the playbook:
+
+```bash
+cd ansible
+ansible-playbook -i inventory/aws_hosts playbooks/l1/deploy-safe.yml \
+  -e chain_id=<CHAIN_ID> \
+  -e evm_chain_id=<EVM_CHAIN_ID> \
+  -e safe_walletconnect_project_id=<REOWN_PROJECT_ID>
+```
+
+`NEXT_PUBLIC_WC_PROJECT_ID` is compiled into the static UI at build time.
+Changing only `/opt/safe/ui.env` does not update an existing UI image.
+
 ### SSL Options
 
 **Option 1: Self-signed certificate (default)**

@@ -116,6 +116,104 @@ Fund both addresses before validator operations. `doctor` reports a blocker when
 either balance is below the runtime threshold. These are Relayer hot keys; they
 are not validator staking keys or the manager owner key.
 
+## Operating validators
+
+Before starting a registration, weight update, or removal:
+
+1. Run `make relayer-doctor` and resolve every blocker.
+2. Run `make relayer-status` and confirm that the daemon and console are
+   healthy and that the expected public funding addresses are present.
+3. Run `make relayer-access` and keep the SSH tunnel open.
+4. Open the console at `http://127.0.0.1:3080`.
+
+The console prepares the L1 call and then hands the **executed L1 transaction**
+to the Relayer. The owner type changes who executes that first call:
+
+- An EOA owner signs and broadcasts the L1 transaction directly from the
+  connected wallet. The confirmed wallet transaction hash can flow directly
+  into the Relayer step.
+- A Safe owner does not broadcast the L1 call when the console creates the
+  proposal. The Safe owners must approve and execute it separately before the
+  Relayer can start.
+
+### Safe-backed operation ceremony
+
+When the PoAManager owner is a Safe:
+
+1. Complete the validator-operation form in the console and create the Safe
+   proposal.
+2. Open the Safe UI at `https://127.0.0.1:3081` through the same
+   `make relayer-access` tunnel. Accept the self-signed certificate warning
+   when using the default deployment.
+3. Find the proposal and collect the configured approval threshold. An approval
+   alone does not change the L1.
+4. Execute the approved proposal in the Safe UI and wait for its L1 receipt to
+   confirm.
+5. Copy the hash of that **executed L1 transaction** from the execution receipt.
+6. Return to the console Relayer step and paste that hash when it is not
+   already populated.
+7. Keep the console open to follow the persisted operation timeline. The
+   Relayer now validates the receipt, gathers Warp signatures, submits the
+   P-Chain transaction, waits for acceptance, and completes the return leg on
+   the L1.
+
+The Relayer does not approve or execute Safe proposals and must not receive the
+Safe proposal hash. If the proposal is only approved, or if its proposal
+identifier is pasted into the Relayer step, there is no executed L1 receipt for
+the daemon to process.
+
+### Do not mix up these identifiers
+
+| Identifier | Where it comes from | How it is used |
+|---|---|---|
+| Safe proposal hash | Safe Transaction Service before execution | Tracks approvals; never submit it to the Relayer |
+| Executed L1 transaction hash | Wallet or Safe execution receipt after the L1 transaction confirms | The hash submitted to the Relayer |
+| P-Chain transaction ID | Relayer after Warp aggregation and P-Chain submission | Tracks the validator-set mutation on the P-Chain |
+| Validation ID | Registration result and subsequent validator records | Stable validator identity for weight updates and removal |
+
+Keep the executed L1 transaction hash and validation ID in the operation
+record. The P-Chain transaction ID is useful when diagnosing an operation that
+has left the L1 but has not completed its return leg.
+
+### Inputs by operation
+
+- Registration requires the validator NodeID and its 144-byte BLS
+  proof-of-possession payload in addition to the normal registration fields.
+  Use the values belonging to the validator being registered; the Relayer
+  verifies that the proof matches the BLS public key in the initiated event.
+- Weight update requires the existing validation ID and the new weight.
+- Removal requires the existing validation ID. If this Relayer did not perform
+  the original registration, also provide the original executed registration
+  transaction hash when the console asks for it. That receipt supplies the
+  registration message needed to justify removal.
+
+Do not guess a registration transaction hash or substitute the P-Chain
+transaction ID. If the original receipt is unavailable, stop and recover the
+original registration record before attempting removal.
+
+### Timing, retries, and recovery
+
+A complete lifecycle can take several minutes. Warp signature collection,
+P-Chain acceptance, and the return message are separate asynchronous stages.
+Do not start a second operation merely because the UI remains on one stage for
+a few minutes.
+
+The daemon persists operation progress and deduplicates the executed L1
+transaction hash. If the browser or console restarts, reopen the same operation
+and reconcile it against the console timeline before submitting another hash.
+Use:
+
+```bash
+make relayer-status
+make relayer-logs
+```
+
+`status` confirms workload health and public funding metadata; `logs` shows the
+daemon's current stage and any actionable failure. Reusing the same executed L1
+transaction hash is the safe retry. Do not create and execute a second Safe
+proposal unless the first proposal was never executed and the console has
+confirmed that no operation was persisted.
+
 ## Day-two commands
 
 | Command | Result |
@@ -197,8 +295,16 @@ of these release gates pass:
 
 Repository redirects do not move granular GHCR packages to the new owner, so
 production images must be published after transfer. Maintainers may use an
-authenticated repository override only for pre-transfer development by setting
-`RELAYER_DEVELOPMENT=true`; that override is not part of the supported operator
-flow.
+approved prerelease before transfer by setting all three explicit overrides:
+
+```bash
+RELAYER_DEVELOPMENT=true \
+RELAYER_DEVELOPMENT_REPOSITORY=owner/validator-lifecycle-relayer \
+make relayer RELAYER_VERSION=vX.Y.Z-rc.N
+```
+
+Add `RELAYER_DEVELOPMENT_TOKEN` only when that repository or its release assets
+require authentication. Development overrides are not part of the supported
+production operator flow.
 
 For runtime details, see the [Relayer technical documentation](https://github.com/ava-labs/validator-lifecycle-relayer/tree/main/docs).

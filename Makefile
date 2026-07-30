@@ -286,7 +286,13 @@ initialize-validator-manager:
 		-e "proxy_address=$(PROXY_ADDRESS)" \
 		-e "evm_chain_id=$(EVM_CHAIN_ID)" \
 		$(if $(MANAGER_TYPE),-e "manager_type=$(MANAGER_TYPE)",) \
-		$(if $(ICM_CONTRACTS_PATH),-e "icm_contracts_path=$(ICM_CONTRACTS_PATH)",)
+		$(if $(ICM_CONTRACTS_PATH),-e "icm_contracts_path=$(ICM_CONTRACTS_PATH)",) \
+		$(if $(CONVERSION_ID),-e "conversion_id=$(CONVERSION_ID)",) \
+		$(if $(VALIDATOR_MESSAGES_LIBRARY),-e "validator_messages_library=$(VALIDATOR_MESSAGES_LIBRARY)",) \
+		$(if $(VALIDATOR_MANAGER_IMPLEMENTATION),-e "validator_manager_implementation=$(VALIDATOR_MANAGER_IMPLEMENTATION)",) \
+		$(if $(filter true,$(USE_LOCAL_SIG_AGG)),-e "use_local_sig_agg=true",) \
+		$(if $(SIG_AGG_URL),-e "sig_agg_url=$(SIG_AGG_URL)",) \
+		$(if $(filter true,$(PREFLIGHT_ONLY)),-e "preflight_only=true",)
 
 #
 # Primary Network Validators

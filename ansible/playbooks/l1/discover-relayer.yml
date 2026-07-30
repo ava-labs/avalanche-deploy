@@ -46,12 +46,18 @@
           - acp_relayer_expected_manager_address is match('^0x[0-9a-fA-F]{40}$')
           - acp_relayer_expected_validator_manager_address is match('^0x[0-9a-fA-F]{40}$')
           - (acp_relayer_expected_manager_address | lower) != (acp_relayer_expected_validator_manager_address | lower)
+          - >-
+            (acp_relayer_expected_network_id | int == 5 and
+             acp_relayer_info_rpc_url == 'https://api.avax-test.network') or
+            (acp_relayer_expected_network_id | int == 1 and
+             acp_relayer_info_rpc_url == 'https://api.avax.network')
           - groups['validators'] is defined
           - groups['validators'] | length > 0
         fail_msg: >-
           The generated l1.env or Terraform inventory is incomplete. The zero-input
           installer requires a Fuji/Mainnet network, subnet and blockchain IDs, EVM
-          chain ID, chain name, PoAManager, ValidatorManager proxy, and validators.
+          chain ID, chain name, PoAManager, ValidatorManager proxy, validators,
+          and the matching managed Avalanche Info API.
 
     - name: Query the AvalancheGo network ID
       ansible.builtin.uri:
@@ -76,6 +82,43 @@
           method: info.peers
         return_content: true
       register: acp_relayer_info_peers
+
+    - name: Query the managed Info API network ID
+      ansible.builtin.uri:
+        url: "{{ acp_relayer_info_rpc_url }}/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.getNetworkID
+        return_content: true
+      register: acp_relayer_bootstrap_network_id
+
+    - name: Query Primary bootstrap candidates from the managed Info API
+      ansible.builtin.uri:
+        url: "{{ acp_relayer_info_rpc_url }}/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.peers
+        return_content: true
+      register: acp_relayer_bootstrap_info_peers
+
+    - name: Query current Primary Network validators from the local P-Chain
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/bc/P
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: platform.getCurrentValidators
+          params: {}
+        return_content: true
+      register: acp_relayer_primary_validators
 
     - name: Query the blockchain status from the P-Chain
       ansible.builtin.uri:
@@ -202,6 +245,15 @@
           - (acp_relayer_network_id.json.result.networkID | int) == (acp_relayer_expected_network_id | int)
           - acp_relayer_info_peers.status == 200
           - acp_relayer_info_peers.json.result.peers is defined
+          - acp_relayer_bootstrap_network_id.status == 200
+          - acp_relayer_bootstrap_network_id.json.error is not defined
+          - (acp_relayer_bootstrap_network_id.json.result.networkID | int) == (acp_relayer_expected_network_id | int)
+          - acp_relayer_bootstrap_info_peers.status == 200
+          - acp_relayer_bootstrap_info_peers.json.error is not defined
+          - acp_relayer_bootstrap_info_peers.json.result.peers is defined
+          - acp_relayer_primary_validators.status == 200
+          - acp_relayer_primary_validators.json.error is not defined
+          - acp_relayer_primary_validators.json.result.validators is defined
           - acp_relayer_blockchain_status.status == 200
           - acp_relayer_blockchain_status.json.result.status | default('Unknown') != 'Unknown'
           - acp_relayer_blockchains.status == 200
@@ -235,6 +287,16 @@
         acp_relayer_manager_owner: "0x{{ acp_relayer_manager_owner_call.json.result[-40:] }}"
         acp_relayer_validator_manager_owner: "0x{{ acp_relayer_validator_manager_owner_call.json.result[-40:] }}"
         acp_relayer_visible_peer_ids: "{{ acp_relayer_info_peers.json.result.peers | map(attribute='nodeID') | list }}"
+        acp_relayer_bootstrap_peer_ids: "{{ acp_relayer_bootstrap_info_peers.json.result.peers | map(attribute='nodeID') | list }}"
+        acp_relayer_primary_validator_ids: "{{ acp_relayer_primary_validators.json.result.validators | map(attribute='nodeID') | list }}"
+
+    - name: Find Info API peers eligible to bootstrap the Relayer P2P client
+      ansible.builtin.set_fact:
+        acp_relayer_eligible_bootstrap_peer_ids: >-
+          {{
+            acp_relayer_bootstrap_peer_ids
+            | intersect(acp_relayer_primary_validator_ids)
+          }}
 
     - name: Verify the ValidatorManager is owned by the PoAManager
       ansible.builtin.assert:
@@ -320,6 +382,52 @@
 
     - name: Discover existing services and persistent Relayer material
       ansible.builtin.service_facts:
+
+    - name: Check whether the Safe oneshot service is active
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - safe.service
+      register: acp_relayer_safe_service_active
+      changed_when: false
+      failed_when: false
+      when: acp_relayer_owner_code.json.result | default('0x') not in ['0x', '0x0', '']
+
+    - name: Check the active Safe Transaction Service
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8001/api/v1/about/
+        method: GET
+        status_code: 200
+      register: acp_relayer_safe_transaction_service
+      changed_when: false
+      failed_when: false
+      when:
+        - acp_relayer_owner_code.json.result | default('0x') not in ['0x', '0x0', '']
+        - (acp_relayer_safe_service_active.rc | default(1) | int) == 0
+
+    - name: Inspect the installed Relayer console environment
+      ansible.builtin.stat:
+        path: /etc/relayerd/secrets/console.env
+        get_checksum: false
+      register: acp_relayer_safe_console_env
+
+    - name: Check required Safe console environment keys without reading their values
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/grep
+          - -Eq
+          - "^{{ item }}=.+$"
+          - /etc/relayerd/secrets/console.env
+      loop:
+        - SAFE_TX_SERVICE_URL
+        - SAFE_UI_URL
+        - SAFE_ADDRESS
+      register: acp_relayer_safe_console_env_keys
+      changed_when: false
+      failed_when: false
+      no_log: true
+      when: acp_relayer_safe_console_env.stat.exists
 
     - name: Inspect existing encrypted keys and funding metadata
       ansible.builtin.stat:
@@ -459,8 +567,20 @@
         acp_relayer_safe_services_detected: >-
           {{
             acp_relayer_owner_code.json.result | default('0x') not in ['0x', '0x0', '']
-            and 'safe.service' in ansible_facts.services
-            and ansible_facts.services['safe.service'].state == 'running'
+            and (acp_relayer_safe_service_active.rc | default(1) | int) == 0
+            and (acp_relayer_safe_transaction_service.status | default(0) | int) == 200
+          }}
+        acp_relayer_safe_console_env_complete: >-
+          {{
+            acp_relayer_safe_console_env.stat.exists
+            and (
+              acp_relayer_safe_console_env_keys.results
+              | default([])
+              | selectattr('rc', 'defined')
+              | selectattr('rc', 'equalto', 0)
+              | list
+              | length
+            ) == 3
           }}
 
     - name: Write machine-readable discovery results on the control host
@@ -476,7 +596,25 @@
               'managerOwner': acp_relayer_manager_owner,
               'ownerType': acp_relayer_owner_type,
               'safeServicesDetected': acp_relayer_safe_services_detected | bool,
+              'safeServiceState': acp_relayer_safe_service_active.stdout | default('not-applicable'),
+              'safeServiceFactsState': (
+                ansible_facts.services['safe.service'].state
+                if 'safe.service' in ansible_facts.services
+                else 'not-found'
+              ),
+              'safeTransactionServiceStatus': acp_relayer_safe_transaction_service.status | default(0) | int,
+              'safeConsoleEnvPresent': acp_relayer_safe_console_env.stat.exists | bool,
+              'safeConsoleEnvComplete': acp_relayer_safe_console_env_complete | bool,
               'peers': acp_relayer_peers,
+              'infoRpcUrl': acp_relayer_info_rpc_url,
+              'bootstrapPeerCount': acp_relayer_bootstrap_peer_ids | length,
+              'primaryValidatorCount': acp_relayer_primary_validator_ids | length,
+              'eligibleBootstrapPeerCount': acp_relayer_eligible_bootstrap_peer_ids | length,
+              'configuredInfoRpcUrl': (
+                (acp_relayer_existing_config_file.content | b64decode | from_json)['info-rpc-url']
+                if acp_relayer_existing_config_file.content is defined
+                else ''
+              ),
               'keystoreExists': acp_relayer_existing_files.results[0].stat.exists | bool,
               'restoreUtilityInstalled': acp_relayer_existing_files.results[8].stat.exists | bool,
               'releaseMetadataExists': acp_relayer_existing_files.results[9].stat.exists | bool,
