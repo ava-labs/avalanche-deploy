@@ -26,26 +26,38 @@ run_case() {
 
 vm="$ROOT_DIR/scripts/l1/relayer.sh"
 
-run_case "$vm" healthy-preinstall 0 PASS VM.INSTALLATION.STATE "ready for a fresh install"
-run_case "$vm" healthy-installed 0 PASS VM.RUNTIME.READY "installed runtime is ready"
-run_case "$vm" missing-tools 1 FAIL VM.TOOL.TERRAFORM "Terraform is missing"
-run_case "$vm" old-terraform 1 FAIL VM.TOOL.TERRAFORM_VERSION "Terraform version is too old"
-run_case "$vm" absent-l1-env 1 FAIL VM.L1_ENV.PRESENT "l1.env is absent"
-run_case "$vm" stale-l1-env 0 WARN VM.L1_ENV.AGE "l1.env is stale"
-run_case "$vm" multiple-states 1 FAIL VM.TERRAFORM.STATE "multiple states are active"
-run_case "$vm" inventory-drift 1 FAIL VM.INVENTORY.MATCH "inventory differs from Terraform"
-run_case "$vm" ssh-denial 1 FAIL VM.ACCESS.SSH "SSH is denied"
-run_case "$vm" sudo-denial 1 FAIL VM.ACCESS.SUDO "sudo is denied"
-run_case "$vm" unavailable-rpc 1 FAIL VM.RPC.HEALTH "RPC is unavailable"
-run_case "$vm" peer-loss 1 FAIL VM.PEERS.VISIBLE "validator peers are missing"
-run_case "$vm" bootstrap-peer-loss 1 FAIL VM.PEERS.BOOTSTRAP "no current Primary bootstrap peers are available"
-run_case "$vm" manager-mismatch 1 FAIL VM.MANAGER.TOPOLOGY "manager topology differs"
-run_case "$vm" unfunded 1 FAIL VM.FUNDING.READY "funding is below threshold"
-run_case "$vm" partial-install 1 FAIL VM.INSTALLATION.STATE "installation is partial"
-run_case "$vm" public-listeners 1 FAIL VM.LISTENERS.LOOPBACK "a listener is public"
-run_case "$vm" stale-backup 0 WARN VM.BACKUPS.INTEGRITY "latest backup is stale"
-run_case "$vm" corrupt-backup 1 FAIL VM.BACKUPS.INTEGRITY "latest backup is corrupt"
-run_case "$vm" version-drift 1 FAIL VM.RELEASE.INTEGRITY "installed version has drifted"
+# The RELAYER_DOCTOR_FIXTURE short-circuit in doctor_vm proves only the shared
+# result formatter and the doctor_finish exit-code contract; every check below
+# calls the real doctor functions.
+run_case "$vm" formatter-pass 0 PASS VM.RUNTIME.READY "installed runtime is ready"
+run_case "$vm" formatter-blocker 1 FAIL VM.FUNDING.READY "funding is below threshold"
+
+# doctor_command derives its check ID from the command name it probes.
+set +e
+tool_output="$(
+    bash -c 'source "$1"; doctor_command bash Bash; doctor_command relayer-absent-tool OpenSSH; doctor_finish' _ "$vm" 2>&1
+)"
+status=$?
+set -e
+[[ "$status" -eq 1 ]] || fail "a missing required tool did not block: $tool_output"
+grep -Fq 'PASS VM.TOOL.BASH | bash is available' <<<"$tool_output" || \
+    fail "an installed tool was not reported as available: $tool_output"
+grep -Fq 'FAIL VM.TOOL.RELAYER_ABSENT_TOOL | relayer-absent-tool is missing | remediation: run make relayer-prereqs or install OpenSSH' <<<"$tool_output" || \
+    fail "a missing tool did not produce its derived check ID and remediation: $tool_output"
+
+pipe_output="$(
+    bash -c 'source "$1"; doctor_result WARN VM.L1_ENV.AGE "sum|mary" "reme|diation"' _ "$vm"
+)"
+[[ "$pipe_output" == 'WARN VM.L1_ENV.AGE | sum/mary | remediation: reme/diation' ]] || \
+    fail "a result carrying the field separator was not sanitised: $pipe_output"
+
+set +e
+scope_output="$(bash -c 'source "$1"; doctor_vm bogus-scope' _ "$vm" 2>&1)"
+status=$?
+set -e
+[[ "$status" -eq 1 ]] || fail "an unsupported doctor scope returned $status, expected 1: $scope_output"
+grep -Fq "unsupported Relayer doctor scope 'bogus-scope'" <<<"$scope_output" || \
+    fail "an unsupported doctor scope did not name the rejected scope: $scope_output"
 
 safe_active_exited="$TMP_DIR/safe-active-exited.json"
 cat >"$safe_active_exited" <<'EOF'
@@ -132,10 +144,14 @@ run_state_case() {
                 case "$STATE_CASE:$*" in
                     ready-valid:*"/usr/bin/test -f /var/backups/relayerd/relayer.db.bak"*) return 0 ;;
                     ready-valid:*"/usr/local/bin/relayer-restore --check-db /var/backups/relayerd/relayer.db.bak"*) return 0 ;;
+                    ready-corrupt-backup:*"/usr/bin/test -f /var/backups/relayerd/relayer.db.bak"*) return 0 ;;
+                    ready-corrupt-backup:*"/usr/local/bin/relayer-restore --check-db /var/backups/relayerd/relayer.db.bak"*) return 1 ;;
                     ready-no-backup:*"/usr/bin/test -f /var/backups/relayerd/relayer.db.bak"*) return 1 ;;
                     active-not-ready:*"/usr/bin/systemctl is-active --quiet relayerd.service"*) return 0 ;;
                     stopped-live:*"/usr/bin/systemctl is-active --quiet relayerd.service"*) return 1 ;;
                     stopped-live:*"/usr/local/bin/relayer-restore --check-db /var/lib/relayerd/relayer.db"*) return 0 ;;
+                    offline-corrupt:*"/usr/bin/systemctl is-active --quiet relayerd.service"*) return 1 ;;
+                    offline-corrupt:*"/usr/local/bin/relayer-restore --check-db /var/lib/relayerd/relayer.db"*) return 1 ;;
                     *) return 1 ;;
                 esac
             }
@@ -155,9 +171,11 @@ run_state_case() {
 }
 
 run_state_case ready-valid true PASS "the daemon-opened bbolt state has a structurally valid rolling hot backup"
+run_state_case ready-corrupt-backup true FAIL "the rolling bbolt hot backup failed its read-only integrity check"
 run_state_case ready-no-backup true WARN "relayerd opened the live database but its first rolling hot backup is not available yet"
 run_state_case active-not-ready false WARN "the active daemon holds the live bbolt lock and is not ready enough to verify its rolling backup"
 run_state_case stopped-live false PASS "offline bbolt state passes a read-only integrity check"
+run_state_case offline-corrupt false FAIL "bbolt state integrity check failed"
 
 password_result="$(
     printf '\n' |
@@ -209,5 +227,82 @@ RELAYER_VERSION=not-a-release "$vm" doctor >/dev/null 2>&1
 status=$?
 set -e
 [[ "$status" -eq 2 ]] || fail "invalid version for $vm returned $status, expected usage status 2"
+
+# The suite can only call the doctor functions it can source, so pin the whole
+# diagnostic surface: a renamed, deleted, or untested check ID fails here.
+expected_ids=(
+    VM.ACCESS.SSH VM.ACCESS.SUDO VM.BACKUPS.INTEGRITY VM.CONFIG.BOOTSTRAP
+    VM.FUNDING.READY VM.INSTALLATION.STATE VM.INVENTORY.MATCH VM.KEYS.INTEGRITY
+    VM.L1_ENV.AGE VM.L1_ENV.METADATA VM.L1_ENV.PRESENT VM.LISTENERS.LOOPBACK
+    VM.MANAGER.TOPOLOGY VM.PEERS.BOOTSTRAP VM.PEERS.VISIBLE VM.PREFLIGHT.REMOTE
+    VM.RELEASE.AVAILABLE VM.RELEASE.INTEGRITY VM.RPC.HEALTH VM.RUNTIME.READY
+    VM.SAFE.CONSOLE_ENV VM.SAFE.DISCOVERY VM.STATE.INTEGRITY VM.TARGET.ARCHITECTURE
+    VM.TARGET.CAPACITY VM.TERRAFORM.STATE VM.TOOL.TERRAFORM_VERSION
+)
+for id in "${expected_ids[@]}"; do
+    grep -Fq "$id" "$vm" || fail "$vm no longer emits the $id diagnostic"
+done
+for id in $(grep -oE 'VM\.[A-Z0-9_]+\.[A-Z0-9_]+' "$vm" | sort -u); do
+    [[ " ${expected_ids[*]} " == *" $id "* ]] || fail "$vm emits $id, which this suite does not cover"
+done
+for tool in terraform ansible ansible-playbook ansible-inventory jq python3 curl ssh; do
+    grep -Fq "doctor_command $tool " "$vm" || fail "the doctor no longer requires $tool"
+done
+
+# ssh_target must default to StrictHostKeyChecking=no (matching ansible.cfg and
+# the Terraform inventories) and honour RELAYER_SSH_HOST_KEY_CHECKING as an
+# opt-in override, for both remote-access actions that build an ssh argv.
+ssh_stub_dir="$TMP_DIR/ssh-stub"
+mkdir -p "$ssh_stub_dir"
+cat >"$ssh_stub_dir/ssh" <<'EOF'
+#!/bin/sh
+printf '%s ' "$@"
+printf '\n'
+EOF
+chmod +x "$ssh_stub_dir/ssh"
+
+ssh_inventory_summary="$TMP_DIR/ssh-inventory-summary.json"
+cat >"$ssh_inventory_summary" <<'EOF'
+{"rpc":[{"user":"ubuntu","port":22,"privateKeyFile":""}]}
+EOF
+
+ssh_argv="$(
+    PATH="$ssh_stub_dir:$PATH" bash -c '
+        source "$1"
+        ACTION=logs
+        TARGET_HOST=rpc0.example.test
+        INVENTORY_SUMMARY="$2"
+        ssh_target
+    ' _ "$vm" "$ssh_inventory_summary"
+)"
+grep -Fq -- '-o StrictHostKeyChecking=no' <<<"$ssh_argv" || \
+    fail "ssh_target did not default RELAYER_SSH_HOST_KEY_CHECKING to no: $ssh_argv"
+
+ssh_argv_override="$(
+    PATH="$ssh_stub_dir:$PATH" RELAYER_SSH_HOST_KEY_CHECKING=accept-new bash -c '
+        source "$1"
+        ACTION=logs
+        TARGET_HOST=rpc0.example.test
+        INVENTORY_SUMMARY="$2"
+        ssh_target
+    ' _ "$vm" "$ssh_inventory_summary"
+)"
+grep -Fq -- '-o StrictHostKeyChecking=accept-new' <<<"$ssh_argv_override" || \
+    fail "ssh_target did not honour RELAYER_SSH_HOST_KEY_CHECKING=accept-new as an override: $ssh_argv_override"
+
+# run_install's reapply-backup guard, `jq -r '.keystoreExists and .releaseMetadataExists'`,
+# must fail closed (report "false") on partial discovery state so a fresh or
+# half-populated install never triggers an extra backup playbook run.
+backup_guard='.keystoreExists and .releaseMetadataExists'
+[[ "$(jq -r "$backup_guard" <<<'{"keystoreExists": true, "releaseMetadataExists": true}')" == true ]] || \
+    fail "the reapply-backup guard did not fire when both keystore and release metadata exist"
+[[ "$(jq -r "$backup_guard" <<<'{"keystoreExists": true}')" == false ]] || \
+    fail "the reapply-backup guard did not fail closed when releaseMetadataExists is missing"
+[[ "$(jq -r "$backup_guard" <<<'{"releaseMetadataExists": true}')" == false ]] || \
+    fail "the reapply-backup guard did not fail closed when keystoreExists is missing"
+[[ "$(jq -r "$backup_guard" <<<'{"keystoreExists": true, "releaseMetadataExists": false}')" == false ]] || \
+    fail "the reapply-backup guard did not fail closed when releaseMetadataExists is false"
+[[ "$(jq -r "$backup_guard" <<<'{}')" == false ]] || \
+    fail "the reapply-backup guard did not fail closed on a discovery file missing both fields"
 
 echo "Relayer doctor fixtures passed"

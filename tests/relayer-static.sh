@@ -51,6 +51,24 @@ fi
 if grep -R -E '_port:[[:space:]]*"?(8081|3080)"?([[:space:]]|#|$)' ansible/roles --include='*.yml' | grep -v 'ansible/roles/acp_relayer/' >/dev/null; then
     fail "another Ansible role claims Relayer port 8081 or console port 3080"
 fi
+
+# The check above only knows today's two Relayer ports; this one holds for any
+# port acp_relayer picks, which is how relayerd ended up on Safe's nginx port.
+role_port_declarations="$(grep -rhE '^[a-z_]+_port:[[:space:]]*[0-9]+' ansible/roles --include='*.yml')"
+for relayer_port in $(grep -hE '^acp_relayer_[a-z_]+_port:[[:space:]]*[0-9]+' ansible/roles/acp_relayer/defaults/main.yml | awk '{print $2}'); do
+    other_claims="$(awk -v port="$relayer_port" '$2 == port && $1 !~ /^acp_relayer_/ {sub(/:$/, "", $1); print $1}' <<<"$role_port_declarations" | tr '\n' ' ')"
+    [[ -z "$other_claims" ]] || fail "another Ansible role already claims Relayer host port $relayer_port: ${other_claims% }"
+done
+# Two roles on one host cannot share a port. Every collision exempted here
+# predates the Relayer: 8080 is Safe's nginx redirect against the ICM Relayer
+# API and 8001 Safe's Transaction Service against Graph Node's WebSocket, both
+# on rpc[0]; 4000 is Blockscout against eRPC; 3000 and 9090 are Safe UI and the
+# ICM Relayer metrics against the monitoring host. A new one must fail here.
+known_shared_role_ports=' 3000 4000 8001 8080 9090 '
+for shared_port in $(awk '{print $2}' <<<"$role_port_declarations" | sort | uniq -d); do
+    [[ "$known_shared_role_ports" == *" $shared_port "* ]] || \
+        fail "two Ansible roles declare host port $shared_port; give one of them a free port"
+done
 if ! grep -Fq -- '--api-listen-addr 127.0.0.1:8081' scripts/l1/relayer.sh; then
     fail "relayer.sh does not pin the daemon API to loopback port 8081"
 fi
@@ -96,5 +114,109 @@ require_file_text scripts/l1/relayer.sh 'ava-labs/validator-lifecycle-relayer'
 if grep -Fq 'k8s-relayer' Makefile || [[ -e kubernetes/scripts/relayer.sh ]] || [[ -e kubernetes/helm/relayerd ]]; then
     fail "Terraform/Ansible PR contains Kubernetes Relayer entry points"
 fi
+
+# Extracts the body of a single Ansible task ("- name: ..." to the next task).
+task_block() {
+    local file="$1" name="$2"
+    awk -v name="- name: $name" '
+        $0 == name { found=1; next }
+        found && /^- name: / { exit }
+        found { print }
+    ' "$file"
+}
+
+# Extracts the body of a bash function ("func() {" to its closing brace line).
+function_body() {
+    local file="$1" func="$2"
+    awk -v marker="${func}() {" '
+        $0 == marker { found=1 }
+        found { print; if ($0 == "}") exit }
+    ' "$file"
+}
+
+# A host that already runs Docker (e.g. via docker-ce for Safe) must never have
+# its Docker package touched; the guard is a stat check gating the apt install.
+acp_main="ansible/roles/acp_relayer/tasks/main.yml"
+docker_stat_line="$(grep -Fn -- '- name: Check for an existing Docker installation' "$acp_main" | cut -d: -f1)"
+docker_apt_line="$(grep -Fn -- '- name: Install Docker for the systemd-managed console container' "$acp_main" | cut -d: -f1)"
+docker_enable_line="$(grep -Fn -- '- name: Enable Docker' "$acp_main" | cut -d: -f1)"
+[[ -n "$docker_stat_line" && -n "$docker_apt_line" && -n "$docker_enable_line" ]] || \
+    fail "$acp_main is missing one of the Docker install-guard tasks"
+[[ "$docker_stat_line" -lt "$docker_apt_line" && "$docker_apt_line" -lt "$docker_enable_line" ]] || \
+    fail "$acp_main does not order the Docker stat/apt/enable tasks stat -> apt -> enable"
+
+docker_stat_block="$(task_block "$acp_main" 'Check for an existing Docker installation')"
+grep -Fq 'ansible.builtin.stat' <<<"$docker_stat_block" || fail "Docker stat task no longer uses ansible.builtin.stat"
+grep -Fq 'path: /usr/bin/docker' <<<"$docker_stat_block" || fail "Docker stat task no longer checks /usr/bin/docker"
+grep -Fq 'register: acp_relayer_docker_stat' <<<"$docker_stat_block" || fail "Docker stat task no longer registers acp_relayer_docker_stat"
+grep -Fq 'when:' <<<"$docker_stat_block" && fail "Docker stat task must be unconditional"
+
+docker_apt_block="$(task_block "$acp_main" 'Install Docker for the systemd-managed console container')"
+grep -Fq 'ansible.builtin.apt' <<<"$docker_apt_block" || fail "Docker install task no longer uses ansible.builtin.apt"
+grep -Eq '^[[:space:]]*name:[[:space:]]*docker\.io[[:space:]]*$' <<<"$docker_apt_block" || \
+    fail "Docker install task no longer installs the scalar package docker.io"
+grep -Eq 'docker-ce|containerd\.io' <<<"$docker_apt_block" && \
+    fail "Docker install task installs docker-ce/containerd.io, which would disrupt Safe's containers"
+grep -Fq 'when: not acp_relayer_docker_stat.stat.exists' <<<"$docker_apt_block" || \
+    fail "Docker install task no longer skips hosts with an existing Docker installation"
+
+docker_enable_block="$(task_block "$acp_main" 'Enable Docker')"
+grep -Fq 'ansible.builtin.systemd' <<<"$docker_enable_block" || fail "Enable Docker task no longer uses ansible.builtin.systemd"
+grep -Fq 'name: docker' <<<"$docker_enable_block" || fail "Enable Docker task no longer targets the docker unit"
+grep -q 'when:' <<<"$docker_enable_block" && \
+    fail "Enable Docker task must run unconditionally regardless of which package provided docker.service"
+
+# SSH host-key checking must stay off by default (matching ansible.cfg and the
+# Terraform inventories); RELAYER_SSH_HOST_KEY_CHECKING is an opt-in override.
+[[ "$(grep -Fc 'RELAYER_SSH_HOST_KEY_CHECKING:-no' scripts/l1/relayer.sh)" -eq 1 ]] || \
+    fail "relayer.sh's default host-key-checking value changed away from 'no'"
+[[ "$(grep -Fc ':-accept-new' scripts/l1/relayer.sh)" -eq 0 ]] || \
+    fail "relayer.sh defaults SSH host-key checking to accept-new instead of matching ansible.cfg's no"
+[[ "$(grep -Fc 'accept-new | yes | no | ask' scripts/l1/relayer.sh)" -eq 1 ]] || \
+    fail "relayer.sh's RELAYER_SSH_HOST_KEY_CHECKING whitelist no longer accepts accept-new/yes/ask as opt-in values"
+
+# run_install must re-back-up existing Relayer state before reapplying over it,
+# guarded by the keystore/release predicate, and only once, before prepare_release.
+run_install_body="$(function_body scripts/l1/relayer.sh run_install)"
+[[ -n "$run_install_body" ]] || fail "run_install function body could not be located in scripts/l1/relayer.sh"
+[[ "$(grep -Fc "jq -r '.keystoreExists and .releaseMetadataExists'" <<<"$run_install_body")" -eq 1 ]] || \
+    fail "run_install no longer guards the reapply backup with the keystore/release predicate"
+[[ "$(grep -Fc 'run_manage_playbook backup' <<<"$run_install_body")" -eq 1 ]] || \
+    fail "run_install must call run_manage_playbook backup exactly once when reapplying over existing state"
+console_password_line="$(grep -Fn 'read_console_password console_password' <<<"$run_install_body" | head -1 | cut -d: -f1)"
+keystore_check_line="$(grep -Fn "jq -r '.keystoreExists and .releaseMetadataExists'" <<<"$run_install_body" | cut -d: -f1)"
+backup_call_line="$(grep -Fn 'run_manage_playbook backup' <<<"$run_install_body" | cut -d: -f1)"
+prepare_release_line="$(grep -Fn 'prepare_release true' <<<"$run_install_body" | cut -d: -f1)"
+[[ -n "$console_password_line" && -n "$keystore_check_line" && -n "$backup_call_line" && -n "$prepare_release_line" ]] || \
+    fail "run_install is missing one of the console-password/backup-guard/prepare-release markers"
+[[ "$console_password_line" -lt "$keystore_check_line" && "$keystore_check_line" -lt "$backup_call_line" && \
+    "$backup_call_line" -lt "$prepare_release_line" ]] || \
+    fail "run_install no longer backs up existing state after the console password prompt but before prepare_release"
+
+# The WalletConnect project ID default must stay non-degenerate, or the
+# freshness-gate greps in ansible/roles/safe/tasks/main.yml become vacuous.
+safe_defaults="ansible/roles/safe/defaults/main.yml"
+wc_default="$(grep -E '^safe_walletconnect_project_id:' "$safe_defaults" | \
+    sed -E 's/^safe_walletconnect_project_id:[[:space:]]*"?([0-9a-f]*)"?.*/\1/')"
+[[ "$wc_default" =~ ^[0-9a-f]{32}$ ]] || \
+    fail "$safe_defaults's safe_walletconnect_project_id default is not exactly 32 lowercase hex characters"
+wc_first_char="${wc_default:0:1}"
+[[ -n "${wc_default//$wc_first_char/}" ]] || \
+    fail "$safe_defaults's safe_walletconnect_project_id default is a degenerate all-$wc_first_char run"
+
+# The anchored form concatenates the CSS declaration with the raw Jinja value;
+# real minified bundles never emit it verbatim, so it must not be reintroduced
+# without a captured real emitted bundle proving otherwise.
+if grep -Fq 'projectId:"{{ safe_walletconnect_project_id }}"' ansible/roles/safe/tasks/main.yml; then
+    fail "ansible/roles/safe/tasks/main.yml reintroduced the anchored projectId literal"
+fi
+
+# Re-assert still-live invariants from earlier fixes so a later edit can't undo them.
+require_file_text scripts/l1/relayer.sh 'sub(/^\*/, "", file)'
+require_file_text scripts/l1/relayer.sh "jq -e '(.json // (.content | fromjson)) | .fundedFloat == true and .fundedGas == true'"
+require_file_text scripts/l1/relayer.sh 'RELAYER_LISTENERS_SCANNED'
+require_file_text ansible/roles/acp_relayer/templates/relayerd.service.j2 'StartLimitIntervalSec=0'
+require_file_text ansible/roles/acp_relayer/templates/relayerd.service.j2 'Restart=always'
+require_file_text ansible/roles/acp_relayer/templates/relayer-console.service.j2 'Wants=relayerd.service'
 
 echo "Relayer static acceptance checks passed"
