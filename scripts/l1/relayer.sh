@@ -168,7 +168,8 @@ doctor_vm() {
     doctor_result PASS VM.L1_ENV.PRESENT "generated l1.env is present" none
     local env_age now modified
     now="$(date +%s)"
-    if modified="$(stat -f %m "$L1_ENV" 2>/dev/null || stat -c %Y "$L1_ENV" 2>/dev/null)"; then
+    if modified="$(stat -c %Y "$L1_ENV" 2>/dev/null || stat -f %m "$L1_ENV" 2>/dev/null)" && \
+      [[ "$modified" =~ ^[0-9]+$ ]]; then
       env_age=$(((now - modified) / 86400))
       if ((env_age > 30)); then
         doctor_result WARN VM.L1_ENV.AGE "l1.env is $env_age days old; live state will still be cross-checked" "confirm this checkout is the active Avalanche Deploy workspace"
@@ -210,6 +211,7 @@ doctor_vm() {
     doctor_result PASS VM.TERRAFORM.STATE "exactly one accessible L1 state was found: $CLOUD" none
     if [[ -f "$inventory" ]]; then
       INVENTORY_FILE="$inventory"
+      ensure_work_dir
       if command -v ansible-inventory >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && \
         (discover_infrastructure) >/dev/null 2>&1; then
         doctor_result PASS VM.INVENTORY.MATCH "Terraform RPC/validator outputs match ansible/inventory/${CLOUD}_hosts" none
@@ -384,7 +386,8 @@ doctor_vm() {
       ensure_work_dir
       local funding_status_file="$WORK_DIR/funding-status.txt"
       if "${ansible_prefix[@]}" -m ansible.builtin.uri -a 'url=http://127.0.0.1:8081/keys status_code=200 return_content=true' >"$funding_status_file" 2>/dev/null; then
-        if grep -q 'fundedFloat.*true' "$funding_status_file" && grep -q 'fundedGas.*true' "$funding_status_file"; then
+        if sed '1s/^[^{]*//' "$funding_status_file" | \
+          jq -e '(.json // (.content | fromjson)) | .fundedFloat == true and .fundedGas == true' >/dev/null 2>&1; then
           doctor_result PASS VM.FUNDING.READY "P-Chain float and L1 gas addresses meet daemon funding thresholds" none
         elif [[ "$doctor_scope" == install ]]; then
           doctor_result WARN VM.FUNDING.READY "one or both public relayer funding addresses are below threshold" "complete the install/reapply, then fund the addresses printed by make relayer-status"
@@ -397,7 +400,8 @@ doctor_vm() {
         doctor_result FAIL VM.FUNDING.READY "public funding status could not be read" "repair relayerd readiness and rerun doctor"
       fi
       local listeners_file="$WORK_DIR/listeners.txt"
-      if "${ansible_prefix[@]}" -m ansible.builtin.shell -a "public=\$(ss -ltnH | awk '\$4 ~ /:(8081|3080)$/ {print \$4}' | grep -Ev '^(127\\.0\\.0\\.1|\\[::1\\]):' || true); printf '%s\\n' \"\$public\"" >"$listeners_file" 2>/dev/null; then
+      if "${ansible_prefix[@]}" -m ansible.builtin.shell -a "ss -ltnH >/dev/null 2>&1 || exit 42; ss -ltnH | awk '\$4 ~ /:(8081|3080)$/ {print \$4}' | grep -Ev '^(127\\.0\\.0\\.1|\\[::1\\]):' || true; printf 'RELAYER_LISTENERS_SCANNED\\n'" >"$listeners_file" 2>/dev/null && \
+        grep -Fqx 'RELAYER_LISTENERS_SCANNED' "$listeners_file"; then
         if grep -Eq '(^|[[:space:]])([^[:space:]]+:)?(8081|3080)($|[[:space:]])' "$listeners_file"; then
           doctor_result FAIL VM.LISTENERS.LOOPBACK "a Relayer listener is bound beyond loopback" "set daemon and console listeners to 127.0.0.1 and restart"
         else
@@ -464,11 +468,16 @@ require_command() {
 
 read_console_password() {
   local output_name="$1"
+  local reset_on_empty="${2:-true}"
   local entered_password=""
   local confirmed_password=""
 
   while true; do
-    printf 'Console password (press Enter for none): ' >&2
+    if [[ "$reset_on_empty" == true ]]; then
+      printf 'Console password (press Enter for none): ' >&2
+    else
+      printf 'Console password (press Enter to keep the current console password): ' >&2
+    fi
     if ! IFS= read -r -s entered_password; then
       printf '\n' >&2
       entered_password=""
@@ -821,7 +830,7 @@ verify_release_asset() {
   local expected
   local actual
   asset="$(basename "$archive")"
-  expected="$(awk -v name="$asset" '{file=$2; sub(/^\\*/, "", file); if (file == name) print $1}' "$checksums")"
+  expected="$(awk -v name="$asset" '{file=$2; sub(/^\*/, "", file); if (file == name) print $1}' "$checksums")"
   [[ "$expected" =~ ^[0-9a-fA-F]{64}$ ]] || die "checksums.txt has no SHA256 entry for $asset"
   actual="$(sha256_file "$archive")"
   actual="$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')"
@@ -920,14 +929,16 @@ run_manage_playbook() {
   fi
   jq -n --arg action "$action" --argjson purge "$purge" --arg backup_dir "$backup_dir" \
     '{relayer_manage_action: $action, relayer_purge: $purge, relayer_backup_fetch_dir: $backup_dir}' >"$vars_file"
+  local playbook_status=0
   (
     cd "$ROOT_DIR/ansible"
     ANSIBLE_CONFIG="$ROOT_DIR/ansible/ansible.cfg" \
       ansible-playbook -i "$INVENTORY_FILE" playbooks/l1/manage-relayer.yml -e "@$vars_file"
-  )
+  ) || playbook_status=$?
   if [[ "$action" == backup ]]; then
     find "$backup_dir" -type f \( -name '*.tar.gz' -o -name '*.manifest.json' \) -exec chmod 0600 {} +
   fi
+  return "$playbook_status"
 }
 
 run_install() {
@@ -940,6 +951,8 @@ run_install() {
   local rewritten_config
   local funding_file
   local console_hash_src
+  local console_installed
+  local console_password_reset
   local preserve_keystore
   local safe_enabled
   local safe_address
@@ -958,8 +971,18 @@ run_install() {
     y | Y | yes | YES | Yes) ;;
     *) printf 'Installation cancelled.\n'; return 0 ;;
   esac
-  if ! read_console_password console_password; then
+  console_installed="$(jq -r '.consoleInstalled' "$DISCOVERY_FILE")"
+  console_password_reset=true
+  if [[ "$console_installed" == true && "${RELAYER_CONSOLE_PASSWORD_RESET:-false}" != "true" ]]; then
+    console_password_reset=false
+  fi
+  if ! read_console_password console_password "$console_password_reset"; then
     die "console password entry was interrupted; installation was not started"
+  fi
+
+  if [[ "$(jq -r '.keystoreExists and .releaseMetadataExists' "$DISCOVERY_FILE")" == true ]]; then
+    printf 'Existing Relayer state was found; creating a recovery backup before reapplying.\n'
+    run_manage_playbook backup
   fi
 
   prepare_release true
@@ -1022,6 +1045,7 @@ run_install() {
     --arg console_hash "$console_hash_src" \
     --arg funding "$funding_file" \
     --arg safe_address "$safe_address" \
+    --argjson password_reset "$console_password_reset" \
     --argjson preserve "$preserve_keystore" \
     --argjson safe_enabled "$safe_enabled" \
     '{
@@ -1037,6 +1061,7 @@ run_install() {
       acp_relayer_keystore_password_src: $password,
       acp_relayer_console_session_secret_src: $session,
       acp_relayer_console_password_hash_src: $console_hash,
+      acp_relayer_console_password_reset: $password_reset,
       acp_relayer_funding_src: $funding,
       acp_relayer_preserve_keystore: $preserve,
       acp_relayer_safe_enabled: $safe_enabled,
@@ -1170,13 +1195,24 @@ ssh_target() {
   local port
   local key_file
   local destination
+  local host_key_checking
   local -a args
   user="$(jq -r '.rpc[0].user' "$INVENTORY_SUMMARY")"
   port="$(jq -r '.rpc[0].port' "$INVENTORY_SUMMARY")"
   key_file="$(jq -r '.rpc[0].privateKeyFile' "$INVENTORY_SUMMARY")"
   destination="$TARGET_HOST"
   [[ -n "$user" ]] && destination="$user@$destination"
-  args=(-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -p "$port")
+  # Default matches ansible.cfg host_key_checking = False and the
+  # StrictHostKeyChecking=no that every Terraform-generated inventory emits, so a
+  # rebuilt rpc[0] with a stale known_hosts entry stays reachable here exactly as
+  # it is for every ansible command. Export RELAYER_SSH_HOST_KEY_CHECKING=accept-new
+  # to opt into refusing a changed host key.
+  host_key_checking="${RELAYER_SSH_HOST_KEY_CHECKING:-no}"
+  case "$host_key_checking" in
+    accept-new | yes | no | ask) ;;
+    *) die "RELAYER_SSH_HOST_KEY_CHECKING must be accept-new, yes, no, or ask" ;;
+  esac
+  args=(-o "StrictHostKeyChecking=$host_key_checking" -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -p "$port")
   if [[ -n "$key_file" ]]; then
     key_file="${key_file/#\~/$HOME}"
     args+=(-i "$key_file")

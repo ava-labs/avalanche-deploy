@@ -61,5 +61,8 @@ Thumbs.db
 *.key
 !*.key.pub
 
+# Fetched relayer backups (plaintext keystore password inside)
+backups/
+
 # Helm vendored dependency tarballs (rebuild with: helm dependency build)
 kubernetes/helm/*/charts/
