@@ -39,7 +39,7 @@ safe_ui_digest: "sha256:af16e7b074d3d4f2bc5a4e8fb978afe44a4cfbf7b4a49444b097b4b0
 # Core and MetaMask. This valid-format placeholder keeps injected wallets
 # working without contacting WalletConnect. Override it with a public
 # Reown/WalletConnect Cloud project ID to enable QR/mobile connections.
-safe_walletconnect_project_id: "00000000000000000000000000000000"
+safe_walletconnect_project_id: "deadbeefdeadbeefdeadbeefdeadbeef"
 
 # Database configuration
 safe_txs_db_name: "safe_txs"
