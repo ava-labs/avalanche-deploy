@@ -24,11 +24,14 @@
 
     - name: Create the root-only restore workspace
       ansible.builtin.file:
-        path: "{{ restore_stage }}"
+        path: "{{ item }}"
         state: directory
         owner: root
         group: root
         mode: "0700"
+      loop:
+        - "{{ restore_root }}"
+        - "{{ restore_stage }}"
 
     - name: Upload the selected validated backup
       ansible.builtin.copy:
@@ -66,6 +69,13 @@
           - etc/relayerd
           - var/lib/relayerd
       changed_when: true
+
+    - name: Restrict pre-restore archive permissions
+      ansible.builtin.file:
+        path: "{{ pre_restore_archive }}"
+        owner: root
+        group: root
+        mode: "0600"
 
     - name: Extract selected backup into an isolated staging directory
       ansible.builtin.unarchive:
@@ -226,6 +236,12 @@
             msg: >-
               Restore failed validation or readiness. The pre-restore archive
               {{ pre_restore_archive }} was automatically reapplied.
+
+      always:
+        - name: Remove the staged restore workspace and its credentials
+          ansible.builtin.file:
+            path: "{{ restore_root }}"
+            state: absent
 
     - name: Report restore outcome
       ansible.builtin.debug:
