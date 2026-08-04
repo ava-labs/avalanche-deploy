@@ -1,6 +1,7 @@
 [Unit]
 Description=Avalanche validator-lifecycle relayer console
-Requires=docker.service relayerd.service
+Requires=docker.service
+Wants=relayerd.service
 After=docker.service relayerd.service
 PartOf=relayerd.service
 

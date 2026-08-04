@@ -3,15 +3,16 @@ Description=Avalanche validator-lifecycle relayer daemon
 Documentation=https://github.com/ava-labs/validator-manager-relayer
 After=network-online.target avalanchego.service
 Wants=network-online.target
-StartLimitIntervalSec=300
-StartLimitBurst=5
+# No start rate limit: after a reboot relayerd legitimately fails until
+# avalanchego finishes bootstrapping, and a parked unit never recovers.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User={{ acp_relayer_user }}
 Group={{ acp_relayer_group }}
 ExecStart={{ acp_relayer_binary_path }} --config-file={{ acp_relayer_config_dir }}/config.json
-Restart=on-failure
+Restart=always
 RestartSec=5s
 KillSignal=SIGTERM
 TimeoutStopSec={{ (acp_relayer_acceptance_timeout_seconds | int) + 540 }}s

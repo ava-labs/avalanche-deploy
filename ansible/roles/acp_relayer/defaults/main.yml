@@ -29,6 +29,9 @@ acp_relayer_keystore_src: ""
 acp_relayer_keystore_password_src: ""
 acp_relayer_console_session_secret_src: ""
 acp_relayer_console_password_hash_src: ""
+# An empty acp_relayer_console_password_hash_src keeps whatever console
+# credential is already installed; set this to remove it instead.
+acp_relayer_console_password_reset: false
 acp_relayer_funding_src: ""
 acp_relayer_preserve_keystore: false
 

@@ -62,11 +62,17 @@
     - "{{ acp_relayer_tls_dir }}"
     - "{{ acp_relayer_backup_dir }}"
 
+- name: Check for an existing Docker installation
+  ansible.builtin.stat:
+    path: /usr/bin/docker
+  register: acp_relayer_docker_stat
+
 - name: Install Docker for the systemd-managed console container
   ansible.builtin.apt:
     name: docker.io
     state: present
     update_cache: true
+  when: not acp_relayer_docker_stat.stat.exists
 
 - name: Enable Docker
   ansible.builtin.systemd:
@@ -166,6 +172,11 @@
   when: acp_relayer_operation == 'install'
   notify: Restart relayer console
 
+- name: Inspect the installed console password hash
+  ansible.builtin.stat:
+    path: "{{ acp_relayer_secrets_dir }}/console-password-hash"
+  register: acp_relayer_console_hash_stat
+
 - name: Install the optional console password hash
   ansible.builtin.copy:
     src: "{{ acp_relayer_console_password_hash_src }}"
@@ -179,13 +190,27 @@
     - acp_relayer_console_password_hash_src | length > 0
   notify: Restart relayer console
 
-- name: Disable console password authentication when no hash was generated
+# An empty hash source means the operator pressed Enter at the reapply prompt:
+# keep the installed credential, and only remove it on an explicit reset.
+- name: Keep the installed console password hash when no new one was generated
+  ansible.builtin.slurp:
+    src: "{{ acp_relayer_secrets_dir }}/console-password-hash"
+  register: acp_relayer_console_hash_kept
+  no_log: true
+  when:
+    - acp_relayer_operation == 'install'
+    - acp_relayer_console_password_hash_src | length == 0
+    - not acp_relayer_console_password_reset | bool
+    - acp_relayer_console_hash_stat.stat.exists
+
+- name: Disable console password authentication on an explicit reset
   ansible.builtin.file:
     path: "{{ acp_relayer_secrets_dir }}/console-password-hash"
     state: absent
   when:
     - acp_relayer_operation == 'install'
     - acp_relayer_console_password_hash_src | length == 0
+    - acp_relayer_console_password_reset | bool
   notify: Restart relayer console
 
 - name: Render the root-only console environment
@@ -252,6 +277,16 @@
 
 - name: Install Relayer release artifacts and units
   block:
+    - name: Clear parked service state so a rerun can start the services
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - reset-failed
+          - relayerd.service
+          - relayer-console.service
+      changed_when: false
+      failed_when: false
+
     - name: Gracefully drain services before an upgrade
       ansible.builtin.systemd:
         name: "{{ item }}"
@@ -334,7 +369,7 @@
             journalctl -u relayerd.service -n 40 --no-pager >&2 || true
             exit 42
           fi
-          curl --fail --silent --show-error \
+          curl --fail --silent --show-error --connect-timeout 5 --max-time 10 \
             "http://127.0.0.1:{{ acp_relayer_api_port }}/ready"
       register: acp_relayer_ready
       changed_when: false
