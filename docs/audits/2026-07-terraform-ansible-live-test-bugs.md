@@ -1,10 +1,11 @@
 # Terraform/Ansible Fuji Live-Test Bug Register
 
 This register records defects and documentation ambiguities found while
-following the supported Avalanche Deploy Terraform/Ansible workflow on Fuji.
+following the supported Avalanche Deploy Terraform/Ansible workflow on Fuji,
+plus defects confirmed by review of the code behind that same workflow.
 It is an implementation backlog, not an operator troubleshooting log.
 
-Last updated: 2026-07-23
+Last updated: 2026-08-04
 
 ## Inclusion rules
 
@@ -50,10 +51,34 @@ session as the fix or investigation.
 | AD-TF-013 | FIXED-WORKTREE | Safe access | Empty WalletConnect project ID disabled every wallet connection |
 | AD-TF-014 | OPEN | Safe access | Default self-signed RPC URL causes Safe creation to fail |
 | AD-TF-015 | OPEN | Ownership documentation | ProxyAdmin handoff procedure is omitted |
-| AD-TF-016 | OPEN | Relayer installation | Optional console password is accepted without confirmation |
+| AD-TF-016 | FIXED-WORKTREE | Relayer installation | Optional console password is accepted without confirmation |
 | AD-TF-017 | FIXED-WORKTREE | Relayer networking | Doctor passed although no Primary bootstrap peer was available |
 | AD-TF-018 | FIXED-WORKTREE | Relayer diagnostics | Doctor treated a locked live bbolt database as corrupt |
-| AD-TF-019 | OPEN | Relayer documentation | Runbook omits the Safe-backed validator-operation ceremony |
+| AD-TF-019 | FIXED-WORKTREE | Relayer documentation | Runbook omits the Safe-backed validator-operation ceremony |
+| AD-TF-020 | OPEN | L1 configuration | L1 configuration replaces Primary bootstrap peers and leaves the P-Chain stale |
+| AD-TF-021 | FIXED-WORKTREE | Relayer Safe integration | Safe-backed Relayer install omitted the Safe transaction-service environment |
+| AD-TF-022 | OPEN | Safe access | Safe UI does not display an indexed Safe owned by the connected wallet |
+| AD-TF-023 | OPEN | Relayer diagnostics | Doctor and install abort on a Linux control host |
+| AD-TF-024 | OPEN | Relayer diagnostics | Funding readiness passes on an unfunded P-Chain float |
+| AD-TF-025 | OPEN | Validator Manager | Initialization ignores the repository network knob |
+| AD-TF-026 | OPEN | Relayer installation | Relayer role installs a conflicting Docker package set |
+| AD-TF-027 | OPEN | Setup | Linux prerequisites skip the Terraform repository when Terraform exists |
+| AD-TF-028 | OPEN | Relayer restore | Restore cannot recover a rebuilt or partially installed host |
+| AD-TF-029 | OPEN | Relayer restore | Restore can destroy the only copy of the Relayer identity |
+| AD-TF-030 | OPEN | Validator Manager | Glacier signature fetch treats an unindexed transaction as terminal |
+| AD-TF-031 | OPEN | Relayer backup | Fetched backups land inside the repository worktree |
+| AD-TF-032 | OPEN | Relayer diagnostics | Several verification steps cannot fail |
+| AD-TF-033 | OPEN | Relayer installation | Reapply installs without rollback and can drop the console password |
+| AD-TF-034 | OPEN | Relayer access | Operator tunnels disable host-key verification |
+| AD-TF-035 | OPEN | Validator Manager | Churn settings use the wrong bounds and are applied after the upgrade |
+| AD-TF-036 | OPEN | Validator Manager | Successful initializer work is lost or reported as skipped |
+| AD-TF-037 | OPEN | Validator Manager | P-Chain conversion fetch has no timeout |
+| AD-TF-038 | OPEN | Relayer installation | Installation readiness wait cannot time out |
+| AD-TF-039 | OPEN | Relayer runtime | relayerd and its console stay dead after a reboot |
+| AD-TF-040 | OPEN | Relayer backup | Backup half-completes on an unhealthy or uninstalled host |
+| AD-TF-041 | OPEN | Validator Manager | l1.env persistence fails after the irreversible initialization |
+| AD-TF-042 | OPEN | Relayer installation | Release checksum marker strip is a no-op |
+| AD-TF-043 | OPEN | Safe architecture | Safe Nginx and the ICM Relayer both bind port 8080 |
 
 ## AD-TF-001: macOS setup installs Terraform from a removed Homebrew formula
 
@@ -763,7 +788,7 @@ Required documentation fix:
 
 ## AD-TF-016: optional console password is accepted without confirmation
 
-Status: `OPEN`
+Status: `FIXED-WORKTREE`
 
 Affected path:
 
@@ -794,6 +819,20 @@ Required fix:
   optional console-password choice.
 - Add non-interactive shell tests for empty, matching, mismatched-then-matching,
   and interrupted input.
+
+Worktree fix:
+
+- Read the console password twice and re-prompt until the two entries match.
+- Keep Enter as the explicit no-password choice, and return a non-zero status
+  without a stored value when input is cancelled.
+- Clear both values on every exit path and pass the accepted value to
+  `relayer-setup` through the environment, never argv.
+
+Verification:
+
+`tests/relayer-doctor-fixtures.sh` covers empty, matching,
+mismatched-then-matching, and interrupted input, and asserts that no entered
+value appears in the prompt output.
 
 ## AD-TF-017: doctor passed although relayerd had no Primary Network bootstrap peer
 
@@ -949,7 +988,7 @@ hot backup passed `relayer-restore --check-db` and reported
 
 ## AD-TF-019: runbook omits the Safe-backed validator-operation ceremony
 
-Status: `OPEN`
+Status: `FIXED-WORKTREE`
 
 Affected paths:
 
@@ -997,6 +1036,23 @@ Required documentation fix:
   escape hatch for removals.
 - Link the Avalanche Deploy operator runbook to the exact Relayer console
   runtime section rather than only its technical index.
+
+Worktree fix:
+
+- Add the Safe-backed operation ceremony and the EOA/Safe execution split to
+  `docs/l1/RELAYER.md`.
+- Add an identifier table separating the Safe proposal hash, the executed L1
+  transaction hash, the P-Chain transaction ID, and the validation ID.
+- Document the per-operation inputs, including NodeID and the 144-byte
+  proof-of-possession, and the original registration receipt required to justify
+  an unrelated removal.
+- Document the expected multi-minute stages, restart-safe retry with the same
+  executed hash, and the recovery commands.
+
+Scope note:
+
+The deep link into the Relayer console's runtime section still depends on the
+pending repository transfer tracked by the release follow-up entry.
 
 ## AD-TF-020: L1 configuration replaces Primary Network bootstrap peers and leaves the P-Chain stale
 
@@ -1087,7 +1143,7 @@ Required fix:
 
 ## AD-TF-021: Safe-backed Relayer install omits the Safe transaction-service environment
 
-Status: `OPEN`
+Status: `FIXED-WORKTREE`
 
 Affected paths:
 
@@ -1153,9 +1209,25 @@ Required fix:
   rendered/running console receives the expected non-secret integration
   metadata.
 
+Worktree fix:
+
+- Detect the oneshot unit with `systemctl is-active safe.service` and verify the
+  loopback Transaction Service before enabling the integration.
+- Persist the unit state, the `service_facts` state, the Transaction Service
+  status, and console-environment completeness in the discovery document.
+- Report `VM.SAFE.DISCOVERY` and `VM.SAFE.CONSOLE_ENV`, blocking the standalone
+  doctor when a Safe-owned console lacks the three required keys and warning
+  during an install that will re-render them.
+
+Verification:
+
+`tests/relayer-doctor-fixtures.sh` covers an `active (exited)` Safe unit whose
+`service_facts` state is `stopped`, a healthy Safe service with an incomplete
+console environment in both doctor scopes, and an unhealthy Safe service.
+
 ## AD-TF-022: Safe UI does not display an indexed Safe owned by the connected wallet
 
-Status: `CONFIRMED-LIVE`
+Status: `OPEN`
 
 Affected paths:
 
@@ -1209,6 +1281,536 @@ Required fix:
   existing Safe without requiring a previously exported browser-data file.
 - Document **Watchlist -> Add** as the recovery workaround until automatic
   discovery is reliable.
+
+## AD-TF-023: doctor and install abort on a Linux control host
+
+Status: `OPEN`
+
+Affected path:
+
+- `scripts/l1/relayer.sh`
+
+Observed behavior:
+
+The `l1.env` age check runs `stat -f %m` first and falls back to `stat -c %Y`.
+On GNU coreutils `-f` selects the file-system report, which is printed to stdout
+before the command fails, so the fallback appends the real mtime to that report.
+The resulting multi-line value fails the day arithmetic and `set -u` aborts
+`make relayer-doctor` and `make relayer` before either can do any work.
+
+Impact:
+
+Every supported Linux operator machine loses both the read-only readiness check
+and the installer. macOS is unaffected, and the doctor fixture suite cannot see
+the failure because the fixture path short-circuits before the check.
+
+Required fix:
+
+- Probe the GNU format first and keep the BSD form as the fallback.
+- Require a numeric mtime before computing the age, matching the other numeric
+  guards in the script.
+- Cover the age check with a fixture that exercises the real code path.
+
+## AD-TF-024: funding readiness passes on an unfunded P-Chain float
+
+Status: `OPEN`
+
+Affected path:
+
+- `scripts/l1/relayer.sh`
+
+Observed behavior:
+
+The `VM.FUNDING.READY` check greps the daemon's `/keys` payload for
+`fundedFloat.*true` and `fundedGas.*true`. The Ansible `uri` module returns that
+payload on a single line, so both patterns match
+`"fundedFloat":false,...,"fundedGas":true`. Doctor reports that both funding
+thresholds are met for a Relayer whose P-Chain float cannot pay for a
+transaction.
+
+Required fix:
+
+- Evaluate the payload with `jq -e '.fundedFloat == true and .fundedGas == true'`
+  instead of substring matching.
+- Add a fixture with one funded and one unfunded address.
+
+## AD-TF-025: validator-manager initialization ignores the repository network knob
+
+Status: `OPEN`
+
+Affected paths:
+
+- `Makefile` (`initialize-validator-manager`)
+- `ansible/playbooks/l1/initialize-validator-manager.yml`
+
+Observed behavior:
+
+`NETWORK` is the repository-wide network selector and other targets forward it as
+`-e network=$(NETWORK)`. The initialization target forwards every other variable
+but not `network`, so the playbook always falls back to `fuji`. On Mainnet the
+accepted conversion is read from the real P-Chain and the signature aggregation
+request is then sent to the Fuji route, which returns HTTP 404 and is treated as
+terminal. There is no make-level override.
+
+Required fix:
+
+- Forward `-e "network=$(NETWORK)"` from the target.
+- Cross-check the resolved network against `info.getNetworkID` before any
+  aggregation request.
+
+## AD-TF-026: Relayer role installs a conflicting Docker package set
+
+Status: `OPEN`
+
+Affected paths:
+
+- `ansible/roles/acp_relayer/tasks/main.yml`
+- `ansible/roles/safe/tasks/main.yml`
+
+Observed behavior:
+
+The Relayer role installs `docker.io` while `icm_relayer`, `graph_node`,
+`blockscout`, `faucet`, and `erpc` all install `docker-ce`, `docker-ce-cli`, and
+`containerd.io` on the same `rpc[0]` host. `docker-ce` declares
+`Conflicts: docker.io`, so apt removes `docker-ce` and `containerd.io` to satisfy
+the Relayer task and stops every container already running on that host. The Safe
+role has the same defect.
+
+Required fix:
+
+- Install the same `docker-ce` package set and repository configuration the
+  sibling roles use, or factor the shared setup into one role.
+- Add a static check that no two roles targeting the same host request
+  conflicting container runtimes.
+
+## AD-TF-027: Linux prerequisites skip the Terraform repository when Terraform exists
+
+Status: `OPEN`
+
+Affected path:
+
+- `scripts/shared/relayer-prereqs.sh`
+
+Observed behavior:
+
+The apt path configures the HashiCorp repository only when `terraform` is not
+already on `PATH`, but then always runs `apt-get install -y terraform ansible`.
+An operator whose Terraform comes from tfenv, asdf, or a manually installed
+binary gets `Unable to locate package terraform`, and because the script runs
+under `set -e`, Ansible and the Galaxy collections are never installed.
+
+Required fix:
+
+- Configure the HashiCorp repository whenever the apt path will request
+  `terraform`, or request only the packages that are actually missing.
+- Install Ansible independently of Terraform so one unavailable package cannot
+  stop the rest of the bootstrap.
+
+## AD-TF-028: restore cannot recover a rebuilt or partially installed host
+
+Status: `OPEN`
+
+Affected paths:
+
+- `ansible/playbooks/l1/restore-relayer.yml`
+- `ansible/playbooks/l1/discover-relayer.yml`
+- `scripts/l1/relayer.sh`
+
+Observed behavior:
+
+Restore begins by archiving `etc/relayerd` and `var/lib/relayerd` with a bare
+`tar` that has no existence guard, so the play aborts on a host where either
+directory is absent and nothing later creates them. Discovery additionally
+asserts that keystore, keystore password, funding, and configuration material is
+either all present or all absent, and its failure message tells the operator to
+run the restore that the same assert blocks.
+
+Impact:
+
+Both cases restore exists for fail before any restore work begins: a Terraform
+rebuild or purge of `rpc[0]`, and an interrupted first install.
+
+Required fix:
+
+- Archive only the paths that exist and skip the rollback archive when neither
+  does.
+- Create `/etc/relayerd` and `/var/lib/relayerd` with their intended ownership
+  and modes before the restore copies.
+- Allow incomplete existing state when the run is a restore, keeping the
+  L1-identity checks that prove the archive belongs to this deployment.
+
+## AD-TF-029: restore can destroy the only copy of the Relayer identity
+
+Status: `OPEN`
+
+Affected path:
+
+- `ansible/playbooks/l1/restore-relayer.yml`
+
+Observed behavior:
+
+The rescue path removes `/etc/relayerd` and `/var/lib/relayerd` and only then
+extracts the pre-restore archive over `/`. Between those two tasks the host holds
+no copy of the encrypted keystore, its password, the console session secret, or
+the staker identity outside that single tarball, and a failed extraction skips
+every remaining rescue task. That archive is created by a bare `tar` under the
+root umask, so it is mode 0644 where the sibling backup path explicitly chmods
+0600, and the extracted staging copy of the same secrets under
+`/var/backups/relayerd/restore-*` is never removed. Stopping the services, the
+rollback archive, the staging extract, and the completeness assert all run
+outside the `block`/`rescue` pair, and the play has no `always`.
+
+Required fix:
+
+- Rename existing state aside, verify the extraction, then swap and delete; never
+  remove the only copy first.
+- Create the rollback archive with mode 0600.
+- Remove the restore staging directory in an `always` section.
+- Move the pre-restore tasks inside the protected block so a failure restarts the
+  services it stopped and reports that the host is down.
+
+## AD-TF-030: Glacier signature fetch treats an unindexed transaction as terminal
+
+Status: `OPEN`
+
+Affected paths:
+
+- `tools/initialize-validator-manager/glacier.go`
+- `tools/initialize-validator-manager/glacier_test.go`
+
+Observed behavior:
+
+The bounded retry loop only retries transport errors, HTTP 429, and HTTP 5xx.
+Glacier answers HTTP 404 for a P-Chain transaction it has not indexed yet, and a
+2xx response without a signed message is also treated as final, so running
+`make initialize-validator-manager` shortly after `make create-l1` fails on the
+first of thirty attempts. The repository's earlier initializer retries this case,
+and the current test pins 404 as terminal.
+
+Required fix:
+
+- Retry HTTP 404 and a 2xx response with no signed message; keep 400, 401, and
+  403 terminal.
+- Add a test that succeeds after an initial 404.
+
+## AD-TF-031: fetched backups land inside the repository worktree
+
+Status: `OPEN`
+
+Affected paths:
+
+- `scripts/l1/relayer.sh`
+- `.gitignore`
+
+Observed behavior:
+
+Backups default to `backups/relayer` inside the checkout and `.gitignore` has no
+rule for that directory. The archive contains
+`etc/relayerd/secrets/keystore-password` in plaintext, so one `git add -A` stages
+the Relayer's signing credential. The `chmod 0600` that hardens the fetched
+archive also runs only when the playbook exited zero, and the post-backup service
+restart legitimately fails on an unhealthy host, leaving the archive at the
+operator's default umask.
+
+Required fix:
+
+- Default the fetch destination outside the repository and ignore the directory
+  regardless.
+- Set `umask 0077` before the playbook runs, or apply the mode on both the
+  success and failure paths.
+
+## AD-TF-032: several verification steps cannot fail
+
+Status: `OPEN`
+
+Affected paths:
+
+- `scripts/l1/relayer.sh`
+- `ansible/playbooks/l1/discover-relayer.yml`
+- `ansible/roles/safe/tasks/main.yml`
+- `tests/relayer-doctor-fixtures.sh`
+
+Observed behavior:
+
+- `VM.LISTENERS.LOOPBACK` ends its remote `ss` pipeline with `|| true` and reads
+  empty output as loopback-only, so it passes on a host without `iproute2` while
+  the daemon and console are bound to every interface.
+- Discovery reports `ownerType: eoa` for every result other than a non-empty
+  `eth_getCode`, including a JSON-RPC error and a renounced or zero owner, and
+  doctor then passes the manager-ownership check for an L1 with no authority.
+- The Safe wallet-connector guards grep for the bare project ID, whose default is
+  thirty-two zeros, so any long zero run in the bundle satisfies them.
+- Most doctor fixture cases inject a pre-rendered result line that short-circuits
+  the real doctor, so names such as `unfunded` and `ssh-denial` assert nothing
+  about the checks they describe.
+
+Required fix:
+
+- Emit and require an explicit sentinel from the listener probe.
+- Distinguish a failed ownership query from an EOA owner and reject a zero owner.
+- Anchor the connector guard to the rendered assignment and use a non-degenerate
+  placeholder.
+- Exercise the real check functions against discovery fixtures instead of
+  replaying their output.
+
+## AD-TF-033: reapply installs without rollback and can drop the console password
+
+Status: `OPEN`
+
+Affected paths:
+
+- `scripts/l1/relayer.sh`
+- `ansible/roles/acp_relayer/tasks/main.yml`
+
+Observed behavior:
+
+`make relayer` always passes `operation=install`, but every rollback affordance in
+the role is gated on `upgrade`: the pre-change copies of the runtime material and
+the whole rescue path are skipped. A reapply over an existing installation can
+therefore replace the daemon binary and overwrite `config.json` with no backup and
+no rollback. The reapply password prompt has the same shape problem: pressing
+Enter means "no console password", so the role deletes `console-password-hash` and
+drops the hash from `console.env`, silently leaving the validator-lifecycle
+console unauthenticated.
+
+Required fix:
+
+- Take the pre-change copies and enable the rescue path for a reapply over an
+  existing installation, not only for an explicit upgrade.
+- On a reapply, treat empty input as keeping the current console password and
+  require an explicit choice to remove it.
+
+## AD-TF-034: operator tunnels disable host-key verification
+
+Status: `OPEN`
+
+Affected path:
+
+- `scripts/l1/relayer.sh`
+
+Observed behavior:
+
+The console/RPC/Safe tunnel and `relayer-logs` both pass
+`-o StrictHostKeyChecking=no`, which silently accepts a changed host key rather
+than only an unknown one. Those forwarded ports carry the validator-lifecycle
+console, the L1 RPC, and the Safe UI, and a stale inventory after a cloud IP
+reassignment is the realistic case.
+
+Required fix:
+
+- Use `-o StrictHostKeyChecking=accept-new` and let a changed key fail.
+- State the expected remediation when the recorded key no longer matches.
+
+## AD-TF-035: churn settings use the wrong bounds and are applied after the upgrade
+
+Status: `OPEN`
+
+Affected path:
+
+- `tools/initialize-validator-manager/main.go`
+
+Observed behavior:
+
+The maximum churn percentage is accepted up to 100 and the churn period is
+unbounded, while the contract rejects zero and anything above its churn
+percentage limit of 20. Settings are initialized after the proxy upgrade, so an
+out-of-range value reverts with the proxy already upgraded and the implementation
+uninitialized.
+
+Required fix:
+
+- Validate both settings against the contract limits before sending any
+  transaction.
+- State in the failure that the proxy upgrade already succeeded and how to
+  resume.
+
+## AD-TF-036: successful initializer work is lost or reported as skipped
+
+Status: `OPEN`
+
+Affected path:
+
+- `tools/initialize-validator-manager/main.go`
+
+Observed behavior:
+
+On any failure after the first step the partially populated result is discarded
+and a fresh unsuccessful document is emitted, so the addresses just deployed never
+reach the operator and the `--validator-messages-library` and
+`--validator-manager-implementation` resume flags have no input. The
+human-readable fallback prints are suppressed because the playbook always passes
+`--json`. Separately, the `cast send` helper discards its JSON decode error and
+returns an empty hash, so any Foundry warning on the stream makes the playbook
+summary report a skipped settings transaction for a run that sent it.
+
+Required fix:
+
+- Emit the partial result with every address discovered so far on failure.
+- Return the decode error and extract the JSON object from warning-prefixed
+  `cast` output, as the deployment path already does.
+
+## AD-TF-037: P-Chain conversion fetch has no timeout
+
+Status: `OPEN`
+
+Affected paths:
+
+- `tools/initialize-validator-manager/conversion.go`
+- `tools/initialize-validator-manager/main.go`
+- `ansible/playbooks/l1/initialize-validator-manager.yml`
+
+Observed behavior:
+
+The conversion lookup uses avalanchego's P-Chain client on the default HTTP
+client, which has no timeout, and is called with a bare background context. A
+bootstrapping node that completes the TCP handshake but never answers blocks the
+tool indefinitely, and the wrapping Ansible task sets no timeout either. Every
+other HTTP path in the tool bounds itself.
+
+Required fix:
+
+- Bound the conversion lookup with a context deadline and a client timeout.
+- Give the Ansible task a timeout and report which endpoint stalled.
+
+## AD-TF-038: installation readiness wait cannot time out
+
+Status: `OPEN`
+
+Affected path:
+
+- `ansible/roles/acp_relayer/tasks/main.yml`
+
+Observed behavior:
+
+The readiness probe curls the daemon without `--max-time`, and the terminal
+failure escape checks `systemctl is-failed`, which is false for a daemon that is
+running but hung. A daemon that accepts the connection and never answers blocks
+`make relayer` instead of consuming a retry and reaching the intended failure.
+
+Required fix:
+
+- Give the probe an explicit `--max-time` shorter than the retry delay.
+- Treat a running but unresponsive daemon as a consumed retry and fail with
+  recent service logs once the retries are exhausted.
+
+## AD-TF-039: relayerd and its console stay dead after a reboot
+
+Status: `OPEN`
+
+Affected paths:
+
+- `ansible/roles/acp_relayer/templates/relayerd.service.j2`
+- `ansible/roles/acp_relayer/templates/relayer-console.service.j2`
+- `ansible/roles/acp_relayer/tasks/main.yml`
+
+Observed behavior:
+
+`StartLimitBurst=5` with `RestartSec=5s` tolerates about twenty-five seconds of
+restarts, far less than an AvalancheGo bootstrap after a reboot. Systemd parks
+`relayerd` in the failed state, and because `relayer-console` declares
+`Requires=relayerd.service` the console is stopped as a dependency. A dependency
+stop is not a failure, so the console's own `Restart=on-failure` never fires and
+both units stay down until an operator intervenes.
+
+Required fix:
+
+- Disable the start-rate limit and restart the daemon unconditionally, matching
+  the AvalancheGo unit.
+- Make the console want, not require, the daemon.
+- Reset the failed state before the reapply drain.
+
+## AD-TF-040: backup half-completes on an unhealthy or uninstalled host
+
+Status: `OPEN`
+
+Affected path:
+
+- `ansible/playbooks/l1/manage-relayer.yml`
+
+Observed behavior:
+
+The backup `always` section restarts the daemon, then the console, then reports
+the archive path. Ansible skips the rest of an `always` section after a failure
+inside it, so the common case of backing up a crash-looping host leaves the
+console stopped and never prints the archive it just created. Backup also has no
+installed-guard, so `make relayer-backup` or `make relayer-upgrade` against a
+never-installed or purged host fails with a raw ownership error.
+
+Required fix:
+
+- Make each restart and the path report independently non-fatal so the section
+  always completes.
+- Assert that the workload is installed before starting a backup and name the
+  install command in the failure.
+
+## AD-TF-041: l1.env persistence fails after the irreversible initialization
+
+Status: `OPEN`
+
+Affected path:
+
+- `ansible/playbooks/l1/initialize-validator-manager.yml`
+
+Observed behavior:
+
+The two tasks that record the manager addresses in `l1.env` use `lineinfile` with
+`create: false`, which fails when the destination does not exist. They run after
+the on-chain initialization, so an L1 created outside this repository, for example
+with avalanche-cli, gets a failed play for a fully successful and unrepeatable
+deployment.
+
+Required fix:
+
+- Create the file when it is absent, or skip persistence and print the values to
+  record.
+- Keep the on-chain result reported as successful independently of local
+  bookkeeping.
+
+## AD-TF-042: release checksum marker strip is a no-op
+
+Status: `OPEN`
+
+Affected path:
+
+- `scripts/l1/relayer.sh`
+
+Observed behavior:
+
+The awk that reads `checksums.txt` strips the binary-mode marker with
+`sub(/^\\*/, "", file)`. In an extended regular expression that pattern means zero
+or more literal backslashes, matches the empty string, and removes nothing, so a
+binary-mode checksum file yields an empty expected hash and every install or
+upgrade stops at the missing-entry error. The published release asset does not
+exist yet, so the failure is latent.
+
+Required fix:
+
+- Strip the marker with `sub(/^\*/, "", file)`.
+- Add a fixture for both text-mode and binary-mode checksum files.
+
+## AD-TF-043: Safe Nginx and the ICM Relayer both bind port 8080
+
+Status: `OPEN`
+
+Affected paths:
+
+- `ansible/roles/safe/defaults/main.yml`
+- `ansible/roles/icm_relayer/defaults/main.yml`
+- `tests/relayer-static.sh`
+
+Observed behavior:
+
+`safe_http_port` and `icm_relayer_api_port` both default to 8080 on `rpc[0]`, and
+the ICM Relayer container runs with host networking. Running `make icm-relayer`
+and then `make safe` leaves Nginx logging `bind() ... Address already in use`
+while the play still reports success. Moving the Relayer daemon API off 8080
+avoided a third listener but did not remove the existing collision.
+
+Required fix:
+
+- Give the two components distinct default host ports on a shared host.
+- Extend the static port check to fail on any duplicate host port across roles
+  that target the same group.
 
 ## Release follow-up: replace the transfer sentinel with the tested production release
 
