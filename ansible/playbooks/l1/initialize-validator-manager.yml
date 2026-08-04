@@ -267,7 +267,7 @@
         path: "{{ playbook_dir }}/../../../l1.env"
         regexp: '^VALIDATOR_MANAGER_PROXY='
         line: "VALIDATOR_MANAGER_PROXY={{ vm_output.proxy }}"
-        create: false
+        create: true
         mode: '0600'
       when:
         - not preflight_only | bool
@@ -280,7 +280,7 @@
         path: "{{ playbook_dir }}/../../../l1.env"
         regexp: '^POA_MANAGER='
         line: "POA_MANAGER={{ vm_output.poa_manager }}"
-        create: false
+        create: true
         mode: '0600'
       when:
         - not preflight_only | bool

@@ -91,29 +91,38 @@ func fetchGlacierSignature(
 				if err := json.Unmarshal(responseBody, &result); err != nil {
 					return nil, fmt.Errorf("decode Glacier signature response: %w", err)
 				}
-				if strings.TrimSpace(result.SignedMessage) == "" {
-					return nil, fmt.Errorf("Glacier signature response did not include signedMessage")
+				if strings.TrimSpace(result.SignedMessage) != "" {
+					signedMessage, err := hex.DecodeString(strings.TrimPrefix(result.SignedMessage, "0x"))
+					if err != nil {
+						return nil, fmt.Errorf("decode Glacier signedMessage: %w", err)
+					}
+					return signedMessage, nil
 				}
-				signedMessage, err := hex.DecodeString(strings.TrimPrefix(result.SignedMessage, "0x"))
-				if err != nil {
-					return nil, fmt.Errorf("decode Glacier signedMessage: %w", err)
+				// Glacier acknowledges the request before aggregation finishes, so
+				// an empty signedMessage means "not ready yet": keep waiting inside
+				// the retry budget instead of failing the deployment.
+				lastErr = fmt.Errorf("Glacier signature response did not include signedMessage")
+			} else {
+				responseSummary := strings.TrimSpace(string(responseBody))
+				if len(responseSummary) > 512 {
+					responseSummary = responseSummary[:512] + "..."
 				}
-				return signedMessage, nil
-			}
+				statusErr := fmt.Errorf("Glacier signature request returned HTTP %d", resp.StatusCode)
+				if responseSummary != "" {
+					statusErr = fmt.Errorf("%w: %s", statusErr, responseSummary)
+				}
 
-			responseSummary := strings.TrimSpace(string(responseBody))
-			if len(responseSummary) > 512 {
-				responseSummary = responseSummary[:512] + "..."
+				// 404 is what Glacier serves for a conversion transaction it has not
+				// indexed yet, which is the normal state for the first minutes after
+				// the P-Chain accepts it. 400/401/403 stay terminal because waiting
+				// never fixes a malformed request or a bad API key.
+				if resp.StatusCode != http.StatusNotFound &&
+					resp.StatusCode != http.StatusTooManyRequests &&
+					resp.StatusCode < http.StatusInternalServerError {
+					return nil, statusErr
+				}
+				lastErr = statusErr
 			}
-			statusErr := fmt.Errorf("Glacier signature request returned HTTP %d", resp.StatusCode)
-			if responseSummary != "" {
-				statusErr = fmt.Errorf("%w: %s", statusErr, responseSummary)
-			}
-
-			if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode < http.StatusInternalServerError {
-				return nil, statusErr
-			}
-			lastErr = statusErr
 		}
 
 		if attempt == maxAttempts {

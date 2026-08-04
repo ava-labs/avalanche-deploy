@@ -124,7 +124,6 @@ func TestFetchGlacierSignatureDoesNotRetryTerminal4xx(t *testing.T) {
 		http.StatusBadRequest,
 		http.StatusUnauthorized,
 		http.StatusForbidden,
-		http.StatusNotFound,
 	} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			var requests atomic.Int32
@@ -184,5 +183,70 @@ func TestFetchGlacierSignatureRetriesNetworkFailure(t *testing.T) {
 	}
 	if requests.Load() != 2 {
 		t.Fatalf("requests = %d, want 2", requests.Load())
+	}
+}
+
+func TestFetchGlacierSignatureRetriesUntilConversionIsIndexed(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		switch attempt := requests.Add(1); attempt {
+		case 1:
+			// Glacier has not indexed the accepted conversion transaction yet.
+			http.Error(w, "not found", http.StatusNotFound)
+		case 2:
+			// Indexed, but aggregation has not produced a signature yet.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"signedMessage":"05"}`))
+		}
+	}))
+	defer server.Close()
+
+	got, err := fetchGlacierSignature(
+		context.Background(),
+		server.Client(),
+		server.URL,
+		"fuji",
+		"tx",
+		"key",
+		5,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("fetchGlacierSignature returned error: %v", err)
+	}
+	if !bytes.Equal(got, []byte{5}) {
+		t.Fatalf("signed message = %x, want 05", got)
+	}
+	if requests.Load() != 3 {
+		t.Fatalf("requests = %d, want 3", requests.Load())
+	}
+}
+
+func TestFetchGlacierSignatureStopsAfterMaxAttempts(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	_, err := fetchGlacierSignature(
+		context.Background(),
+		server.Client(),
+		server.URL,
+		"fuji",
+		"tx",
+		"key",
+		3,
+		0,
+	)
+	if err == nil || !strings.Contains(err.Error(), "after 3 attempts") {
+		t.Fatalf("got error %v, want an exhausted retry budget", err)
+	}
+	if requests.Load() != 3 {
+		t.Fatalf("requests = %d, want 3", requests.Load())
 	}
 }

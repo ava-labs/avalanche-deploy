@@ -285,6 +285,7 @@ initialize-validator-manager:
 		-e "conversion_tx=$(CONVERSION_TX)" \
 		-e "proxy_address=$(PROXY_ADDRESS)" \
 		-e "evm_chain_id=$(EVM_CHAIN_ID)" \
+		-e "network=$(NETWORK)" \
 		$(if $(MANAGER_TYPE),-e "manager_type=$(MANAGER_TYPE)",) \
 		$(if $(ICM_CONTRACTS_PATH),-e "icm_contracts_path=$(ICM_CONTRACTS_PATH)",) \
 		$(if $(CONVERSION_ID),-e "conversion_id=$(CONVERSION_ID)",) \
@@ -716,6 +717,7 @@ test-unit:
 	@cd tools/initialize-validator-manager/cmd/init_valset && go test ./...
 	@./tests/relayer-static.sh
 	@./tests/relayer-doctor-fixtures.sh
+	@./tests/safe-deploy-contracts.sh
 	@echo "✓ Unit tests passed"
 
 test-incremental: lint validate test-unit test-e2e-dry

@@ -47,6 +47,7 @@ var (
 // Output represents the JSON output structure
 type Output struct {
 	Implementation   string `json:"implementation"`
+	Library          string `json:"library,omitempty"`
 	Proxy            string `json:"proxy"`
 	PoAManager       string `json:"poa_manager,omitempty"`
 	InitSettingsTx   string `json:"init_settings_tx,omitempty"`
@@ -85,9 +86,14 @@ func main() {
 	flag.BoolVar(&skipInitValSet, "skip-init-validator-set", false, "Skip initializing validator set")
 	flag.Parse()
 
-	if err := run(); err != nil {
+	// run() populates output as each address is obtained so a failed run still
+	// reports what was deployed; those addresses are the input to
+	// --validator-messages-library / --validator-manager-implementation.
+	var output Output
+	if err := run(&output); err != nil {
+		output.Success = false
+		output.Error = err.Error()
 		if jsonOutput {
-			output := Output{Success: false, Error: err.Error()}
 			jsonBytes, _ := json.MarshalIndent(output, "", "  ")
 			fmt.Println(string(jsonBytes))
 		} else {
@@ -97,7 +103,7 @@ func main() {
 	}
 }
 
-func run() error {
+func run(output *Output) error {
 	// Validate required parameters
 	if rpcURL == "" {
 		return fmt.Errorf("--rpc-url is required")
@@ -123,8 +129,14 @@ func run() error {
 	if err := validateManagerType(managerType); err != nil {
 		return err
 	}
-	if maxChurnPercent > 100 {
-		return fmt.Errorf("--max-churn-percent must be between 0 and 100")
+	// ValidatorManager.__ValidatorManager_init_unchained reverts on these, and
+	// initializeSettings runs after the proxy upgrade, so a revert there leaves
+	// an upgraded-but-uninitialized proxy. Reject the values up front.
+	if maxChurnPercent == 0 || maxChurnPercent > 20 {
+		return fmt.Errorf("--max-churn-percent must be between 1 and 20: ValidatorManager rejects 0 and MAXIMUM_CHURN_PERCENTAGE_LIMIT is 20")
+	}
+	if churnPeriod > 86400 {
+		return fmt.Errorf("--churn-period must not exceed 86400 seconds: ValidatorManager MAXIMUM_CHURN_PERIOD_LENGTH is 1 day")
 	}
 
 	var (
@@ -180,7 +192,7 @@ func run() error {
 	}
 
 	ctx := context.Background()
-	output := Output{Proxy: proxyAddress}
+	output.Proxy = proxyAddress
 
 	if !jsonOutput {
 		fmt.Println("=== Initialize Validator Manager ===")
@@ -339,11 +351,16 @@ func run() error {
 				managerType,
 				validatorMessagesLibrary,
 			)
+			// deployImplementation returns the library address even when the
+			// implementation deploy fails; record it before returning so a
+			// resumed run can pass it back via --validator-messages-library.
+			output.Library = libAddress
 			if err != nil {
 				return fmt.Errorf("failed to deploy implementation: %w", err)
 			}
 		}
 		output.Implementation = implAddress
+		output.Library = libAddress
 
 		if !jsonOutput {
 			fmt.Printf("  ValidatorMessages library: %s\n", libAddress)
@@ -545,6 +562,20 @@ func validatorMessagesLibraryFlag(libAddr string) string {
 }
 
 func deployImplementation(ctx context.Context, contractsPath, rpcURL, privKey, managerType, existingLibAddr string) (implAddr string, libAddr string, err error) {
+	// Resolve the implementation contract before deploying anything so an
+	// unknown manager type fails without spending gas on the library.
+	var contract string
+	switch managerType {
+	case "poa":
+		contract = "contracts/validator-manager/ValidatorManager.sol:ValidatorManager"
+	case "native-staking":
+		contract = "contracts/validator-manager/NativeTokenStakingManager.sol:NativeTokenStakingManager"
+	case "erc20-staking":
+		contract = "contracts/validator-manager/ERC20TokenStakingManager.sol:ERC20TokenStakingManager"
+	default:
+		return "", "", fmt.Errorf("unknown manager type: %s", managerType)
+	}
+
 	// Deploy ValidatorMessages library first (required by all ValidatorManager variants).
 	// Foundry no longer supports automatic dynamic linking in forge create.
 	if existingLibAddr == "" {
@@ -561,18 +592,6 @@ func deployImplementation(ctx context.Context, contractsPath, rpcURL, privKey, m
 	}
 
 	librariesFlag := validatorMessagesLibraryFlag(libAddr)
-
-	var contract string
-	switch managerType {
-	case "poa":
-		contract = "contracts/validator-manager/ValidatorManager.sol:ValidatorManager"
-	case "native-staking":
-		contract = "contracts/validator-manager/NativeTokenStakingManager.sol:NativeTokenStakingManager"
-	case "erc20-staking":
-		contract = "contracts/validator-manager/ERC20TokenStakingManager.sol:ERC20TokenStakingManager"
-	default:
-		return "", "", fmt.Errorf("unknown manager type: %s", managerType)
-	}
 
 	// Deploy with ICMInitializable.Allowed = 0
 	implAddr, err = forgeCreate(ctx, contractsPath, rpcURL, privKey, contract, librariesFlag, "--constructor-args", "0")
@@ -740,14 +759,15 @@ func initializeValidatorSet(ctx context.Context, contractsPath, rpcURL, privKey,
 		return "", fmt.Errorf("cast send failed: %w\nOutput: %s", err, string(output))
 	}
 
-	var result struct {
-		TransactionHash string `json:"transactionHash"`
-	}
-	if err := json.Unmarshal(output, &result); err == nil && result.TransactionHash != "" {
-		return result.TransactionHash, nil
+	txHash, err := parseCastSendOutput(output)
+	if err != nil {
+		// The signed warp transaction is already broadcast at this point. Returning
+		// an error would fail the play after the validator set was initialized
+		// on-chain, which also skips the l1.env persistence tasks.
+		fmt.Fprintf(os.Stderr, "Warning: %v. Output: %s\n", err, string(output))
 	}
 
-	return "", nil
+	return txHash, nil
 }
 
 func forgeCreate(ctx context.Context, workDir, rpcURL, privKey, contract string, args ...string) (string, error) {
@@ -797,6 +817,34 @@ func parseForgeCreateOutput(output []byte) (string, error) {
 	return "", fmt.Errorf("forge create returned no parseable deployedTo address")
 }
 
+// parseCastSendOutput extracts the transaction hash from `cast send --json`
+// output, tolerating the foundry warnings that can precede the JSON. Failing
+// here does not mean the transaction was not sent, so callers warn and keep the
+// empty hash rather than failing after the transaction landed.
+func parseCastSendOutput(output []byte) (string, error) {
+	type castSendResult struct {
+		TransactionHash string `json:"transactionHash"`
+	}
+
+	remaining := string(output)
+	for {
+		jsonStart := strings.IndexByte(remaining, '{')
+		if jsonStart < 0 {
+			break
+		}
+
+		var result castSendResult
+		decoder := json.NewDecoder(strings.NewReader(remaining[jsonStart:]))
+		if err := decoder.Decode(&result); err == nil && result.TransactionHash != "" {
+			return result.TransactionHash, nil
+		}
+
+		remaining = remaining[jsonStart+1:]
+	}
+
+	return "", fmt.Errorf("cast send returned no parseable transactionHash")
+}
+
 func validateDeployedContract(ctx context.Context, rpcURL, address string) error {
 	rawAddress := strings.TrimPrefix(address, "0x")
 	if len(rawAddress) != 40 {
@@ -829,12 +877,15 @@ func castSend(ctx context.Context, rpcURL, privKey, to, sig string, args ...stri
 		return "", fmt.Errorf("cast send failed: %w\nOutput: %s", err, string(output))
 	}
 
-	var result struct {
-		TransactionHash string `json:"transactionHash"`
+	txHash, err := parseCastSendOutput(output)
+	if err != nil {
+		// cast exited 0, so the transaction was broadcast: only the reported hash
+		// is missing. Failing here would abort the run after ProxyAdmin.upgrade(),
+		// initialize() or transferOwnership() already changed on-chain state.
+		fmt.Fprintf(os.Stderr, "Warning: %v. Output: %s\n", err, string(output))
 	}
-	json.Unmarshal(output, &result)
 
-	return result.TransactionHash, nil
+	return txHash, nil
 }
 
 func validateManagerType(value string) error {

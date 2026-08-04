@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/utils/constants"
@@ -55,7 +56,13 @@ func fetchAuthoritativeConversion(
 	expectedChainID ids.ID,
 	expectedManagerAddress string,
 ) (*AuthoritativeConversion, error) {
-	txBytes, err := platformvm.NewClient(strings.TrimRight(nodeURL, "/")).GetTx(ctx, conversionTxID)
+	// avalanchego's platformvm client uses http.DefaultClient, which has no
+	// timeout: a node that accepts the connection but never answers would hang
+	// the tool forever. Bound it like the other API calls in this tool.
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	txBytes, err := platformvm.NewClient(strings.TrimRight(nodeURL, "/")).GetTx(requestCtx, conversionTxID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch ConvertSubnetToL1Tx %s from %s/ext/P: %w", conversionTxID, strings.TrimRight(nodeURL, "/"), err)
 	}

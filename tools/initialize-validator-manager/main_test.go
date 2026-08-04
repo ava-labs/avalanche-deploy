@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -160,8 +161,8 @@ func TestDeployImplementationRejectsUnknownManager(t *testing.T) {
 	t.Helper()
 
 	_, _, err := deployImplementation(context.Background(), "", "", "", "unknown", "")
-	if err == nil {
-		t.Fatal("expected error for unknown manager type")
+	if err == nil || !strings.Contains(err.Error(), "unknown manager type") {
+		t.Fatalf("got error %v, want unknown manager type", err)
 	}
 }
 
@@ -207,5 +208,57 @@ func TestParseForgeCreateOutputRejectsMissingAddress(t *testing.T) {
 	_, err := parseForgeCreateOutput([]byte("Warning: config key is unknown\n{\"transactionHash\":\"0xdef\"}\n"))
 	if err == nil {
 		t.Fatal("expected an error when deployedTo is missing")
+	}
+}
+
+func TestParseCastSendOutput(t *testing.T) {
+	t.Parallel()
+
+	const transactionHash = "0x6ab5e59d4bd8b32c0d6b6b93dfb1a1e5ba9a04d5b4e0b8b0a1a0b1c2d3e4f5a6"
+	output := "Warning: Found unknown `number_underscores` config key in section `fmt` defined in foundry.toml.\n" +
+		`{"status":"0x1","transactionHash":"` + transactionHash + `","blockNumber":"0x2"}` + "\n"
+
+	got, err := parseCastSendOutput([]byte(output))
+	if err != nil {
+		t.Fatalf("parseCastSendOutput returned error: %v", err)
+	}
+	if got != transactionHash {
+		t.Fatalf("unexpected transaction hash: got %q want %q", got, transactionHash)
+	}
+}
+
+func TestParseCastSendOutputReportsMissingHash(t *testing.T) {
+	t.Parallel()
+
+	// The helper's error is advisory only: castSend and initializeValidatorSet log
+	// it and return an empty hash, because cast already broadcast the transaction.
+	got, err := parseCastSendOutput([]byte("Warning: config key is unknown\n{\"status\":\"0x1\"}\n"))
+	if err == nil {
+		t.Fatal("expected parseCastSendOutput to report a missing transactionHash")
+	}
+	if got != "" {
+		t.Fatalf("unexpected transaction hash: got %q want empty", got)
+	}
+}
+
+func TestCastSendToleratesUnparseableOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the cast stub needs a POSIX shell")
+	}
+
+	// A cast that exits 0 without printing a receipt: the transaction is on-chain,
+	// so castSend must report an empty hash rather than fail its caller.
+	stubDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stubDir, "cast"), []byte("#!/bin/sh\necho 'Warning: config key is unknown'\n"), 0o755); err != nil {
+		t.Fatalf("failed to write cast stub: %v", err)
+	}
+	t.Setenv("PATH", stubDir)
+
+	txHash, err := castSend(context.Background(), "http://127.0.0.1:9650", "0xkey", "0xproxy", "transferOwnership(address)", "0xowner")
+	if err != nil {
+		t.Fatalf("castSend returned error: %v", err)
+	}
+	if txHash != "" {
+		t.Fatalf("unexpected transaction hash: got %q want empty", txHash)
 	}
 }
