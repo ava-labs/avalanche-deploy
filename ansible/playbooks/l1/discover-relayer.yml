@@ -311,9 +311,11 @@
     - name: Verify every deployed validator is visible to rpc[0]
       ansible.builtin.assert:
         that:
+          - hostvars[item].acp_relayer_node_id is defined
           - hostvars[item].acp_relayer_node_id in acp_relayer_visible_peer_ids
         fail_msg: >-
-          rpc[0] cannot see validator {{ item }} ({{ hostvars[item].acp_relayer_node_id }}).
+          rpc[0] cannot see validator {{ item }}
+          ({{ hostvars[item].acp_relayer_node_id | default('no NodeID discovered') }}).
           Repair AvalancheGo peering before installing; otherwise the Relayer cannot
           gather Warp signatures safely.
       loop: "{{ groups['validators'] }}"
@@ -332,6 +334,20 @@
             - latest
         return_content: true
       register: acp_relayer_owner_code
+
+    - name: Reject an unresolved or renounced PoAManager owner
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_owner_code.status == 200
+          - acp_relayer_owner_code.json.error is not defined
+          - acp_relayer_owner_code.json.result is defined
+          - (acp_relayer_manager_owner | lower) != '0x0000000000000000000000000000000000000000'
+        fail_msg: >-
+          The PoAManager owner could not be classified as an EOA or a Safe. Owner
+          {{ acp_relayer_manager_owner }} is the zero address, or the L1 RPC did not
+          answer eth_getCode for it. A renounced owner and an unanswered owner lookup
+          are both unsupported; repair the L1 RPC or restore PoAManager ownership
+          before installing.
 
     - name: Read a contract owner's Safe threshold
       ansible.builtin.uri:
