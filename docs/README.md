@@ -21,10 +21,6 @@ Avalanche Deploy repository unless a guide says otherwise.
 - [Repository security policy](../SECURITY.md)
 - [Managed Relayer authorization, secrets, and tunnel-only access](l1/RELAYER.md#security-and-authorization)
 
-## Testing and audits
-
-- [Terraform/Ansible Fuji live-test bug register](audits/2026-07-terraform-ansible-live-test-bugs.md)
-
 The validator-lifecycle Relayer is different from the ICM Relayer. Use the
 [managed Relayer runbook](l1/RELAYER.md) for PoAManager validator registration,
 weight, and removal operations. Use the [add-ons guide](l1/ADD-ONS.md#icm-relayer-cross-chain-messaging)

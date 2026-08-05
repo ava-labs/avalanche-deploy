@@ -25,6 +25,7 @@ run_case() {
 }
 
 vm="$ROOT_DIR/scripts/l1/relayer.sh"
+doctor_module="$ROOT_DIR/scripts/l1/relayer/doctor.sh"
 
 # The RELAYER_DOCTOR_FIXTURE short-circuit in doctor_vm proves only the shared
 # result formatter and the doctor_finish exit-code contract; every check below
@@ -240,13 +241,13 @@ expected_ids=(
     VM.TARGET.CAPACITY VM.TERRAFORM.STATE VM.TOOL.TERRAFORM_VERSION
 )
 for id in "${expected_ids[@]}"; do
-    grep -Fq "$id" "$vm" || fail "$vm no longer emits the $id diagnostic"
+    grep -Fq "$id" "$doctor_module" || fail "$doctor_module no longer emits the $id diagnostic"
 done
-for id in $(grep -oE 'VM\.[A-Z0-9_]+\.[A-Z0-9_]+' "$vm" | sort -u); do
-    [[ " ${expected_ids[*]} " == *" $id "* ]] || fail "$vm emits $id, which this suite does not cover"
+for id in $(grep -oE 'VM\.[A-Z0-9_]+\.[A-Z0-9_]+' "$doctor_module" | sort -u); do
+    [[ " ${expected_ids[*]} " == *" $id "* ]] || fail "$doctor_module emits $id, which this suite does not cover"
 done
 for tool in terraform ansible ansible-playbook ansible-inventory jq python3 curl ssh; do
-    grep -Fq "doctor_command $tool " "$vm" || fail "the doctor no longer requires $tool"
+    grep -Fq "doctor_command $tool " "$doctor_module" || fail "the doctor no longer requires $tool"
 done
 
 # ssh_target must default to StrictHostKeyChecking=no (matching ansible.cfg and

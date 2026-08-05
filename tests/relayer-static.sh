@@ -5,6 +5,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+VM_SCRIPT="scripts/l1/relayer.sh"
+RELAYER_MODULE_DIR="scripts/l1/relayer"
+DOCTOR_MODULE="$RELAYER_MODULE_DIR/doctor.sh"
+INSTALLATION_MODULE="$RELAYER_MODULE_DIR/installation.sh"
+MANAGEMENT_MODULE="$RELAYER_MODULE_DIR/management.sh"
+PREREQUISITES_MODULE="$RELAYER_MODULE_DIR/prerequisites.sh"
+STATE_MODULE="$RELAYER_MODULE_DIR/state.sh"
+RELAYER_SOURCES=("$VM_SCRIPT" "$RELAYER_MODULE_DIR"/*.sh)
+
 fail() {
     echo "Relayer acceptance check failed: $*" >&2
     exit 1
@@ -21,6 +30,14 @@ done
 
 [[ ! -e configs/services.yaml ]] || fail "concept-only configs/services.yaml still exists"
 [[ ! -e scripts/l1/l1-up.sh ]] || fail "concept-only l1-up orchestrator still exists"
+
+for module in common doctor installation management prerequisites state; do
+    [[ -f "$RELAYER_MODULE_DIR/$module.sh" ]] || fail "Relayer $module module is missing"
+    require_file_text "$VM_SCRIPT" "source \"\$ROOT_DIR/scripts/l1/relayer/$module.sh\""
+done
+[[ "$(wc -l <"$VM_SCRIPT")" -le 140 ]] || fail "Relayer dispatcher is no longer thin"
+[[ "$(grep -Ec '^[a-zA-Z_][a-zA-Z0-9_]*\(\)' "$VM_SCRIPT")" -eq 1 ]] || \
+    fail "Relayer dispatcher defines operational functions instead of delegating to modules"
 
 make -n relayer | grep -Fq './scripts/l1/relayer.sh install' || fail "make relayer does not use automatic discovery"
 for target in \
@@ -69,14 +86,14 @@ for shared_port in $(awk '{print $2}' <<<"$role_port_declarations" | sort | uniq
     [[ "$known_shared_role_ports" == *" $shared_port "* ]] || \
         fail "two Ansible roles declare host port $shared_port; give one of them a free port"
 done
-if ! grep -Fq -- '--api-listen-addr 127.0.0.1:8081' scripts/l1/relayer.sh; then
+if ! grep -Fq -- '--api-listen-addr 127.0.0.1:8081' "$INSTALLATION_MODULE"; then
     fail "relayer.sh does not pin the daemon API to loopback port 8081"
 fi
 [[ "$(bash -c 'source scripts/l1/relayer.sh; managed_info_rpc_url fuji')" == "https://api.avax-test.network" ]] || \
     fail "Fuji does not select the managed Avalanche Info API"
 [[ "$(bash -c 'source scripts/l1/relayer.sh; managed_info_rpc_url mainnet')" == "https://api.avax.network" ]] || \
     fail "Mainnet does not select the managed Avalanche Info API"
-if grep -Fq -- '--info-rpc-url http://127.0.0.1:9650' scripts/l1/relayer.sh; then
+if grep -Fq -- '--info-rpc-url http://127.0.0.1:9650' "${RELAYER_SOURCES[@]}"; then
     fail "relayer.sh still uses the partial-sync local RPC for Primary bootstrap discovery"
 fi
 require_file_text ansible/playbooks/l1/discover-relayer.yml 'eligibleBootstrapPeerCount'
@@ -92,25 +109,25 @@ if grep -Fq "ansible_facts.services['safe.service'].state == 'running'" ansible/
 fi
 require_file_text ansible/roles/acp_relayer/tasks/main.yml 'systemctl is-failed --quiet relayerd.service'
 require_file_text ansible/roles/acp_relayer/tasks/main.yml 'until: acp_relayer_ready.rc in [0, 42]'
-require_file_text scripts/l1/relayer.sh '/var/backups/relayerd/relayer.db.bak'
-require_file_text scripts/l1/relayer.sh 'the active daemon holds the live bbolt lock'
-if grep -R -nE '127\.0\.0\.1:8080' scripts/l1/relayer.sh ansible/roles/acp_relayer \
+require_file_text "$DOCTOR_MODULE" '/var/backups/relayerd/relayer.db.bak'
+require_file_text "$DOCTOR_MODULE" 'the active daemon holds the live bbolt lock'
+if grep -R -nE '127\.0\.0\.1:8080' "$VM_SCRIPT" "$RELAYER_MODULE_DIR" ansible/roles/acp_relayer \
     ansible/playbooks/l1/deploy-relayer.yml ansible/playbooks/l1/discover-relayer.yml \
     ansible/playbooks/l1/manage-relayer.yml ansible/playbooks/l1/restore-relayer.yml >/dev/null; then
     fail "a Relayer component still references port 8080, which Safe and the ICM Relayer occupy"
 fi
 
-require_file_text scripts/l1/relayer.sh 'Install the relayer and console on %s? [y/N] '
-require_file_text scripts/l1/relayer.sh 'Console password (press Enter for none): '
-require_file_text scripts/l1/relayer.sh 'Confirm console password: '
-require_file_text scripts/l1/relayer.sh 'Console passwords did not match; try again.'
-[[ "$(grep -Fc 'Install the relayer and console on %s? [y/N] ' scripts/l1/relayer.sh)" -eq 1 ]] || fail "VM installer target prompt is not unique"
-[[ "$(grep -Fc 'Console password (press Enter for none): ' scripts/l1/relayer.sh)" -eq 1 ]] || fail "VM installer password prompt is not unique"
-require_file_text scripts/l1/relayer.sh 'doctor_vm'
-require_file_text scripts/l1/relayer.sh 'BACKUP must be an absolute path'
-require_file_text scripts/l1/relayer.sh 'unsupported link or special archive member'
+require_file_text "$INSTALLATION_MODULE" 'Install the relayer and console on %s? [y/N] '
+require_file_text "$INSTALLATION_MODULE" 'Console password (press Enter for none): '
+require_file_text "$INSTALLATION_MODULE" 'Confirm console password: '
+require_file_text "$INSTALLATION_MODULE" 'Console passwords did not match; try again.'
+[[ "$(grep -Fc 'Install the relayer and console on %s? [y/N] ' "$INSTALLATION_MODULE")" -eq 1 ]] || fail "VM installer target prompt is not unique"
+[[ "$(grep -Fc 'Console password (press Enter for none): ' "$INSTALLATION_MODULE")" -eq 1 ]] || fail "VM installer password prompt is not unique"
+require_file_text "$DOCTOR_MODULE" 'doctor_vm'
+require_file_text "$MANAGEMENT_MODULE" 'BACKUP must be an absolute path'
+require_file_text "$MANAGEMENT_MODULE" 'unsupported link or special archive member'
 require_file_text Makefile 'v0.0.0-transfer-required'
-require_file_text scripts/l1/relayer.sh 'ava-labs/validator-lifecycle-relayer'
+require_file_text "$VM_SCRIPT" 'ava-labs/validator-lifecycle-relayer'
 if grep -Fq 'k8s-relayer' Makefile || [[ -e kubernetes/scripts/relayer.sh ]] || [[ -e kubernetes/helm/relayerd ]]; then
     fail "Terraform/Ansible PR contains Kubernetes Relayer entry points"
 fi
@@ -168,17 +185,17 @@ grep -q 'when:' <<<"$docker_enable_block" && \
 
 # SSH host-key checking must stay off by default (matching ansible.cfg and the
 # Terraform inventories); RELAYER_SSH_HOST_KEY_CHECKING is an opt-in override.
-[[ "$(grep -Fc 'RELAYER_SSH_HOST_KEY_CHECKING:-no' scripts/l1/relayer.sh)" -eq 1 ]] || \
+[[ "$(grep -Fc 'RELAYER_SSH_HOST_KEY_CHECKING:-no' "$STATE_MODULE")" -eq 1 ]] || \
     fail "relayer.sh's default host-key-checking value changed away from 'no'"
-[[ "$(grep -Fc ':-accept-new' scripts/l1/relayer.sh)" -eq 0 ]] || \
+[[ "$(grep -Fc ':-accept-new' "$STATE_MODULE")" -eq 0 ]] || \
     fail "relayer.sh defaults SSH host-key checking to accept-new instead of matching ansible.cfg's no"
-[[ "$(grep -Fc 'accept-new | yes | no | ask' scripts/l1/relayer.sh)" -eq 1 ]] || \
+[[ "$(grep -Fc 'accept-new | yes | no | ask' "$STATE_MODULE")" -eq 1 ]] || \
     fail "relayer.sh's RELAYER_SSH_HOST_KEY_CHECKING whitelist no longer accepts accept-new/yes/ask as opt-in values"
 
 # run_install must re-back-up existing Relayer state before reapplying over it,
 # guarded by the keystore/release predicate, and only once, before prepare_release.
-run_install_body="$(function_body scripts/l1/relayer.sh run_install)"
-[[ -n "$run_install_body" ]] || fail "run_install function body could not be located in scripts/l1/relayer.sh"
+run_install_body="$(function_body "$INSTALLATION_MODULE" run_install)"
+[[ -n "$run_install_body" ]] || fail "run_install function body could not be located in $INSTALLATION_MODULE"
 [[ "$(grep -Fc "jq -r '.keystoreExists and .releaseMetadataExists'" <<<"$run_install_body")" -eq 1 ]] || \
     fail "run_install no longer guards the reapply backup with the keystore/release predicate"
 [[ "$(grep -Fc 'run_manage_playbook backup' <<<"$run_install_body")" -eq 1 ]] || \
@@ -212,9 +229,9 @@ if grep -Fq 'projectId:"{{ safe_walletconnect_project_id }}"' ansible/roles/safe
 fi
 
 # Re-assert still-live invariants from earlier fixes so a later edit can't undo them.
-require_file_text scripts/l1/relayer.sh 'sub(/^\*/, "", file)'
-require_file_text scripts/l1/relayer.sh "jq -e '(.json // (.content | fromjson)) | .fundedFloat == true and .fundedGas == true'"
-require_file_text scripts/l1/relayer.sh 'RELAYER_LISTENERS_SCANNED'
+require_file_text "$PREREQUISITES_MODULE" 'sub(/^\*/, "", file)'
+require_file_text "$DOCTOR_MODULE" "jq -e '(.json // (.content | fromjson)) | .fundedFloat == true and .fundedGas == true'"
+require_file_text "$DOCTOR_MODULE" 'RELAYER_LISTENERS_SCANNED'
 require_file_text ansible/roles/acp_relayer/templates/relayerd.service.j2 'StartLimitIntervalSec=0'
 require_file_text ansible/roles/acp_relayer/templates/relayerd.service.j2 'Restart=always'
 require_file_text ansible/roles/acp_relayer/templates/relayer-console.service.j2 'Wants=relayerd.service'

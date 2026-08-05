@@ -42,7 +42,8 @@
 #                               after an interrupted initialization
 #   validator_manager_implementation: Reuse an existing ValidatorManager
 #                                     implementation after an interrupted run
-#   preflight_only: Validate conversion and signature without changing contracts
+#   preflight_only: Validate the accepted conversion and, in local signature-
+#                   aggregator mode, its signature without changing contracts
 #   icm_contracts_path: Path to icm-contracts repository
 #
 # The initial validator set is read from the accepted ConvertSubnetToL1Tx.
@@ -91,13 +92,6 @@
       when:
         - not preflight_only | bool
         - lookup('env', 'AVALANCHE_PRIVATE_KEY') == ''
-
-    - name: Check for Glacier API key
-      ansible.builtin.fail:
-        msg: "GLACIER_API_KEY environment variable is required unless use_local_sig_agg=true"
-      when:
-        - not use_local_sig_agg | bool
-        - glacier_api_key | default(lookup('env', 'GLACIER_API_KEY'), true) == ''
 
     - name: Check for forge (foundry)
       ansible.builtin.command: which forge
@@ -300,9 +294,10 @@
           Validator Manager Preflight Successful
           ============================================
 
-          The accepted conversion and its aggregated
-          signature were validated. No contract state
-          or local deployment metadata was changed.
+          The accepted conversion was validated. In
+          local signature-aggregator mode, its signature
+          was validated too. No contract state or local
+          deployment metadata was changed.
 
           ============================================
       when: preflight_only | bool

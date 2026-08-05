@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/utils/crypto/secp256k1"
@@ -79,7 +81,7 @@ func main() {
 	flag.UintVar(&maxChurnPercent, "max-churn-percent", 20, "Maximum churn percentage (default: 20)")
 	flag.StringVar(&outputFile, "output", "validator-manager.json", "Output file for deployment info")
 	flag.BoolVar(&jsonOutput, "json", false, "Output results as JSON")
-	flag.BoolVar(&preflightOnly, "preflight-only", false, "Validate the conversion and signature without changing contracts or writing output")
+	flag.BoolVar(&preflightOnly, "preflight-only", false, "Validate the accepted conversion and, in local signature-aggregator mode, its signature without changing contracts or writing output")
 	flag.BoolVar(&skipDeploy, "skip-deploy", false, "Skip deploying implementation (use if already deployed)")
 	flag.BoolVar(&skipUpgrade, "skip-upgrade", false, "Skip upgrading proxy (use if already upgraded)")
 	flag.BoolVar(&skipInitSettings, "skip-init-settings", false, "Skip initializing settings (use if already initialized)")
@@ -292,24 +294,15 @@ func run(output *Output) error {
 				parsedSubnetID,
 				authoritativeConversionID,
 			)
-		} else {
-			apiKey := glacierAPIKey
-			if apiKey == "" {
-				apiKey = os.Getenv("GLACIER_API_KEY")
+			if err != nil {
+				return fmt.Errorf("preflight local signature acquisition failed: %w", err)
+			}
+			if err := validateSignedConversionMessage(signedMessage, parsedNetworkID, authoritativeConversionID); err != nil {
+				return fmt.Errorf("preflight local signature validation failed: %w", err)
 			}
 			if !jsonOutput {
-				fmt.Println("Preflight: fetching signature from Glacier API...")
+				fmt.Printf("Preflight: local signature validated (%d bytes)\n\n", len(signedMessage))
 			}
-			signedMessage, err = waitForGlacierSignature(ctx, networkName, conversionTxHash, apiKey)
-		}
-		if err != nil {
-			return fmt.Errorf("preflight signature acquisition failed: %w", err)
-		}
-		if err := validateSignedConversionMessage(signedMessage, parsedNetworkID, authoritativeConversionID); err != nil {
-			return fmt.Errorf("preflight signature validation failed: %w", err)
-		}
-		if !jsonOutput {
-			fmt.Printf("Preflight: signature validated (%d bytes)\n\n", len(signedMessage))
 		}
 	}
 	if preflightOnly {
@@ -447,6 +440,24 @@ func run(output *Output) error {
 	if !skipInitValSet {
 		if !jsonOutput {
 			fmt.Println("[4/4] Initializing validator set...")
+		}
+
+		if !useLocalSigAgg {
+			if !jsonOutput {
+				fmt.Println("  Fetching signature from Glacier API...")
+			}
+			apiKey := glacierAPIKey
+			if apiKey == "" {
+				apiKey = os.Getenv("GLACIER_API_KEY")
+			}
+			signedMessage, err = waitForGlacierSignature(ctx, networkName, conversionTxHash, apiKey)
+			if err != nil {
+				return fmt.Errorf("failed to get aggregated signature: %w", err)
+			}
+
+			if !jsonOutput {
+				fmt.Printf("  Signature received (%d bytes)\n", len(signedMessage))
+			}
 		}
 
 		// Call initializeValidatorSet
@@ -706,6 +717,52 @@ func parseID(s string) (ids.ID, error) {
 	return ids.FromString(s)
 }
 
+func waitForGlacierSignature(ctx context.Context, network, txHash, apiKey string) ([]byte, error) {
+	// Map network names
+	glacierNetwork := network
+	if network == "fuji" {
+		glacierNetwork = "testnet"
+	}
+
+	url := fmt.Sprintf("https://glacier-api.avax.network/v1/networks/%s/signatureAggregator/aggregateSignatures?txHash=%s",
+		glacierNetwork, txHash)
+
+	for i := 0; i < 30; i++ {
+		req, err := NewRequestWithContext(ctx, "GET", url)
+		if err != nil {
+			return nil, err
+		}
+		if apiKey != "" {
+			req.Header.Set("x-glacier-api-key", apiKey)
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		if resp.StatusCode == 200 {
+			var result struct {
+				SignedMessage string `json:"signedMessage"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+				resp.Body.Close()
+				return nil, err
+			}
+			resp.Body.Close()
+
+			return hex.DecodeString(strings.TrimPrefix(result.SignedMessage, "0x"))
+		}
+		resp.Body.Close()
+
+		fmt.Printf("  Waiting for signature (attempt %d/30)...\n", i+1)
+		time.Sleep(10 * time.Second)
+	}
+
+	return nil, fmt.Errorf("timeout waiting for signature")
+}
+
 func initializeValidatorSet(ctx context.Context, contractsPath, rpcURL, privKey, proxyAddress string, subnetID, chainID ids.ID, validators []ValidatorInfo, signedMessage []byte) (string, error) {
 	// Build ConversionData
 	// struct ConversionData { bytes32 subnetID; bytes32 validatorManagerBlockchainID; address validatorManagerAddress; InitialValidator[] initialValidators; }
@@ -926,4 +983,11 @@ func validateContractsPath(contractsPath, selectedManagerType string) error {
 		}
 	}
 	return nil
+}
+
+// HTTP client for Glacier API
+var httpClient = &http.Client{Timeout: 60 * time.Second}
+
+func NewRequestWithContext(ctx context.Context, method, url string) (*http.Request, error) {
+	return http.NewRequestWithContext(ctx, method, url, nil)
 }

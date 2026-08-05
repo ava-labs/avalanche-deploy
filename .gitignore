@@ -35,6 +35,7 @@ validator-manager.json
 
 # Local notes
 notes/
+docs/audits/2026-07-terraform-ansible-live-test-bugs.md
 
 # Claude Code config (local only)
 CLAUDE.md
