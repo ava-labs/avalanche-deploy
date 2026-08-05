@@ -1,9 +1,23 @@
 ---
 # Avalanchego role defaults
 
-# Versions
-avalanchego_version: "v1.14.1"
-avalanchego_subnet_evm_version: "v0.8.0"
+# Versions, selected per network. Fuji runs the Helicon pre-release train:
+# since v1.15.0-fuji activated (2026-07), stable 1.14.x nodes are rejected by
+# the network (0 peers, bootstrap never completes), so Fuji deploys must track
+# the -fuji pre-release. Mainnet stays on the latest stable release.
+# Override avalanchego_version / avalanchego_subnet_evm_version to pin
+# something else.
+avalanchego_stable_version: "v1.14.2"
+avalanchego_fuji_version: "v1.15.0-fuji"
+avalanchego_version: "{{ avalanchego_fuji_version if avalanchego_network == 'fuji' else avalanchego_stable_version }}"
+
+# subnet-evm was grafted into the avalanchego repo in v1.15: from then on the
+# plugin is versioned with avalanchego and published as an asset on the
+# avalanchego release (subnet-evm-linux-<arch>-<tag>.tar.gz). v0.x versions
+# still come from the standalone ava-labs/subnet-evm repo.
+avalanchego_subnet_evm_stable_version: "v0.8.0"
+avalanchego_subnet_evm_fuji_version: "v1.15.0-fuji"
+avalanchego_subnet_evm_version: "{{ avalanchego_subnet_evm_fuji_version if avalanchego_network == 'fuji' else avalanchego_subnet_evm_stable_version }}"
 
 # Install location of the avalanchego binary
 avalanchego_binary_path: /usr/local/bin/avalanchego
@@ -23,6 +37,21 @@ avalanchego_checksums:
   v1.14.2:
     amd64: "daf7f2739f0790c033ad728af6ee29bcd2660baf5265844079eb60f22d101e46"
     arm64: "0c4563c55659fd9923bd1ea9d3dbcd0a85668325091ffc4a259d0a137033ad0b"
+  v1.15.0-fuji:
+    amd64: "aeae28f71499fc55d0e3349fbe8f73dc0c95d62837b6d12f1eb6741efaa575eb"
+    arm64: "d8a326be0fb7183ed7fc95d751f254a4dc61390f53e3112e40aa7dd1eafcb815"
+
+# SHA256 checksums for grafted subnet-evm assets (published on avalanchego
+# releases, which have no checksum manifest). Standalone v0.x subnet-evm
+# releases publish their own checksums.txt and are verified against it
+# directly, so they do not need entries here.
+avalanchego_subnet_evm_checksums:
+  v1.15.0-fuji:
+    amd64: "6ed97b581c5964ee8d54525e2e4497236d6d193f0d334e224b6a431c3480305e"
+    arm64: "c94862f5da996ce9e2d6fcb30905f0b0dd61218038c765e0df70391f4bb32c15"
+
+# Checksum override for grafted subnet-evm versions not pinned above.
+avalanchego_subnet_evm_checksum_sha256: ""
 
 # Checksum override for versions not pinned in avalanchego_checksums.
 # Accepts a literal sha256 value or a URL to a checksum file
