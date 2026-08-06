@@ -121,7 +121,10 @@
     - name: Assert node is running the target version
       vars:
         running_version: "{{ version_check.json.result.version | default('') | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') }}"
-        target_version: "{{ avalanchego_version | string | regex_replace('^v', '') }}"
+        # Numeric triplet only: pre-release tags (v1.15.0-fuji) report as
+        # avalanchego/1.15.0, so stripping just the leading v fails the
+        # assert on every pre-release upgrade.
+        target_version: "{{ avalanchego_version | string | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') }}"
       ansible.builtin.assert:
         that:
           - running_version == target_version
@@ -198,7 +201,10 @@
     - name: Assert node is running the target version
       vars:
         running_version: "{{ version_check.json.result.version | default('') | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') }}"
-        target_version: "{{ avalanchego_version | string | regex_replace('^v', '') }}"
+        # Numeric triplet only: pre-release tags (v1.15.0-fuji) report as
+        # avalanchego/1.15.0, so stripping just the leading v fails the
+        # assert on every pre-release upgrade.
+        target_version: "{{ avalanchego_version | string | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') }}"
       ansible.builtin.assert:
         that:
           - running_version == target_version
@@ -275,7 +281,10 @@
     - name: Assert node is running the target version
       vars:
         running_version: "{{ version_check.json.result.version | default('') | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') }}"
-        target_version: "{{ avalanchego_version | string | regex_replace('^v', '') }}"
+        # Numeric triplet only: pre-release tags (v1.15.0-fuji) report as
+        # avalanchego/1.15.0, so stripping just the leading v fails the
+        # assert on every pre-release upgrade.
+        target_version: "{{ avalanchego_version | string | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') }}"
       ansible.builtin.assert:
         that:
           - running_version == target_version
