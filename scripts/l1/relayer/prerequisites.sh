@@ -8,11 +8,57 @@ run_prerequisites() {
 validate_release_source() {
   [[ "$RELAYER_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || \
     die "invalid Relayer release repository: $RELAYER_REPOSITORY"
-  if [[ "$RELAYER_REPOSITORY" != "ava-labs/validator-lifecycle-relayer" || -n "$RELAYER_DEVELOPMENT_TOKEN" ]]; then
+  if [[ "$RELAYER_REPOSITORY" != "$OFFICIAL_RELAYER_REPOSITORY" || -n "$RELAYER_DEVELOPMENT_TOKEN" ]]; then
     [[ "${RELAYER_DEVELOPMENT:-false}" == "true" ]] || \
       die "repository or authentication overrides require RELAYER_DEVELOPMENT=true and are not part of the supported operator flow"
   fi
 }
+
+
+official_latest_release_tag() {
+  local metadata
+  metadata="$(release_curl -fsSL --retry 3 --retry-delay 1 \
+    "https://api.github.com/repos/$OFFICIAL_RELAYER_REPOSITORY/releases?per_page=100")" || return 1
+  jq -er '
+    [
+      .[] |
+      select(.draft == false and .prerelease == false) |
+      .tag_name |
+      select(type == "string" and test("^v[0-9A-Za-z][0-9A-Za-z.+-]*$"))
+    ][0] // ""
+  ' <<<"$metadata"
+}
+
+
+resolve_release_version() {
+  [[ "$RELAYER_VERSION" == "$DEFAULT_RELAYER_VERSION_SELECTOR" ]] || return 0
+  [[ "$RELAYER_REPOSITORY" == "$OFFICIAL_RELAYER_REPOSITORY" ]] || \
+    die "$DEFAULT_RELAYER_VERSION_SELECTOR can resolve only from $OFFICIAL_RELAYER_REPOSITORY"
+
+  local stable_version="" release_query_succeeded=false
+  if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+    if stable_version="$(official_latest_release_tag 2>/dev/null)"; then
+      release_query_succeeded=true
+    fi
+  else
+    release_query_succeeded=true
+  fi
+  if [[ "$stable_version" =~ ^v[0-9A-Za-z][0-9A-Za-z.+-]*$ ]]; then
+    RELAYER_VERSION="$stable_version"
+    printf 'Selected latest official production Relayer release: %s\n' "$RELAYER_VERSION" >&2
+    return 0
+  fi
+
+  [[ "$release_query_succeeded" == true ]] || \
+    die "could not query official Relayer releases; verify GitHub connectivity and, while the repository is private, set RELAYER_DEVELOPMENT=true with RELAYER_DEVELOPMENT_TOKEN"
+
+  [[ "$RELAYER_PRERELEASE_FALLBACK" =~ ^v[0-9A-Za-z][0-9A-Za-z.+-]*-[0-9A-Za-z.+-]+$ ]] || \
+    die "no official production Relayer release is available and RELAYER_PRERELEASE_FALLBACK is not a valid prerelease tag"
+  RELAYER_VERSION="$RELAYER_PRERELEASE_FALLBACK"
+  printf 'No official production Relayer release is available; using reviewed prerelease fallback: %s\n' \
+    "$RELAYER_VERSION" >&2
+}
+
 
 release_curl() {
   if [[ -n "$RELAYER_DEVELOPMENT_TOKEN" ]]; then
@@ -20,6 +66,15 @@ release_curl() {
   else
     curl "$@"
   fi
+}
+
+
+release_asset_api_url() {
+  local asset="$1" metadata
+  metadata="$(release_curl -fsSL --retry 3 --retry-delay 1 \
+    "https://api.github.com/repos/$RELAYER_REPOSITORY/releases/tags/$RELAYER_VERSION")" || return 1
+  jq -r --arg asset "$asset" \
+    '[.assets[] | select(.name == $asset) | .url][0] // empty' <<<"$metadata"
 }
 
 
@@ -64,7 +119,16 @@ run_preflight() {
   jq -e --arg target "$TARGET_NAME" --arg info_rpc_url "$INFO_RPC_URL" \
     '.target == $target and .infoRpcUrl == $info_rpc_url and
      (.eligibleBootstrapPeerCount | type) == "number" and
-     (.peers | length > 0) and (.architecture | length > 0)' \
+     (.peers | length > 0) and (.architecture | length > 0) and
+     (.validatorPrivacy | type) == "array" and
+     (.validatorPrivacy | length > 0) and
+     all(.validatorPrivacy[];
+       (.name | type) == "string" and
+       (.nodeId | startswith("NodeID-")) and
+       (.validatorOnly | type) == "boolean" and
+       (.allowedNodes | type) == "array" and
+       all(.allowedNodes[]; type == "string") and
+       (.source | type) == "string")' \
     "$DISCOVERY_FILE" >/dev/null || \
     die "Relayer discovery did not produce a complete result; inspect the Ansible preflight output above"
   if [[ "$enforce_bootstrap" == true ]]; then
@@ -86,9 +150,23 @@ sha256_file() {
 download_release_asset() {
   local asset="$1"
   local destination="$2"
-  release_curl -fL --retry 3 --retry-delay 1 \
-    "https://github.com/$RELAYER_REPOSITORY/releases/download/$RELAYER_VERSION/$asset" \
-    -o "$destination"
+  if [[ -n "$RELAYER_DEVELOPMENT_TOKEN" ]]; then
+    local api_url
+    api_url="$(release_asset_api_url "$asset")"
+    if [[ ! "$api_url" =~ ^https://api\.github\.com/repos/.+/releases/assets/[0-9]+$ ]]; then
+      printf 'ERROR: %s is absent from %s release %s\n' \
+        "$asset" "$RELAYER_REPOSITORY" "$RELAYER_VERSION" >&2
+      return 1
+    fi
+    release_curl -fL --retry 3 --retry-delay 1 \
+      -H 'Accept: application/octet-stream' \
+      -H 'X-GitHub-Api-Version: 2022-11-28' \
+      "$api_url" -o "$destination"
+  else
+    release_curl -fL --retry 3 --retry-delay 1 \
+      "https://github.com/$RELAYER_REPOSITORY/releases/download/$RELAYER_VERSION/$asset" \
+      -o "$destination"
+  fi
 }
 
 verify_release_asset() {

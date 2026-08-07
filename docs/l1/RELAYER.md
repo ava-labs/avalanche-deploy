@@ -77,6 +77,33 @@ the root filesystem. The installer downloads the native daemon and offline
 restore utility for that architecture, verifies the release checksum, and uses
 the published immutable console digest.
 
+### Permanent NodeID and protocol-private L1s
+
+Every Relayer gets a permanent P2P TLS certificate and derived NodeID by
+default. The identity is created by `relayer-setup`, staged on `rpc[0]` before
+the runtime is installed, and reused across restarts, upgrades, normal removal,
+and reinstallation. The daemon refuses to silently generate a replacement.
+
+Discovery reads the effective Subnet config from every existing validator. If
+`validatorOnly` is disabled everywhere, including a network-private deployment
+whose P2P ports are protected only by firewalls, no protocol allowlist is
+required and installation continues normally.
+
+If `validatorOnly` is enabled, `make relayer` prints the permanent Relayer
+NodeID and stops before funding metadata, daemon installation, or service
+startup unless that NodeID is present in `allowedNodes` on **every existing L1
+validator**. The chain owner must merge the printed NodeID into each
+validator's Subnet config and restart each affected AvalancheGo node. Updating
+only `rpc[0]` or one validator is insufficient. Follow the
+[AvalancheGo `allowedNodes` documentation](https://build.avax.network/docs/nodes/configure/avalanche-l1-configs#allowednodes-string-list),
+then rerun `make relayer`; the staged identity is reused.
+
+The workflow also blocks a mixed validator set where only some validators have
+`validatorOnly` enabled. Apply one protocol-privacy policy consistently before
+continuing. A backup retains the identity. An explicit `PURGE=true` deletes it,
+so the next fresh setup creates a different NodeID that must be allowlisted
+again on every protocol-private validator.
+
 ## What doctor checks
 
 Each independent result has a stable identifier and a `PASS`, `WARN`, `FAIL`,
@@ -92,9 +119,10 @@ change infrastructure.
 The VM doctor verifies local software and Terraform version, `l1.env`, exactly
 one cloud state, matching inventory, backend access, SSH and `sudo`, target
 architecture/capacity, release availability, RPC and peer health, the official
-manager topology, EOA/Safe ownership, installation state, loopback listeners,
-service readiness, encrypted-key and bbolt integrity, public funding status,
-retained backup integrity/freshness, and installed artifact drift.
+manager topology, EOA/Safe ownership, all-validator protocol privacy and
+NodeID allowlisting, installation state, loopback listeners, service readiness,
+encrypted-key and bbolt integrity, public funding status, retained backup
+integrity/freshness, and installed artifact drift.
 
 Doctor adapts its result to a fresh target, a healthy installation, a normally
 removed workload with retained recovery state, or a partial/inconsistent
@@ -223,7 +251,7 @@ confirmed that no operation was persisted.
 | `make relayer-status` | Lightweight runtime snapshot |
 | `make relayer-logs` | Follow runtime logs |
 | `make relayer-backup` | Drain and create a retained consistent backup |
-| `make relayer-upgrade RELAYER_VERSION=vX.Y.Z` | Backup, immutable upgrade, readiness check, automatic rollback |
+| `make relayer-upgrade [RELAYER_VERSION=vX.Y.Z]` | Backup, upgrade to the latest official stable or an exact override, readiness check, automatic rollback |
 | `make relayer-remove` | Remove workload and retain recovery material |
 | `make relayer-remove PURGE=true` | Separately confirm permanent deletion |
 
@@ -236,7 +264,8 @@ Backups drain the daemon and console before taking a consistent archive. The
 archive includes bbolt state, the encrypted keystore and matching credential,
 TLS identity, and runtime configuration. A non-secret sidecar manifest records
 the release version, network and chain identity, manager addresses, public
-funding addresses, creation time, archive name, and checksum.
+funding addresses, permanent P2P NodeID and certificate fingerprint, creation
+time, archive name, and checksum.
 
 VM backups are retained on `rpc[0]` and fetched to the root-only local
 `backups/relayer` directory. Restore requires the absolute path to the fetched
@@ -247,12 +276,15 @@ make relayer-restore BACKUP=/absolute/path/to/relayer-YYYYMMDDTHHMMSS.tar.gz
 ```
 
 Restore confirms the exact target, validates the sidecar checksum and current
-L1 compatibility, rejects unsafe archive members, drains an installed workload,
-retains an automatic pre-restore archive, uses `relayer-restore` to replace
-bbolt state offline, restores the matching encrypted keys/TLS material, and
-checks readiness. A failed readiness check automatically reapplies the
-pre-restore state. If the workload was normally removed, restore leaves it
-removed and ready for an idempotent reinstall.
+L1 compatibility, rejects unsafe or duplicate archive members, and derives the
+NodeID from the archived TLS certificate. The manifest, `identity.json`, and
+certificate must all describe the same permanent identity. The VM repeats that
+binding check before it stops services. Restore then retains an automatic
+pre-restore archive, uses `relayer-restore` to replace bbolt state offline,
+restores the matching encrypted keys/TLS material, and checks readiness. A
+failed readiness check automatically reapplies the pre-restore state. If the
+workload was normally removed, restore leaves it removed and ready for an
+idempotent reinstall.
 
 ## Removal and purge
 
@@ -274,7 +306,7 @@ TLS identity, configuration, and backups.
 
 ## Release and repository contract
 
-The separate `ava-labs/validator-lifecycle-relayer` repository owns daemon behavior, release
+The separate `ava-labs/avalanche-vmc-relayer` repository owns daemon behavior, release
 artifacts, configuration, APIs, security, and runtime semantics. A tagged
 release publishes `relayerd`, `relayer-setup`, and `relayer-restore` for
 Darwin/Linux on AMD64/ARM64, `checksums.txt`, SBOMs and attestations, and
@@ -285,26 +317,39 @@ commands. VM installs use the checksum-verified native daemon and a digest-pinne
 console. Installed release metadata lets doctor detect checksum, digest, and
 version drift.
 
-The production version pin intentionally remains a transfer sentinel until all
-of these release gates pass:
+For release-dependent commands, the VM workflow resolves `official-latest` to
+GitHub's newest non-draft, non-prerelease release from
+`ava-labs/avalanche-vmc-relayer`. It then uses that immutable tag for release
+availability, checksum, image-digest, install, restore, and integrity checks.
+While the official repository has no production release, the reviewed fallback
+is `v0.1.0-rc.8`. The prerelease is ready for managed testing only after all of
+these publication gates pass:
 
-1. the repository is transferred to public `ava-labs/validator-lifecycle-relayer`;
-2. OCI packages are public under `ghcr.io/ava-labs`;
-3. a tagged release is published after transfer; and
-4. anonymous archive downloads and image pulls pass for the VM workflow.
+1. `v0.1.0-rc.8` is published from `ava-labs/avalanche-vmc-relayer`;
+2. its OCI packages are readable under `ghcr.io/ava-labs`;
+3. archive checksums and immutable image-digest assets are present; and
+4. the authenticated private-repository flow or the anonymous public flow
+   passes end to end.
 
-Repository redirects do not move granular GHCR packages to the new owner, so
-production images must be published after transfer. Maintainers may use an
-approved prerelease before transfer by setting all three explicit overrides:
+This selector does not upgrade a running Relayer in the background. Once a
+production release exists, `make relayer-doctor` selects it and reports whether
+the installed immutable version differs. The operator must still run
+`make relayer-upgrade` to perform a backup and upgrade. Set
+`RELAYER_VERSION=vX.Y.Z` to test or retain one exact release explicitly.
+
+While the Ava Labs repository is private, an authorized maintainer can read its
+release archives with an explicit development token:
 
 ```bash
 RELAYER_DEVELOPMENT=true \
-RELAYER_DEVELOPMENT_REPOSITORY=owner/validator-lifecycle-relayer \
-make relayer RELAYER_VERSION=vX.Y.Z-rc.N
+RELAYER_DEVELOPMENT_TOKEN="$(gh auth token)" \
+make relayer
 ```
 
-Add `RELAYER_DEVELOPMENT_TOKEN` only when that repository or its release assets
-require authentication. Development overrides are not part of the supported
-production operator flow.
+The VM still needs anonymous read access to the immutable `ghcr.io/ava-labs`
+console image because the managed install does not configure registry
+credentials. Make that package public before the end-to-end test. Repository
+overrides remain an explicit development-only escape hatch and are not part of
+the supported operator flow.
 
-For runtime details, see the [Relayer technical documentation](https://github.com/ava-labs/validator-lifecycle-relayer/tree/main/docs).
+For runtime details, see the [Relayer technical documentation](https://github.com/ava-labs/avalanche-vmc-relayer/tree/main/docs).

@@ -104,6 +104,11 @@ require_file_text ansible/playbooks/l1/discover-relayer.yml 'safeConsoleEnvCompl
 require_file_text ansible/playbooks/l1/discover-relayer.yml 'SAFE_TX_SERVICE_URL'
 require_file_text ansible/playbooks/l1/discover-relayer.yml 'SAFE_UI_URL'
 require_file_text ansible/playbooks/l1/discover-relayer.yml 'SAFE_ADDRESS'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'validatorPrivacy'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'tlsIdentityExists'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'p2pNodeId'
+require_file_text ansible/playbooks/l1/stage-relayer-identity.yml 'identity-provisioned'
+require_file_text ansible/playbooks/l1/stage-relayer-identity.yml 'not relayer_identity_files.results[0].stat.exists'
 if grep -Fq "ansible_facts.services['safe.service'].state == 'running'" ansible/playbooks/l1/discover-relayer.yml; then
     fail "Safe discovery still rejects a healthy active (exited) oneshot unit"
 fi
@@ -126,8 +131,23 @@ require_file_text "$INSTALLATION_MODULE" 'Console passwords did not match; try a
 require_file_text "$DOCTOR_MODULE" 'doctor_vm'
 require_file_text "$MANAGEMENT_MODULE" 'BACKUP must be an absolute path'
 require_file_text "$MANAGEMENT_MODULE" 'unsupported link or special archive member'
-require_file_text Makefile 'v0.0.0-transfer-required'
-require_file_text "$VM_SCRIPT" 'ava-labs/validator-lifecycle-relayer'
+require_file_text "$MANAGEMENT_MODULE" 'duplicate archive member'
+require_file_text "$MANAGEMENT_MODULE" '"etc/relayerd/identity.json"'
+require_file_text "$MANAGEMENT_MODULE" 'archived TLS certificate does not derive the archived P2P NodeID'
+require_file_text "$MANAGEMENT_MODULE" 'backup manifest P2P NodeID does not match archived identity metadata'
+require_file_text "$MANAGEMENT_MODULE" 'protocol_privacy_gate "$backup_node_id"'
+require_file_text ansible/playbooks/l1/restore-relayer.yml '/etc/relayerd/identity.json'
+require_file_text ansible/playbooks/l1/restore-relayer.yml 'Bind staged restore identity to the admitted backup manifest'
+require_file_text ansible/playbooks/l1/restore-relayer.yml 'restore_certificate.stat.checksum == restore_expected_tls_certificate_sha256'
+require_file_text Makefile 'RELAYER_VERSION ?= official-latest'
+require_file_text Makefile 'RELAYER_PRERELEASE_FALLBACK ?= v0.1.0-rc.8'
+require_file_text "$VM_SCRIPT" 'ava-labs/avalanche-vmc-relayer'
+require_file_text "$PREREQUISITES_MODULE" 'https://api.github.com/repos/$RELAYER_REPOSITORY/releases/tags/$RELAYER_VERSION'
+require_file_text "$PREREQUISITES_MODULE" 'https://api.github.com/repos/$OFFICIAL_RELAYER_REPOSITORY/releases?per_page=100'
+require_file_text "$PREREQUISITES_MODULE" 'Selected latest official production Relayer release:'
+if grep -R -Fq 'ava-labs/validator-lifecycle-relayer' Makefile scripts/l1 docs/l1/RELAYER.md; then
+    fail "active Terraform/Ansible Relayer integration still references the superseded repository name"
+fi
 if grep -Fq 'k8s-relayer' Makefile || [[ -e kubernetes/scripts/relayer.sh ]] || [[ -e kubernetes/helm/relayerd ]]; then
     fail "Terraform/Ansible PR contains Kubernetes Relayer entry points"
 fi
@@ -209,6 +229,14 @@ prepare_release_line="$(grep -Fn 'prepare_release true' <<<"$run_install_body" |
 [[ "$console_password_line" -lt "$keystore_check_line" && "$keystore_check_line" -lt "$backup_call_line" && \
     "$backup_call_line" -lt "$prepare_release_line" ]] || \
     fail "run_install no longer backs up existing state after the console password prompt but before prepare_release"
+
+identity_stage_line="$(grep -Fn 'stage_relayer_identity' <<<"$run_install_body" | cut -d: -f1)"
+privacy_gate_line="$(grep -Fn 'protocol_privacy_gate "$p2p_node_id"' <<<"$run_install_body" | cut -d: -f1)"
+deploy_line="$(grep -Fn 'playbooks/l1/deploy-relayer.yml' <<<"$run_install_body" | cut -d: -f1)"
+[[ -n "$identity_stage_line" && -n "$privacy_gate_line" && -n "$deploy_line" ]] || \
+    fail "run_install is missing identity staging, the protocol-privacy gate, or runtime deployment"
+[[ "$identity_stage_line" -lt "$privacy_gate_line" && "$privacy_gate_line" -lt "$deploy_line" ]] || \
+    fail "run_install must stage the permanent identity, enforce protocol privacy, then install the runtime"
 
 # The WalletConnect project ID default must stay non-degenerate, or the
 # freshness-gate greps in ansible/roles/safe/tasks/main.yml become vacuous.

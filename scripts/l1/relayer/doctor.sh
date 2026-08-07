@@ -66,6 +66,40 @@ doctor_safe_console_environment() {
   fi
 }
 
+doctor_protocol_privacy() {
+  local discovery_file="$1"
+  local validator_count private_count tls_identity_exists p2p_node_id missing_names
+  validator_count="$(jq '.validatorPrivacy | length' "$discovery_file")"
+  private_count="$(jq '[.validatorPrivacy[] | select(.validatorOnly)] | length' "$discovery_file")"
+  tls_identity_exists="$(jq -r '.tlsIdentityExists // false' "$discovery_file")"
+  p2p_node_id="$(jq -r '.p2pNodeId // empty' "$discovery_file")"
+
+  if ((private_count == 0)); then
+    doctor_result PASS VM.PROTOCOL.PRIVACY \
+      "validatorOnly is disabled on all $validator_count validator(s); a NodeID allowlist is not required" none
+  elif ((private_count != validator_count)); then
+    doctor_result FAIL VM.PROTOCOL.PRIVACY \
+      "validatorOnly is inconsistent across the L1 validator set ($private_count of $validator_count enabled)" \
+      "apply one protocol-privacy policy on every validator before installing the Relayer"
+  elif [[ "$tls_identity_exists" != true ]]; then
+    doctor_result WARN VM.PROTOCOL.PRIVACY \
+      "all validators enforce protocol privacy; the permanent Relayer NodeID has not been staged yet" \
+      "make relayer will stage the identity, print its NodeID, and stop before runtime installation if allowlisting is required"
+  else
+    missing_names="$(jq -r --arg node_id "$p2p_node_id" \
+      '[.validatorPrivacy[] | select(.allowedNodes | index($node_id) | not) | .name] | join(", ")' \
+      "$discovery_file")"
+    if [[ -n "$missing_names" ]]; then
+      doctor_result FAIL VM.PROTOCOL.PRIVACY \
+        "$p2p_node_id is absent from allowedNodes on: $missing_names" \
+        "add it on every validator, restart affected AvalancheGo nodes, and follow https://build.avax.network/docs/nodes/configure/avalanche-l1-configs#allowednodes-string-list"
+    else
+      doctor_result PASS VM.PROTOCOL.PRIVACY \
+        "all $validator_count protocol-private validator(s) allow $p2p_node_id" none
+    fi
+  fi
+}
+
 relayer_remote_check() {
   "$@"
 }
@@ -230,6 +264,7 @@ doctor_vm() {
       fi
       doctor_result PASS VM.MANAGER.TOPOLOGY "official PoAManager and initialized owned ValidatorManager topology verified" none
       doctor_safe_integration "$DISCOVERY_FILE"
+      doctor_protocol_privacy "$DISCOVERY_FILE"
     else
       doctor_result FAIL VM.PREFLIGHT.REMOTE "remote RPC, peer, topology, or retained-state preflight failed" "run ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook -i ${INVENTORY_FILE#"$ROOT_DIR/"} ansible/playbooks/l1/discover-relayer.yml with the generated discovery variables, or rerun make relayer for detailed output"
       doctor_result SKIP VM.RPC.HEALTH "RPC health was not independently confirmed" "repair the remote preflight"
@@ -237,6 +272,7 @@ doctor_vm() {
       doctor_result SKIP VM.PEERS.BOOTSTRAP "Primary Network bootstrap eligibility was not independently confirmed" "repair the remote preflight"
       doctor_result SKIP VM.MANAGER.TOPOLOGY "manager topology was not independently confirmed" "verify official PoAManager ownership and initialization"
       doctor_result SKIP VM.SAFE.DISCOVERY "EOA/Safe ownership was not independently confirmed" "repair the manager topology preflight"
+      doctor_result SKIP VM.PROTOCOL.PRIVACY "protocol privacy was not independently confirmed" "repair the remote preflight"
     fi
   else
     doctor_result SKIP VM.PREFLIGHT.REMOTE "remote preflight prerequisites are incomplete" "repair the earlier tool, l1.env, and state checks"
@@ -245,10 +281,11 @@ doctor_vm() {
     doctor_result SKIP VM.PEERS.BOOTSTRAP "Primary Network bootstrap eligibility was not checked" "repair the remote preflight prerequisites"
     doctor_result SKIP VM.MANAGER.TOPOLOGY "manager topology was not checked" "repair the remote preflight prerequisites"
     doctor_result SKIP VM.SAFE.DISCOVERY "EOA/Safe ownership was not checked" "repair the remote preflight prerequisites"
+    doctor_result SKIP VM.PROTOCOL.PRIVACY "protocol privacy was not checked" "repair the remote preflight prerequisites"
   fi
 
   if [[ "$preflight_ok" == true && -f "$DISCOVERY_FILE" ]]; then
-    local architecture daemon_installed console_installed keystore_exists restore_installed release_metadata_exists
+    local architecture daemon_installed console_installed keystore_exists restore_installed release_metadata_exists tls_identity_exists
     architecture="$(jq -r '.architecture // empty' "$DISCOVERY_FILE")"
     case "$architecture" in
       x86_64|amd64|aarch64|arm64) doctor_result PASS VM.TARGET.ARCHITECTURE "rpc[0] architecture $architecture has a published release target" none ;;
@@ -268,9 +305,13 @@ doctor_vm() {
     keystore_exists="$(jq -r '.keystoreExists' "$DISCOVERY_FILE")"
     restore_installed="$(jq -r '.restoreUtilityInstalled' "$DISCOVERY_FILE")"
     release_metadata_exists="$(jq -r '.releaseMetadataExists' "$DISCOVERY_FILE")"
+    tls_identity_exists="$(jq -r '.tlsIdentityExists' "$DISCOVERY_FILE")"
     if [[ "$daemon_installed" == true && "$console_installed" == true && "$keystore_exists" == true && \
       "$restore_installed" == true && "$release_metadata_exists" == true ]]; then
       doctor_result PASS VM.INSTALLATION.STATE "Relayer is installed with persistent key material" none
+    elif [[ "$daemon_installed" == false && "$console_installed" == false && "$keystore_exists" == false && \
+      "$tls_identity_exists" == true ]]; then
+      doctor_result PASS VM.INSTALLATION.STATE "Relayer runtime is absent and its permanent P2P identity is staged for installation" none
     elif [[ "$daemon_installed" == false && "$console_installed" == false && "$keystore_exists" == false ]]; then
       doctor_result PASS VM.INSTALLATION.STATE "Relayer is not installed and the target is ready for a fresh install" none
     elif [[ "$daemon_installed" == false && "$console_installed" == false && "$keystore_exists" == true ]]; then
@@ -299,15 +340,19 @@ doctor_vm() {
       doctor_result SKIP VM.CONFIG.BOOTSTRAP "installed bootstrap configuration does not apply while the workload is absent" "the installer will render the managed network Info API"
     fi
 
-    local release_arch version_without_v release_url release_base published_console_image=""
+    local release_arch version_without_v release_asset release_probe_dir published_console_image=""
     case "$architecture" in x86_64|amd64) release_arch=amd64 ;; *) release_arch=arm64 ;; esac
     version_without_v="${RELAYER_VERSION#v}"
-    release_url="https://github.com/$RELAYER_REPOSITORY/releases/download/$RELAYER_VERSION/relayer_${version_without_v}_linux_${release_arch}.tar.gz"
-    release_base="https://github.com/$RELAYER_REPOSITORY/releases/download/$RELAYER_VERSION"
-    published_console_image="$(release_curl -fsSL --retry 1 "$release_base/relayer-console-image.txt" 2>/dev/null | tr -d '[:space:]' || true)"
-    if release_curl -fsIL --retry 1 "$release_url" >/dev/null 2>&1 && \
-      release_curl -fsSL --retry 1 "$release_base/checksums.txt" >/dev/null 2>&1 && \
-      [[ "$published_console_image" =~ ^ghcr\.io/.+@sha256:[0-9a-f]{64}$ ]]; then
+    release_asset="relayer_${version_without_v}_linux_${release_arch}.tar.gz"
+    release_probe_dir="$WORK_DIR/release-probe"
+    mkdir -p "$release_probe_dir"
+    if download_release_asset "$release_asset" "$release_probe_dir/$release_asset" >/dev/null 2>&1 && \
+      download_release_asset checksums.txt "$release_probe_dir/checksums.txt" >/dev/null 2>&1 && \
+      download_release_asset relayer-console-image.txt "$release_probe_dir/relayer-console-image.txt" >/dev/null 2>&1; then
+      published_console_image="$(tr -d '[:space:]' <"$release_probe_dir/relayer-console-image.txt")"
+    fi
+    if [[ -s "$release_probe_dir/$release_asset" && -s "$release_probe_dir/checksums.txt" && \
+      "$published_console_image" =~ ^ghcr\.io/.+@sha256:[0-9a-f]{64}$ ]]; then
       doctor_result PASS VM.RELEASE.AVAILABLE "$RELAYER_VERSION archive, checksums, and immutable console image are available for $release_arch" none
     else
       doctor_result FAIL VM.RELEASE.AVAILABLE "$RELAYER_VERSION release archive or checksums are unavailable for $release_arch" "publish the tested public Relayer release or set an approved development repository/version override"

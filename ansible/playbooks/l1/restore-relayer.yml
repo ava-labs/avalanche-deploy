@@ -6,6 +6,8 @@
   vars:
     restore_archive_local: "{{ relayer_restore_archive_local }}"
     restore_utility_local: "{{ relayer_restore_utility_local }}"
+    restore_expected_p2p_node_id: "{{ relayer_restore_expected_p2p_node_id }}"
+    restore_expected_tls_certificate_sha256: "{{ relayer_restore_expected_tls_certificate_sha256 }}"
     restore_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
     restore_root: "/var/backups/relayerd/restore-{{ restore_timestamp }}"
     restore_archive_remote: "{{ restore_root }}/selected.tar.gz"
@@ -17,7 +19,9 @@
         that:
           - restore_archive_local | length > 0
           - restore_utility_local | length > 0
-        fail_msg: "A validated archive and relayer-restore release utility are required."
+          - restore_expected_p2p_node_id is match('^NodeID-.+$')
+          - restore_expected_tls_certificate_sha256 is match('^[0-9a-f]{64}$')
+        fail_msg: "A validated archive, permanent identity, and relayer-restore release utility are required."
 
     - name: Gather installed service state
       ansible.builtin.service_facts:
@@ -49,6 +53,59 @@
         group: root
         mode: "0755"
 
+    - name: Extract selected backup into an isolated staging directory
+      ansible.builtin.unarchive:
+        src: "{{ restore_archive_remote }}"
+        dest: "{{ restore_stage }}"
+        remote_src: true
+
+    - name: Verify required restore components exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ restore_stage }}/etc/relayerd/config.json"
+        - "{{ restore_stage }}/etc/relayerd/funding.json"
+        - "{{ restore_stage }}/etc/relayerd/identity.json"
+        - "{{ restore_stage }}/etc/relayerd/secrets/keystore-password"
+        - "{{ restore_stage }}/etc/relayerd/secrets/console-session-secret"
+        - "{{ restore_stage }}/etc/relayerd/secrets/console.env"
+        - "{{ restore_stage }}/var/lib/relayerd/keystore.json"
+        - "{{ restore_stage }}/var/lib/relayerd/relayer.db"
+        - "{{ restore_stage }}/var/lib/relayerd/tls/staker.crt"
+        - "{{ restore_stage }}/var/lib/relayerd/tls/staker.key"
+      register: restore_required_files
+
+    - name: Reject an incomplete selected backup
+      ansible.builtin.assert:
+        that:
+          - restore_required_files.results | map(attribute='stat.exists') | min
+        fail_msg: "The selected archive is missing matching config, credential, keystore, bbolt state, or TLS identity."
+
+    - name: Read staged permanent identity metadata
+      ansible.builtin.slurp:
+        src: "{{ restore_stage }}/etc/relayerd/identity.json"
+      register: restore_identity_raw
+
+    - name: Hash the staged permanent TLS certificate
+      ansible.builtin.stat:
+        path: "{{ restore_stage }}/var/lib/relayerd/tls/staker.crt"
+        get_checksum: true
+        checksum_algorithm: sha256
+      register: restore_certificate
+
+    - name: Bind staged restore identity to the admitted backup manifest
+      vars:
+        restore_identity: "{{ restore_identity_raw.content | b64decode | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - restore_identity.schemaVersion == 1
+          - restore_identity.p2pNodeId == restore_expected_p2p_node_id
+          - restore_identity.tlsCertificateSha256 == restore_expected_tls_certificate_sha256
+          - restore_certificate.stat.checksum == restore_expected_tls_certificate_sha256
+        fail_msg: >-
+          The staged identity metadata or TLS certificate does not match the
+          NodeID and certificate checksum admitted on the control host.
+
     - name: Stop console and daemon before offline restore
       ansible.builtin.systemd:
         name: "{{ item }}"
@@ -77,33 +134,6 @@
         group: root
         mode: "0600"
 
-    - name: Extract selected backup into an isolated staging directory
-      ansible.builtin.unarchive:
-        src: "{{ restore_archive_remote }}"
-        dest: "{{ restore_stage }}"
-        remote_src: true
-
-    - name: Verify required restore components exist
-      ansible.builtin.stat:
-        path: "{{ item }}"
-      loop:
-        - "{{ restore_stage }}/etc/relayerd/config.json"
-        - "{{ restore_stage }}/etc/relayerd/funding.json"
-        - "{{ restore_stage }}/etc/relayerd/secrets/keystore-password"
-        - "{{ restore_stage }}/etc/relayerd/secrets/console-session-secret"
-        - "{{ restore_stage }}/etc/relayerd/secrets/console.env"
-        - "{{ restore_stage }}/var/lib/relayerd/keystore.json"
-        - "{{ restore_stage }}/var/lib/relayerd/relayer.db"
-        - "{{ restore_stage }}/var/lib/relayerd/tls/staker.crt"
-        - "{{ restore_stage }}/var/lib/relayerd/tls/staker.key"
-      register: restore_required_files
-
-    - name: Reject an incomplete selected backup
-      ansible.builtin.assert:
-        that:
-          - restore_required_files.results | map(attribute='stat.exists') | min
-        fail_msg: "The selected archive is missing matching config, credential, keystore, bbolt state, or TLS identity."
-
     - name: Restore selected recovery material with automatic rollback
       block:
         - name: Validate and replace bbolt state offline
@@ -129,6 +159,15 @@
           ansible.builtin.copy:
             src: "{{ restore_stage }}/etc/relayerd/funding.json"
             dest: /etc/relayerd/funding.json
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Restore matching permanent identity metadata
+          ansible.builtin.copy:
+            src: "{{ restore_stage }}/etc/relayerd/identity.json"
+            dest: /etc/relayerd/identity.json
             remote_src: true
             owner: root
             group: root

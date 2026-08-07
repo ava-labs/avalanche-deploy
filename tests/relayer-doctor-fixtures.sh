@@ -134,6 +134,70 @@ set -e
 grep -Fq 'FAIL VM.SAFE.DISCOVERY' <<<"$safe_unhealthy_output" || \
     fail "unhealthy Safe fixture did not produce a blocker: $safe_unhealthy_output"
 
+privacy_node_id="NodeID-DoctorPrivacyFixture"
+write_privacy_fixture() {
+    local path="$1" first_private="$2" second_private="$3" identity_exists="$4"
+    local first_allowed="$5" second_allowed="$6"
+    jq -n \
+        --arg node_id "$privacy_node_id" \
+        --argjson first_private "$first_private" \
+        --argjson second_private "$second_private" \
+        --argjson identity_exists "$identity_exists" \
+        --argjson first_allowed "$first_allowed" \
+        --argjson second_allowed "$second_allowed" \
+        '{
+          tlsIdentityExists: $identity_exists,
+          p2pNodeId: (if $identity_exists then $node_id else "" end),
+          validatorPrivacy: [
+            {
+              name: "validator-1",
+              validatorOnly: $first_private,
+              allowedNodes: (if $first_allowed then [$node_id] else [] end)
+            },
+            {
+              name: "validator-2",
+              validatorOnly: $second_private,
+              allowedNodes: (if $second_allowed then [$node_id] else [] end)
+            }
+          ]
+        }' >"$path"
+}
+
+run_privacy_doctor_case() {
+    local name="$1" expected_exit="$2" expected_level="$3" expected_summary="$4"
+    local fixture="$5" output status
+    set +e
+    output="$(bash -c 'source "$1"; doctor_protocol_privacy "$2"; doctor_finish' _ "$vm" "$fixture" 2>&1)"
+    status=$?
+    set -e
+    [[ "$status" -eq "$expected_exit" ]] || \
+        fail "$name privacy fixture returned $status, expected $expected_exit: $output"
+    grep -Fq "$expected_level VM.PROTOCOL.PRIVACY | $expected_summary" <<<"$output" || \
+        fail "$name privacy fixture produced the wrong result: $output"
+}
+
+privacy_open="$TMP_DIR/privacy-open.json"
+privacy_unstaged="$TMP_DIR/privacy-unstaged.json"
+privacy_allowed="$TMP_DIR/privacy-allowed.json"
+privacy_missing="$TMP_DIR/privacy-missing.json"
+privacy_mixed="$TMP_DIR/privacy-mixed.json"
+write_privacy_fixture "$privacy_open" false false false false false
+write_privacy_fixture "$privacy_unstaged" true true false false false
+write_privacy_fixture "$privacy_allowed" true true true true true
+write_privacy_fixture "$privacy_missing" true true true true false
+write_privacy_fixture "$privacy_mixed" true false true true false
+
+run_privacy_doctor_case open 0 PASS \
+    'validatorOnly is disabled on all 2 validator(s); a NodeID allowlist is not required' "$privacy_open"
+run_privacy_doctor_case unstaged 0 WARN \
+    'all validators enforce protocol privacy; the permanent Relayer NodeID has not been staged yet' "$privacy_unstaged"
+run_privacy_doctor_case allowed 0 PASS \
+    "all 2 protocol-private validator(s) allow $privacy_node_id" "$privacy_allowed"
+run_privacy_doctor_case missing 1 FAIL \
+    "$privacy_node_id is absent from allowedNodes on: validator-2" "$privacy_missing"
+run_privacy_doctor_case mixed 1 FAIL \
+    'validatorOnly is inconsistent across the L1 validator set (1 of 2 enabled)' "$privacy_mixed"
+
 run_state_case() {
     local name="$1" runtime_ready="$2" expected_level="$3" expected_summary="$4"
     local output status
@@ -209,13 +273,78 @@ status=$?
 set -e
 [[ "$status" -ne 0 ]] || fail "interrupted password confirmation unexpectedly succeeded"
 
+default_source="$(bash -c 'source "$1"; printf "%s|%s|%s" "$RELAYER_REPOSITORY" "$RELAYER_VERSION" "$RELAYER_PRERELEASE_FALLBACK"' _ "$vm")"
+[[ "$default_source" == 'ava-labs/avalanche-vmc-relayer|official-latest|v0.1.0-rc.8' ]] || \
+    fail "default release source is not the official stable selector with the reviewed rc.8 fallback: $default_source"
+
+stable_selection="$(bash -c '
+    source "$1"
+    release_curl() {
+        printf "%s\n" '\''[
+          {"draft":false,"prerelease":true,"tag_name":"v0.2.0-rc.1"},
+          {"draft":false,"prerelease":false,"tag_name":"v0.1.0"}
+        ]'\''
+    }
+    resolve_release_version
+    printf "%s" "$RELAYER_VERSION"
+' _ "$vm" 2>/dev/null)"
+[[ "$stable_selection" == v0.1.0 ]] || \
+    fail "official stable release selector returned $stable_selection instead of v0.1.0"
+
+fallback_selection="$(bash -c '
+    source "$1"
+    release_curl() { printf "[]\n"; }
+    resolve_release_version
+    printf "%s" "$RELAYER_VERSION"
+' _ "$vm" 2>/dev/null)"
+[[ "$fallback_selection" == v0.1.0-rc.8 ]] || \
+    fail "unavailable stable release did not select the reviewed rc.8 fallback: $fallback_selection"
+
 set +e
-sentinel_output="$("$vm" doctor 2>&1)"
+release_query_failure="$(bash -c '
+    source "$1"
+    release_curl() { return 1; }
+    resolve_release_version
+' _ "$vm" 2>&1)"
 status=$?
 set -e
-[[ "$status" -eq 1 ]] || fail "sentinel doctor returned $status, expected 1: $sentinel_output"
-grep -Fq 'production Relayer pin is awaiting repository transfer' <<<"$sentinel_output" || \
-    fail "sentinel doctor did not explain the prerelease override"
+[[ "$status" -eq 1 ]] || fail "failed official release query returned $status, expected 1"
+grep -Fq 'could not query official Relayer releases' <<<"$release_query_failure" || \
+    fail "failed official release query silently used the prerelease fallback"
+set +e
+source_override_output="$(RELAYER_DEVELOPMENT_REPOSITORY=anishnar/validator-lifecycle-relayer \
+    bash -c 'source "$1"; validate_release_source' _ "$vm" 2>&1)"
+status=$?
+set -e
+[[ "$status" -eq 1 ]] || fail "unapproved repository override returned $status, expected 1"
+grep -Fq 'repository or authentication overrides require RELAYER_DEVELOPMENT=true' <<<"$source_override_output" || \
+    fail "unapproved repository override did not explain the development gate"
+RELAYER_DEVELOPMENT=true RELAYER_DEVELOPMENT_REPOSITORY=anishnar/validator-lifecycle-relayer \
+    bash -c 'source "$1"; validate_release_source' _ "$vm"
+
+private_asset="$TMP_DIR/private-release-asset"
+bash -c '
+    source "$1"
+    RELAYER_REPOSITORY=ava-labs/avalanche-vmc-relayer
+    RELAYER_VERSION=v0.1.0-rc.8
+    RELAYER_DEVELOPMENT_TOKEN=fixture-token
+    release_curl() {
+        if [[ "$*" == *"/releases/tags/"* ]]; then
+            printf "%s\n" '\''{"assets":[{"name":"checksums.txt","url":"https://api.github.com/repos/ava-labs/avalanche-vmc-relayer/releases/assets/123"}]}'\''
+            return
+        fi
+        local destination="" previous=""
+        for argument in "$@"; do
+            if [[ "$previous" == -o ]]; then destination="$argument"; fi
+            previous="$argument"
+        done
+        [[ -n "$destination" ]] || return 1
+        printf "private-release-asset\n" >"$destination"
+    }
+    download_release_asset checksums.txt "$2"
+' _ "$vm" "$private_asset"
+[[ "$(cat "$private_asset")" == private-release-asset ]] || \
+    fail "authenticated private-release API path did not download the selected asset"
 
 set +e
 "$vm" invalid-action >/dev/null 2>&1
@@ -236,6 +365,7 @@ expected_ids=(
     VM.FUNDING.READY VM.INSTALLATION.STATE VM.INVENTORY.MATCH VM.KEYS.INTEGRITY
     VM.L1_ENV.AGE VM.L1_ENV.METADATA VM.L1_ENV.PRESENT VM.LISTENERS.LOOPBACK
     VM.MANAGER.TOPOLOGY VM.PEERS.BOOTSTRAP VM.PEERS.VISIBLE VM.PREFLIGHT.REMOTE
+    VM.PROTOCOL.PRIVACY
     VM.RELEASE.AVAILABLE VM.RELEASE.INTEGRITY VM.RPC.HEALTH VM.RUNTIME.READY
     VM.SAFE.CONSOLE_ENV VM.SAFE.DISCOVERY VM.STATE.INTEGRITY VM.TARGET.ARCHITECTURE
     VM.TARGET.CAPACITY VM.TERRAFORM.STATE VM.TOOL.TERRAFORM_VERSION

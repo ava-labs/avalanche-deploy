@@ -125,6 +125,8 @@
                     'pChain': funding.pChainAddress,
                     'evm': funding.evmAddress
                   },
+                  'p2pNodeId': funding.p2pNodeId | default(''),
+                  'tlsCertificateSha256': funding.tlsCertificateSha256 | default(''),
                   'createdAt': ansible_date_time.iso8601,
                   'archive': {
                     'file': archive_name,

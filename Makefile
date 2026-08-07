@@ -14,10 +14,10 @@ SHELL := /bin/bash
 # Default cloud provider
 CLOUD ?= aws
 NETWORK ?= fuji
-# Deliberately not a published version. Replace this sentinel with the first
-# tested ava-labs/validator-lifecycle-relayer release only after the repository
-# and package transfer and anonymous archive/image pull release gate has passed.
-RELAYER_VERSION ?= v0.0.0-transfer-required
+# Resolve the newest non-prerelease from the official repository. Until the
+# first production release exists, use this reviewed prerelease explicitly.
+RELAYER_VERSION ?= official-latest
+RELAYER_PRERELEASE_FALLBACK ?= v0.1.0-rc.8
 AUTO_APPROVE ?= false
 TF_INIT_RETRIES ?= 3
 SKIP_TERRAFORM_VALIDATE ?= false
@@ -237,10 +237,10 @@ relayer-prereqs:
 	@./scripts/l1/relayer.sh prereqs
 
 relayer-doctor:
-	@RELAYER_VERSION="$(RELAYER_VERSION)" ./scripts/l1/relayer.sh doctor
+	@RELAYER_VERSION="$(RELAYER_VERSION)" RELAYER_PRERELEASE_FALLBACK="$(RELAYER_PRERELEASE_FALLBACK)" ./scripts/l1/relayer.sh doctor
 
 relayer:
-	@RELAYER_VERSION="$(RELAYER_VERSION)" ./scripts/l1/relayer.sh install
+	@RELAYER_VERSION="$(RELAYER_VERSION)" RELAYER_PRERELEASE_FALLBACK="$(RELAYER_PRERELEASE_FALLBACK)" ./scripts/l1/relayer.sh install
 
 relayer-access:
 	@./scripts/l1/relayer.sh access
@@ -252,14 +252,14 @@ relayer-logs:
 	@./scripts/l1/relayer.sh logs
 
 relayer-upgrade:
-	@RELAYER_VERSION="$(RELAYER_VERSION)" ./scripts/l1/relayer.sh upgrade
+	@RELAYER_VERSION="$(RELAYER_VERSION)" RELAYER_PRERELEASE_FALLBACK="$(RELAYER_PRERELEASE_FALLBACK)" ./scripts/l1/relayer.sh upgrade
 
 relayer-backup:
 	@./scripts/l1/relayer.sh backup
 
 relayer-restore:
 	@if [ -z "$(BACKUP)" ]; then echo "Usage: make relayer-restore BACKUP=/absolute/path/to/relayer-*.tar.gz"; exit 2; fi
-	@BACKUP="$(BACKUP)" ./scripts/l1/relayer.sh restore
+	@BACKUP="$(BACKUP)" RELAYER_VERSION="$(RELAYER_VERSION)" RELAYER_PRERELEASE_FALLBACK="$(RELAYER_PRERELEASE_FALLBACK)" ./scripts/l1/relayer.sh restore
 
 relayer-remove:
 	@PURGE="$(PURGE)" ./scripts/l1/relayer.sh remove
@@ -716,6 +716,7 @@ test-unit:
 	@cd tools/initialize-validator-manager && go test ./...
 	@cd tools/initialize-validator-manager/cmd/init_valset && go test ./...
 	@./tests/relayer-static.sh
+	@./tests/relayer-protocol-privacy-fixtures.sh
 	@./tests/relayer-doctor-fixtures.sh
 	@./tests/safe-deploy-contracts.sh
 	@echo "✓ Unit tests passed"
@@ -787,7 +788,7 @@ help-l1:
 	@echo "  make relayer-access | make relayer-status | make relayer-logs"
 	@echo "  make relayer-backup"
 	@echo "  make relayer-restore BACKUP=/absolute/path/to/relayer-....tar.gz"
-	@echo "  make relayer-upgrade RELAYER_VERSION=vX.Y.Z"
+	@echo "  make relayer-upgrade [RELAYER_VERSION=vX.Y.Z]"
 	@echo "  make relayer-remove [PURGE=true]"
 	@echo "  make safe [CHAIN_ID=... EVM_CHAIN_ID=...]  (auto-detects from l1.env)"
 	@echo ""
@@ -893,7 +894,7 @@ help-all:
 	@echo "  make relayer-logs      Follow Relayer logs"
 	@echo "  make relayer-backup    Create a retained consistent backup"
 	@echo "  make relayer-restore BACKUP=/absolute/path/to/relayer-....tar.gz"
-	@echo "  make relayer-upgrade RELAYER_VERSION=vX.Y.Z"
+	@echo "  make relayer-upgrade [RELAYER_VERSION=vX.Y.Z]"
 	@echo "  make relayer-remove [PURGE=true]"
 	@echo ""
 	@echo "Validator Manager:"

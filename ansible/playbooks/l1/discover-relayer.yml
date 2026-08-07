@@ -1,6 +1,7 @@
 ---
 - name: Discover validator identities from the deployed nodes
   hosts: validators
+  become: true
   gather_facts: false
   tasks:
     - name: Read each validator NodeID
@@ -29,6 +30,62 @@
     - name: Save the discovered validator NodeID
       ansible.builtin.set_fact:
         acp_relayer_node_id: "{{ acp_relayer_validator_node_id.json.result.nodeID }}"
+
+    - name: Read the effective AvalancheGo node configuration
+      ansible.builtin.slurp:
+        src: /etc/avalanchego/node.json
+      register: acp_relayer_validator_node_config_file
+
+    - name: Resolve the validator Subnet configuration source
+      vars:
+        node_config: "{{ acp_relayer_validator_node_config_file.content | b64decode | from_json }}"
+      ansible.builtin.set_fact:
+        acp_relayer_subnet_config_content: "{{ node_config['subnet-config-content'] | default('') }}"
+        acp_relayer_subnet_config_dir: >-
+          {{
+            node_config['subnet-config-dir']
+            | default('/home/avalanche/.avalanchego/configs/subnets')
+          }}
+
+    - name: Inspect the validator Subnet configuration file
+      ansible.builtin.stat:
+        path: "{{ acp_relayer_subnet_config_dir }}/{{ acp_relayer_expected_subnet_id }}.json"
+      register: acp_relayer_validator_subnet_config_stat
+      when: acp_relayer_subnet_config_content | length == 0
+
+    - name: Read the validator Subnet configuration file
+      ansible.builtin.slurp:
+        src: "{{ acp_relayer_subnet_config_dir }}/{{ acp_relayer_expected_subnet_id }}.json"
+      register: acp_relayer_validator_subnet_config_file
+      when:
+        - acp_relayer_subnet_config_content | length == 0
+        - acp_relayer_validator_subnet_config_stat.stat.exists | default(false)
+
+    - name: Resolve effective protocol-privacy configuration
+      ansible.builtin.set_fact:
+        acp_relayer_subnet_config: >-
+          {{
+            (
+              acp_relayer_subnet_config_content | b64decode | from_json
+            )
+            if acp_relayer_subnet_config_content | length > 0
+            else (
+              acp_relayer_validator_subnet_config_file.content | b64decode | from_json
+              if acp_relayer_validator_subnet_config_file.content is defined
+              else {}
+            )
+          }}
+
+    - name: Save effective validator protocol-privacy facts
+      ansible.builtin.set_fact:
+        acp_relayer_validator_only: "{{ acp_relayer_subnet_config.validatorOnly | default(false) | bool }}"
+        acp_relayer_allowed_nodes: "{{ acp_relayer_subnet_config.allowedNodes | default([]) }}"
+        acp_relayer_subnet_config_source: >-
+          {{
+            'subnet-config-content'
+            if acp_relayer_subnet_config_content | length > 0
+            else acp_relayer_subnet_config_dir ~ '/' ~ acp_relayer_expected_subnet_id ~ '.json'
+          }}
 
 - name: Verify L1 metadata, contracts, RPC health, and peer visibility
   hosts: rpc[0]
@@ -460,6 +517,7 @@
         - /usr/local/bin/relayerd
         - /usr/local/bin/relayer-restore
         - /etc/relayerd/release.json
+        - /etc/relayerd/identity.json
       register: acp_relayer_existing_files
 
     - name: Reject incomplete preserved key material
@@ -470,7 +528,7 @@
           - acp_relayer_existing_files.results[0].stat.exists == acp_relayer_existing_files.results[3].stat.exists
           - not acp_relayer_existing_files.results[4].stat.exists or acp_relayer_existing_files.results[0].stat.exists
           - acp_relayer_existing_files.results[5].stat.exists == acp_relayer_existing_files.results[6].stat.exists
-          - not acp_relayer_existing_files.results[5].stat.exists or acp_relayer_existing_files.results[0].stat.exists
+          - not acp_relayer_existing_files.results[10].stat.exists or acp_relayer_existing_files.results[5].stat.exists
         fail_msg: >-
           Existing Relayer key material is incomplete. Restore keystore.json,
           its matching keystore-password credential, funding.json, config.json,
@@ -495,6 +553,27 @@
       register: acp_relayer_existing_version
       changed_when: false
       when: acp_relayer_existing_files.results[7].stat.exists
+
+    - name: Read permanent Relayer P2P identity metadata
+      ansible.builtin.slurp:
+        src: /etc/relayerd/identity.json
+      register: acp_relayer_existing_identity_file
+      when: acp_relayer_existing_files.results[10].stat.exists
+
+    - name: Verify permanent Relayer P2P identity metadata
+      vars:
+        identity: "{{ acp_relayer_existing_identity_file.content | b64decode | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - identity.schemaVersion | int == 1
+          - identity.p2pNodeId is match('^NodeID-')
+          - identity.tlsCertificateSha256 is match('^[0-9a-f]{64}$')
+          - identity.tlsCertificateSha256 == acp_relayer_existing_files.results[5].stat.checksum
+        fail_msg: >-
+          /etc/relayerd/identity.json is invalid or does not match the retained
+          TLS certificate. Restore the certificate, key, and identity metadata
+          from the same retained backup.
+      when: acp_relayer_existing_files.results[10].stat.exists
 
     - name: Find retained manual backups
       ansible.builtin.find:
@@ -562,6 +641,7 @@
     - name: Initialize Relayer-compatible manual peer records
       ansible.builtin.set_fact:
         acp_relayer_peers: []
+        acp_relayer_validator_privacy: []
 
     - name: Build Relayer-compatible manual peer records
       ansible.builtin.set_fact:
@@ -572,6 +652,23 @@
               {
                 'node-id': hostvars[item].acp_relayer_node_id,
                 'ip': acp_relayer_validator_private_ips[item] ~ ':9651'
+              }
+            ]
+          }}
+      loop: "{{ groups['validators'] }}"
+
+    - name: Build all-validator protocol-privacy records
+      ansible.builtin.set_fact:
+        acp_relayer_validator_privacy: >-
+          {{
+            acp_relayer_validator_privacy
+            + [
+              {
+                'name': item,
+                'nodeId': hostvars[item].acp_relayer_node_id,
+                'validatorOnly': hostvars[item].acp_relayer_validator_only | bool,
+                'allowedNodes': hostvars[item].acp_relayer_allowed_nodes,
+                'source': hostvars[item].acp_relayer_subnet_config_source
               }
             ]
           }}
@@ -622,6 +719,7 @@
               'safeConsoleEnvPresent': acp_relayer_safe_console_env.stat.exists | bool,
               'safeConsoleEnvComplete': acp_relayer_safe_console_env_complete | bool,
               'peers': acp_relayer_peers,
+              'validatorPrivacy': acp_relayer_validator_privacy,
               'infoRpcUrl': acp_relayer_info_rpc_url,
               'bootstrapPeerCount': acp_relayer_bootstrap_peer_ids | length,
               'primaryValidatorCount': acp_relayer_primary_validator_ids | length,
@@ -632,6 +730,25 @@
                 else ''
               ),
               'keystoreExists': acp_relayer_existing_files.results[0].stat.exists | bool,
+              'tlsPairExists': (
+                acp_relayer_existing_files.results[5].stat.exists
+                and acp_relayer_existing_files.results[6].stat.exists
+              ) | bool,
+              'tlsIdentityExists': (
+                acp_relayer_existing_files.results[5].stat.exists
+                and acp_relayer_existing_files.results[6].stat.exists
+                and acp_relayer_existing_files.results[10].stat.exists
+              ) | bool,
+              'p2pNodeId': (
+                (acp_relayer_existing_identity_file.content | b64decode | from_json).p2pNodeId
+                if acp_relayer_existing_identity_file.content is defined
+                else ''
+              ),
+              'tlsCertificateSha256': (
+                (acp_relayer_existing_identity_file.content | b64decode | from_json).tlsCertificateSha256
+                if acp_relayer_existing_identity_file.content is defined
+                else ''
+              ),
               'restoreUtilityInstalled': acp_relayer_existing_files.results[8].stat.exists | bool,
               'releaseMetadataExists': acp_relayer_existing_files.results[9].stat.exists | bool,
               'installedVersion': acp_relayer_existing_version.stdout | default(''),

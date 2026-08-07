@@ -1,0 +1,145 @@
+---
+- name: Validate the permanent Relayer identity staging inputs
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Require the discovered target and complete generated identity
+      ansible.builtin.assert:
+        that:
+          - groups['rpc'] is defined
+          - groups['rpc'] | length > 0
+          - acp_relayer_discovered_target == groups['rpc'][0]
+          - acp_relayer_tls_cert_src | length > 0
+          - acp_relayer_tls_key_src | length > 0
+          - acp_relayer_identity_src | length > 0
+          - acp_relayer_expected_p2p_node_id is match('^NodeID-')
+          - acp_relayer_expected_tls_certificate_sha256 is match('^[0-9a-f]{64}$')
+
+- name: Persist the Relayer P2P identity before runtime installation
+  hosts: rpc[0]
+  become: true
+  gather_facts: false
+  vars:
+    relayer_user: relayerd
+    relayer_group: relayerd
+    relayer_state_dir: /var/lib/relayerd
+    relayer_tls_dir: /var/lib/relayerd/tls
+    relayer_config_dir: /etc/relayerd
+  tasks:
+    - name: Create the Relayer system group
+      ansible.builtin.group:
+        name: "{{ relayer_group }}"
+        system: true
+
+    - name: Create the Relayer system user
+      ansible.builtin.user:
+        name: "{{ relayer_user }}"
+        group: "{{ relayer_group }}"
+        system: true
+        shell: /usr/sbin/nologin
+        home: "{{ relayer_state_dir }}"
+        create_home: false
+
+    - name: Create permanent identity directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - {path: "{{ relayer_config_dir }}", owner: root, group: root, mode: "0755"}
+        - {path: "{{ relayer_state_dir }}", owner: "{{ relayer_user }}", group: "{{ relayer_group }}", mode: "0700"}
+        - {path: "{{ relayer_tls_dir }}", owner: "{{ relayer_user }}", group: "{{ relayer_group }}", mode: "0700"}
+
+    - name: Inspect any existing permanent identity
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ relayer_tls_dir }}/staker.crt"
+        - "{{ relayer_tls_dir }}/staker.key"
+        - "{{ relayer_config_dir }}/identity.json"
+      register: relayer_identity_files
+
+    - name: Reject a partial or implicit identity replacement
+      ansible.builtin.assert:
+        that:
+          - relayer_identity_files.results[0].stat.exists == relayer_identity_files.results[1].stat.exists
+          - relayer_identity_files.results[0].stat.exists == relayer_identity_files.results[2].stat.exists
+          - not relayer_identity_files.results[0].stat.exists
+        fail_msg: >-
+          A permanent Relayer P2P identity already exists or is incomplete. The
+          staging workflow never replaces it. Rerun discovery to reuse a complete
+          identity, or restore its matching certificate, key, and identity.json.
+
+    - name: Install and verify the new permanent identity as one transaction
+      block:
+        - name: Install the generated permanent TLS certificate
+          ansible.builtin.copy:
+            src: "{{ acp_relayer_tls_cert_src }}"
+            dest: "{{ relayer_tls_dir }}/staker.crt"
+            owner: "{{ relayer_user }}"
+            group: "{{ relayer_group }}"
+            mode: "0400"
+
+        - name: Install the generated permanent TLS private key
+          ansible.builtin.copy:
+            src: "{{ acp_relayer_tls_key_src }}"
+            dest: "{{ relayer_tls_dir }}/staker.key"
+            owner: "{{ relayer_user }}"
+            group: "{{ relayer_group }}"
+            mode: "0400"
+          no_log: true
+
+        - name: Install non-secret permanent identity metadata
+          ansible.builtin.copy:
+            src: "{{ acp_relayer_identity_src }}"
+            dest: "{{ relayer_config_dir }}/identity.json"
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Checksum the installed TLS certificate
+          ansible.builtin.stat:
+            path: "{{ relayer_tls_dir }}/staker.crt"
+            checksum_algorithm: sha256
+          register: relayer_installed_tls_certificate
+
+        - name: Read the installed identity metadata
+          ansible.builtin.slurp:
+            src: "{{ relayer_config_dir }}/identity.json"
+          register: relayer_installed_identity_file
+
+        - name: Verify the staged permanent identity
+          vars:
+            identity: "{{ relayer_installed_identity_file.content | b64decode | from_json }}"
+          ansible.builtin.assert:
+            that:
+              - identity.schemaVersion | int == 1
+              - identity.p2pNodeId == acp_relayer_expected_p2p_node_id
+              - identity.tlsCertificateSha256 == acp_relayer_expected_tls_certificate_sha256
+              - relayer_installed_tls_certificate.stat.checksum == acp_relayer_expected_tls_certificate_sha256
+            fail_msg: "The staged Relayer P2P identity failed its NodeID or certificate-integrity check."
+      rescue:
+        - name: Remove an incomplete new identity after staging failure
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ relayer_tls_dir }}/staker.crt"
+            - "{{ relayer_tls_dir }}/staker.key"
+            - "{{ relayer_config_dir }}/identity.json"
+
+        - name: Stop after rolling back the failed identity staging transaction
+          ansible.builtin.fail:
+            msg: >-
+              Permanent Relayer identity staging failed and its partial files
+              were removed. Correct the reported input or transport error and
+              rerun make relayer.
+
+    - name: Report the permanent Relayer P2P identity
+      ansible.builtin.debug:
+        msg:
+          target: "{{ inventory_hostname }}"
+          p2pNodeId: "{{ acp_relayer_expected_p2p_node_id }}"
+          state: identity-provisioned

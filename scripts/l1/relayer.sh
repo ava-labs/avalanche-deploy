@@ -6,10 +6,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT_DIR/scripts/shared/relayer-doctor-lib.sh"
 
 ACTION="${1:-install}"
-PINNED_RELAYER_VERSION="v0.0.0-transfer-required"
-RELAYER_VERSION="${RELAYER_VERSION:-$PINNED_RELAYER_VERSION}"
+OFFICIAL_RELAYER_REPOSITORY="ava-labs/avalanche-vmc-relayer"
+DEFAULT_RELAYER_VERSION_SELECTOR="official-latest"
+RELAYER_VERSION="${RELAYER_VERSION:-$DEFAULT_RELAYER_VERSION_SELECTOR}"
+RELAYER_PRERELEASE_FALLBACK="${RELAYER_PRERELEASE_FALLBACK:-v0.1.0-rc.8}"
 L1_ENV="$ROOT_DIR/l1.env"
-RELAYER_REPOSITORY="${RELAYER_DEVELOPMENT_REPOSITORY:-ava-labs/validator-lifecycle-relayer}"
+RELAYER_REPOSITORY="${RELAYER_DEVELOPMENT_REPOSITORY:-$OFFICIAL_RELAYER_REPOSITORY}"
 RELAYER_DEVELOPMENT_TOKEN="${RELAYER_DEVELOPMENT_TOKEN:-}"
 
 WORK_DIR=""
@@ -43,14 +45,13 @@ source "$ROOT_DIR/scripts/l1/relayer/installation.sh"
 main() {
   [[ $# -le 1 ]] || usage
   validate_release_source
-  if [[ ! "$RELAYER_VERSION" =~ ^v[0-9A-Za-z][0-9A-Za-z.+-]*$ ]]; then
-    printf 'ERROR: RELAYER_VERSION must be a release tag such as v0.1.0\n' >&2
-    usage
+  if [[ "$ACTION" =~ ^(doctor|install|restore|upgrade)$ ]]; then
+    resolve_release_version
+    if [[ ! "$RELAYER_VERSION" =~ ^v[0-9A-Za-z][0-9A-Za-z.+-]*$ ]]; then
+      printf 'ERROR: RELAYER_VERSION must be official-latest or a release tag such as v0.1.0\n' >&2
+      usage
+    fi
   fi
-  if [[ "$RELAYER_VERSION" == "$PINNED_RELAYER_VERSION" && "$ACTION" =~ ^(doctor|install)$ ]]; then
-    die "the production Relayer pin is awaiting repository transfer; for an approved prerelease set RELAYER_DEVELOPMENT=true, RELAYER_DEVELOPMENT_REPOSITORY=owner/repository, and RELAYER_VERSION=vX.Y.Z-rc.N"
-  fi
-
   case "$ACTION" in
     prereqs)
       run_prerequisites

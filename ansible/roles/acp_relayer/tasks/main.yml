@@ -23,6 +23,8 @@
       - acp_relayer_keystore_password_src | length > 0
       - acp_relayer_console_session_secret_src | length > 0
       - acp_relayer_funding_src | length > 0
+      - acp_relayer_expected_p2p_node_id is match('^NodeID-')
+      - acp_relayer_expected_tls_certificate_sha256 is match('^[0-9a-f]{64}$')
   when: acp_relayer_operation == 'install'
 
 - name: Create the relayerd system group
@@ -61,6 +63,49 @@
     - "{{ acp_relayer_state_dir }}"
     - "{{ acp_relayer_tls_dir }}"
     - "{{ acp_relayer_backup_dir }}"
+
+- name: Inspect the permanent Relayer P2P identity
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    checksum_algorithm: sha256
+  loop:
+    - "{{ acp_relayer_tls_dir }}/staker.crt"
+    - "{{ acp_relayer_tls_dir }}/staker.key"
+    - "{{ acp_relayer_config_dir }}/identity.json"
+  register: acp_relayer_identity_files
+  when: acp_relayer_operation == 'install'
+
+- name: Require the identity provisioned before runtime installation
+  ansible.builtin.assert:
+    that:
+      - acp_relayer_identity_files.results[0].stat.exists
+      - acp_relayer_identity_files.results[1].stat.exists
+      - acp_relayer_identity_files.results[2].stat.exists
+      - acp_relayer_identity_files.results[0].stat.checksum == acp_relayer_expected_tls_certificate_sha256
+    fail_msg: >-
+      The permanent Relayer P2P identity is absent, partial, or different from
+      the identity approved during protocol-privacy preflight. Rerun make relayer
+      to stage and verify the identity before installing the runtime.
+  when: acp_relayer_operation == 'install'
+
+- name: Read permanent Relayer P2P identity metadata
+  ansible.builtin.slurp:
+    src: "{{ acp_relayer_config_dir }}/identity.json"
+  register: acp_relayer_identity_file
+  when: acp_relayer_operation == 'install'
+
+- name: Verify permanent Relayer P2P identity metadata
+  vars:
+    identity: "{{ acp_relayer_identity_file.content | b64decode | from_json }}"
+  ansible.builtin.assert:
+    that:
+      - identity.schemaVersion | int == 1
+      - identity.p2pNodeId == acp_relayer_expected_p2p_node_id
+      - identity.tlsCertificateSha256 == acp_relayer_expected_tls_certificate_sha256
+    fail_msg: >-
+      /etc/relayerd/identity.json does not match the permanent TLS certificate
+      selected during protocol-privacy preflight.
+  when: acp_relayer_operation == 'install'
 
 - name: Check for an existing Docker installation
   ansible.builtin.stat:
