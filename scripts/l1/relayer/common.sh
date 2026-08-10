@@ -3,12 +3,13 @@
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/l1/relayer.sh [prereqs|doctor|install|access|status|logs|backup|restore|upgrade|remove]
+usage: scripts/l1/relayer.sh [prereqs|doctor|prepare|authorize|install|access|status|logs|backup|restore|upgrade|remove]
 
 All infrastructure and L1 metadata are discovered from l1.env, Terraform state,
 and the matching Ansible inventory. The official stable release is selected by
 default; set RELAYER_VERSION only to require an exact tag. Set PURGE=true with
-remove to permanently delete retained material.
+remove to permanently delete retained material. Protocol-private L1s use
+prepare, optional authorize, then install.
 EOF
   exit 2
 }

@@ -17,7 +17,7 @@ run_manage_playbook() {
     '{relayer_manage_action: $action, relayer_purge: $purge, relayer_backup_fetch_dir: $backup_dir}' >"$vars_file"
   local playbook_status=0
   (
-    cd "$ROOT_DIR/ansible"
+    cd "$ROOT_DIR/ansible" || exit 1
     ANSIBLE_CONFIG="$ROOT_DIR/ansible/ansible.cfg" \
       ansible-playbook -i "$INVENTORY_FILE" playbooks/l1/manage-relayer.yml -e "@$vars_file"
   ) || playbook_status=$?
@@ -141,7 +141,9 @@ PY
 
 
 run_restore() {
-  local backup="${BACKUP:-}" manifest expected actual answer vars_file backup_node_id backup_tls_sha
+  local backup="${BACKUP:-}" manifest expected actual answer vars_file backup_node_id backup_tls_sha authorize_answer
+  local current_node_id="" authorization_managed=false authorization_status=0 restore_status=0 cleanup_status=0
+  local observed_node_id=""
   [[ -n "$backup" ]] || die "BACKUP is required; use make relayer-restore BACKUP=/absolute/path/to/relayer-*.tar.gz"
   [[ "$backup" == /* ]] || die "BACKUP must be an absolute path to an archive created by make relayer-backup"
   [[ -f "$backup" ]] || die "BACKUP does not exist: $backup"
@@ -166,13 +168,13 @@ run_restore() {
   validate_restore_archive_identity "$backup" "$manifest" || \
     die "backup identity metadata, TLS certificate, and manifest do not describe one permanent NodeID"
 
-  run_preflight
+  run_authorization_preflight
   backup_node_id="$(jq -r '.p2pNodeId' "$manifest")"
   backup_tls_sha="$(jq -r '.tlsCertificateSha256' "$manifest")"
-  if ! protocol_privacy_gate "$backup_node_id" "$DISCOVERY_FILE" \
-    "The selected backup was not restored. Update every validator, then rerun make relayer-restore."; then
-    return 1
+  if [[ "$(jq -r '.tlsIdentityExists' "$DISCOVERY_FILE")" == true ]]; then
+    current_node_id="$(jq -r '.p2pNodeId' "$DISCOVERY_FILE")"
   fi
+  run_preflight
   jq -e \
     --argjson network "$(jq '.networkId' "$METADATA_FILE")" \
     --arg subnet "$(jq -r '.subnetId' "$METADATA_FILE")" \
@@ -205,10 +207,70 @@ run_restore() {
       relayer_restore_expected_p2p_node_id: $node_id,
       relayer_restore_expected_tls_certificate_sha256: $certificate_sha
     }' >"$vars_file"
+
+  if authorization_needed "$backup_node_id" "$DISCOVERY_FILE"; then
+    print_protocol_authorization "$backup_node_id" "$DISCOVERY_FILE"
+    printf 'Authorize this validated backup identity on the managed validators now? [y/N] '
+    IFS= read -r authorize_answer
+    case "$authorize_answer" in
+      y | Y | yes | YES | Yes)
+        authorization_managed=true
+        (run_authorization true "$backup_node_id") || authorization_status=$?
+        ;;
+      *)
+        printf 'Restore stopped. Authorize the backup NodeID manually, then rerun make relayer-restore.\n'
+        return 1
+        ;;
+    esac
+  else
+    protocol_privacy_gate "$backup_node_id" "$DISCOVERY_FILE" \
+      "The selected backup was not restored. Update every validator, then rerun make relayer-restore." || return 1
+    peer_visibility_gate "$DISCOVERY_FILE" || return 1
+  fi
+
+  if ((authorization_status != 0)); then
+    printf 'Managed backup authorization failed. Restoring the pre-restore authorization set.\n' >&2
+    (run_authorization_cleanup "$current_node_id") || cleanup_status=$?
+    if ((cleanup_status != 0)); then
+      printf 'ERROR: temporary backup authorization cleanup also failed; inspect every validator before retrying.\n' >&2
+    fi
+    return "$authorization_status"
+  fi
+
   (
     cd "$ROOT_DIR/ansible"
     ANSIBLE_CONFIG="$ROOT_DIR/ansible/ansible.cfg" \
       ansible-playbook -i "$INVENTORY_FILE" playbooks/l1/restore-relayer.yml -e "@$vars_file"
-  )
-  doctor_vm
+  ) || restore_status=$?
+  if ((restore_status == 0)); then
+    doctor_vm || restore_status=$?
+  fi
+
+  if ((restore_status == 0)); then
+    # Reconcile even when the owner pre-authorized the backup manually. The
+    # helper removes only obsolete NodeIDs recorded in its managed manifest.
+    (run_authorization_cleanup "$backup_node_id") || cleanup_status=$?
+  elif [[ "$authorization_managed" == true ]]; then
+    if observed_node_id="$(
+      (run_authorization_preflight >/dev/null && \
+        jq -r 'if .tlsIdentityExists then .p2pNodeId else "" end' "$DISCOVERY_FILE") 2>/dev/null
+    )" && \
+      [[ "$observed_node_id" == "$current_node_id" ]]; then
+      (run_authorization_cleanup "$current_node_id") || cleanup_status=$?
+    else
+      cleanup_status=1
+      printf 'ERROR: restore failed and the original permanent identity was not confirmed.\n' >&2
+      printf 'The old and backup NodeIDs remain authorized to preserve recovery access.\n' >&2
+    fi
+  fi
+
+  if ((cleanup_status != 0)); then
+    printf 'ERROR: restore authorization cleanup is incomplete; inspect every validator before another restore.\n' >&2
+    return 1
+  fi
+  if ((restore_status != 0)); then
+    printf 'ERROR: Relayer restore failed; the original authorization set was restored.\n' >&2
+    return "$restore_status"
+  fi
+  printf 'Relayer restore and temporary NodeID authorization cleanup are complete.\n'
 }

@@ -10,6 +10,7 @@ RELAYER_MODULE_DIR="scripts/l1/relayer"
 DOCTOR_MODULE="$RELAYER_MODULE_DIR/doctor.sh"
 INSTALLATION_MODULE="$RELAYER_MODULE_DIR/installation.sh"
 MANAGEMENT_MODULE="$RELAYER_MODULE_DIR/management.sh"
+AUTHORIZATION_MODULE="$RELAYER_MODULE_DIR/authorization.sh"
 PREREQUISITES_MODULE="$RELAYER_MODULE_DIR/prerequisites.sh"
 STATE_MODULE="$RELAYER_MODULE_DIR/state.sh"
 RELAYER_SOURCES=("$VM_SCRIPT" "$RELAYER_MODULE_DIR"/*.sh)
@@ -31,7 +32,7 @@ done
 [[ ! -e configs/services.yaml ]] || fail "concept-only configs/services.yaml still exists"
 [[ ! -e scripts/l1/l1-up.sh ]] || fail "concept-only l1-up orchestrator still exists"
 
-for module in common doctor installation management prerequisites state; do
+for module in common doctor installation management authorization prerequisites state; do
     [[ -f "$RELAYER_MODULE_DIR/$module.sh" ]] || fail "Relayer $module module is missing"
     require_file_text "$VM_SCRIPT" "source \"\$ROOT_DIR/scripts/l1/relayer/$module.sh\""
 done
@@ -41,7 +42,7 @@ done
 
 make -n relayer | grep -Fq './scripts/l1/relayer.sh install' || fail "make relayer does not use automatic discovery"
 for target in \
-    relayer-prereqs relayer-doctor relayer relayer-access relayer-status relayer-logs \
+    relayer-prereqs relayer-doctor relayer-prepare relayer-authorize relayer relayer-access relayer-status relayer-logs \
     relayer-backup relayer-upgrade relayer-remove; do
     make -n "$target" >/dev/null || fail "make $target is not dry-runnable"
 done
@@ -49,7 +50,7 @@ make -n relayer-restore BACKUP=/tmp/relayer-20260716T120000.tar.gz >/dev/null ||
 
 vm_help="$(make help-l1)"
 all_help="$(make help-all)"
-for command in relayer-prereqs relayer-doctor relayer relayer-access relayer-status relayer-logs relayer-backup relayer-restore relayer-upgrade relayer-remove; do
+for command in relayer-prereqs relayer-doctor relayer-prepare relayer-authorize relayer relayer-access relayer-status relayer-logs relayer-backup relayer-restore relayer-upgrade relayer-remove; do
     grep -Fq "make $command" <<<"$vm_help" || fail "help-l1 omits $command"
     grep -Fq "make $command" <<<"$all_help" || fail "help-all omits $command"
 done
@@ -105,6 +106,12 @@ require_file_text ansible/playbooks/l1/discover-relayer.yml 'SAFE_TX_SERVICE_URL
 require_file_text ansible/playbooks/l1/discover-relayer.yml 'SAFE_UI_URL'
 require_file_text ansible/playbooks/l1/discover-relayer.yml 'SAFE_ADDRESS'
 require_file_text ansible/playbooks/l1/discover-relayer.yml 'validatorPrivacy'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'runtimeConfigFresh'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'relayer-verify-identity.py'
+require_file_text ansible/playbooks/l1/discover-relayer-authorization.yml 'relayer-verify-identity.py'
+require_file_text ansible/playbooks/l1/files/relayer-verify-identity.py 'TLS certificate does not derive the recorded P2P NodeID'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'rpcNodes'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'missingValidatorPeers'
 require_file_text ansible/playbooks/l1/discover-relayer.yml 'tlsIdentityExists'
 require_file_text ansible/playbooks/l1/discover-relayer.yml 'p2pNodeId'
 require_file_text ansible/playbooks/l1/stage-relayer-identity.yml 'identity-provisioned'
@@ -136,6 +143,8 @@ require_file_text "$MANAGEMENT_MODULE" '"etc/relayerd/identity.json"'
 require_file_text "$MANAGEMENT_MODULE" 'archived TLS certificate does not derive the archived P2P NodeID'
 require_file_text "$MANAGEMENT_MODULE" 'backup manifest P2P NodeID does not match archived identity metadata'
 require_file_text "$MANAGEMENT_MODULE" 'protocol_privacy_gate "$backup_node_id"'
+require_file_text "$MANAGEMENT_MODULE" 'run_authorization_cleanup "$backup_node_id"'
+require_file_text "$MANAGEMENT_MODULE" 'run_authorization_cleanup "$current_node_id"'
 require_file_text ansible/playbooks/l1/restore-relayer.yml '/etc/relayerd/identity.json'
 require_file_text ansible/playbooks/l1/restore-relayer.yml 'Bind staged restore identity to the admitted backup manifest'
 require_file_text ansible/playbooks/l1/restore-relayer.yml 'restore_certificate.stat.checksum == restore_expected_tls_certificate_sha256'
@@ -230,13 +239,23 @@ prepare_release_line="$(grep -Fn 'prepare_release true' <<<"$run_install_body" |
     "$backup_call_line" -lt "$prepare_release_line" ]] || \
     fail "run_install no longer backs up existing state after the console password prompt but before prepare_release"
 
-identity_stage_line="$(grep -Fn 'stage_relayer_identity' <<<"$run_install_body" | cut -d: -f1)"
-privacy_gate_line="$(grep -Fn 'protocol_privacy_gate "$p2p_node_id"' <<<"$run_install_body" | cut -d: -f1)"
+identity_stage_line="$(grep -Fn 'stage_relayer_identity' <<<"$run_install_body" | head -1 | cut -d: -f1)"
+privacy_gate_line="$(grep -Fn 'protocol_privacy_gate "$p2p_node_id"' <<<"$run_install_body" | tail -1 | cut -d: -f1)"
 deploy_line="$(grep -Fn 'playbooks/l1/deploy-relayer.yml' <<<"$run_install_body" | cut -d: -f1)"
 [[ -n "$identity_stage_line" && -n "$privacy_gate_line" && -n "$deploy_line" ]] || \
     fail "run_install is missing identity staging, the protocol-privacy gate, or runtime deployment"
 [[ "$identity_stage_line" -lt "$privacy_gate_line" && "$privacy_gate_line" -lt "$deploy_line" ]] || \
     fail "run_install must stage the permanent identity, enforce protocol privacy, then install the runtime"
+require_file_text "$INSTALLATION_MODULE" 'peer_visibility_gate "$DISCOVERY_FILE"'
+require_file_text "$AUTHORIZATION_MODULE" 'complete effective allowlist'
+require_file_text ansible/playbooks/l1/authorize-relayer.yml 'serial: 1'
+require_file_text ansible/playbooks/l1/authorize-relayer.yml 'acp_relayer_stale_validator_ids'
+require_file_text ansible/playbooks/l1/authorize-relayer.yml 'mode rollback'
+require_file_text ansible/playbooks/l1/authorize-relayer.yml 'Wait for the L1 to recover on rpc[0]'
+require_file_text ansible/playbooks/l1/authorize-relayer.yml 'Check the recovered validator L1'
+require_file_text ansible/playbooks/l1/authorize-relayer.yml 'No later validator was changed.'
+require_file_text ansible/playbooks/l1/discover-relayer.yml 'Inspect managed Relayer service definitions'
+require_file_text ansible/playbooks/l1/discover-relayer.yml "'daemonInstalled': acp_relayer_service_units.results[0].stat.exists"
 
 # The WalletConnect project ID default must stay non-degenerate, or the
 # freshness-gate greps in ansible/roles/safe/tasks/main.yml become vacuous.

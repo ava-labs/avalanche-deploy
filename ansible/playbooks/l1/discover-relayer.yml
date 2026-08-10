@@ -62,12 +62,17 @@
         - acp_relayer_validator_subnet_config_stat.stat.exists | default(false)
 
     - name: Resolve effective protocol-privacy configuration
+      vars:
+        inline_configs: >-
+          {{
+            acp_relayer_subnet_config_content | b64decode | from_json
+            if acp_relayer_subnet_config_content | length > 0
+            else {}
+          }}
       ansible.builtin.set_fact:
         acp_relayer_subnet_config: >-
           {{
-            (
-              acp_relayer_subnet_config_content | b64decode | from_json
-            )
+            inline_configs[acp_relayer_expected_subnet_id] | default({})
             if acp_relayer_subnet_config_content | length > 0
             else (
               acp_relayer_validator_subnet_config_file.content | b64decode | from_json
@@ -76,16 +81,115 @@
             )
           }}
 
+    - name: Resolve the effective validator Subnet configuration path
+      ansible.builtin.set_fact:
+        acp_relayer_effective_subnet_config_path: >-
+          {{
+            '/etc/avalanchego/node.json'
+            if acp_relayer_subnet_config_content | length > 0
+            else acp_relayer_subnet_config_dir ~ '/' ~ acp_relayer_expected_subnet_id ~ '.json'
+          }}
+
+    - name: Inspect the effective validator Subnet configuration source
+      ansible.builtin.stat:
+        path: "{{ acp_relayer_effective_subnet_config_path }}"
+      register: acp_relayer_effective_subnet_config_stat
+
+    - name: Read the running AvalancheGo process ID
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - avalanchego.service
+          - --property=MainPID
+          - --value
+      register: acp_relayer_avalanchego_main_pid
+      changed_when: false
+
+    - name: Require a running AvalancheGo process
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_avalanchego_main_pid.rc == 0
+          - acp_relayer_avalanchego_main_pid.stdout | trim is match('^[1-9][0-9]*$')
+        fail_msg: >-
+          Validator {{ inventory_hostname }} does not have a running
+          avalanchego.service. Repair it before Relayer discovery.
+
+    - name: Inspect the running AvalancheGo process
+      ansible.builtin.stat:
+        path: "/proc/{{ acp_relayer_avalanchego_main_pid.stdout | trim }}"
+      register: acp_relayer_avalanchego_process_stat
+
+    - name: Require a stable process and private configuration source
+      vars:
+        validator_only: "{{ acp_relayer_subnet_config.validatorOnly | default(false) }}"
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_avalanchego_process_stat.stat.exists
+          - not (validator_only | bool) or acp_relayer_effective_subnet_config_stat.stat.exists
+        fail_msg: >-
+          Validator {{ inventory_hostname }} changed state during discovery or
+          has no effective protocol-private subnet configuration source.
+
     - name: Save effective validator protocol-privacy facts
       ansible.builtin.set_fact:
         acp_relayer_validator_only: "{{ acp_relayer_subnet_config.validatorOnly | default(false) | bool }}"
         acp_relayer_allowed_nodes: "{{ acp_relayer_subnet_config.allowedNodes | default([]) }}"
+        acp_relayer_subnet_config_mode: >-
+          {{
+            'content'
+            if acp_relayer_subnet_config_content | length > 0
+            else 'file'
+          }}
         acp_relayer_subnet_config_source: >-
           {{
-            'subnet-config-content'
+            '/etc/avalanchego/node.json:subnet-config-content'
             if acp_relayer_subnet_config_content | length > 0
             else acp_relayer_subnet_config_dir ~ '/' ~ acp_relayer_expected_subnet_id ~ '.json'
           }}
+        acp_relayer_runtime_config_fresh: >-
+          {{
+            not (acp_relayer_subnet_config.validatorOnly | default(false) | bool)
+            or (
+              acp_relayer_effective_subnet_config_stat.stat.exists
+              and (
+                acp_relayer_effective_subnet_config_stat.stat.mtime | float
+                < acp_relayer_avalanchego_process_stat.stat.mtime | float
+              )
+            )
+          }}
+
+- name: Discover RPC identities required by protocol-private L1s
+  hosts: rpc
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read each RPC NodeID
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.getNodeID
+        return_content: true
+      register: acp_relayer_rpc_node_id_result
+
+    - name: Validate each RPC NodeID
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_rpc_node_id_result.status == 200
+          - acp_relayer_rpc_node_id_result.json.error is not defined
+          - acp_relayer_rpc_node_id_result.json.result.nodeID is match('^NodeID-')
+        fail_msg: >-
+          RPC {{ inventory_hostname }} did not return a NodeID from its AvalancheGo
+          Info API. Confirm avalanchego is running and the inventory points at the
+          deployed L1.
+
+    - name: Save the discovered RPC NodeID
+      ansible.builtin.set_fact:
+        acp_relayer_rpc_node_id: "{{ acp_relayer_rpc_node_id_result.json.result.nodeID }}"
 
 - name: Verify L1 metadata, contracts, RPC health, and peer visibility
   hosts: rpc[0]
@@ -365,18 +469,6 @@
           PoAManager {{ acp_relayer_expected_manager_address }}. Bare managers and
           custom wrappers are unsupported.
 
-    - name: Verify every deployed validator is visible to rpc[0]
-      ansible.builtin.assert:
-        that:
-          - hostvars[item].acp_relayer_node_id is defined
-          - hostvars[item].acp_relayer_node_id in acp_relayer_visible_peer_ids
-        fail_msg: >-
-          rpc[0] cannot see validator {{ item }}
-          ({{ hostvars[item].acp_relayer_node_id | default('no NodeID discovered') }}).
-          Repair AvalancheGo peering before installing; otherwise the Relayer cannot
-          gather Warp signatures safely.
-      loop: "{{ groups['validators'] }}"
-
     - name: Read owner bytecode to distinguish EOA from Safe
       ansible.builtin.uri:
         url: "http://127.0.0.1:9650/ext/bc/{{ acp_relayer_expected_blockchain_id }}/rpc"
@@ -455,6 +547,14 @@
 
     - name: Discover existing services and persistent Relayer material
       ansible.builtin.service_facts:
+
+    - name: Inspect managed Relayer service definitions
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/systemd/system/relayerd.service
+        - /etc/systemd/system/relayer-console.service
+      register: acp_relayer_service_units
 
     - name: Check whether the Safe oneshot service is active
       ansible.builtin.command:
@@ -554,25 +654,19 @@
       changed_when: false
       when: acp_relayer_existing_files.results[7].stat.exists
 
-    - name: Read permanent Relayer P2P identity metadata
-      ansible.builtin.slurp:
-        src: /etc/relayerd/identity.json
-      register: acp_relayer_existing_identity_file
+    - name: Derive and verify the permanent Relayer P2P identity
+      ansible.builtin.script:
+        cmd: >-
+          {{ playbook_dir }}/files/relayer-verify-identity.py
+          --identity /etc/relayerd/identity.json
+          --certificate /var/lib/relayerd/tls/staker.crt
+      register: acp_relayer_existing_identity_result
+      changed_when: false
       when: acp_relayer_existing_files.results[10].stat.exists
 
-    - name: Verify permanent Relayer P2P identity metadata
-      vars:
-        identity: "{{ acp_relayer_existing_identity_file.content | b64decode | from_json }}"
-      ansible.builtin.assert:
-        that:
-          - identity.schemaVersion | int == 1
-          - identity.p2pNodeId is match('^NodeID-')
-          - identity.tlsCertificateSha256 is match('^[0-9a-f]{64}$')
-          - identity.tlsCertificateSha256 == acp_relayer_existing_files.results[5].stat.checksum
-        fail_msg: >-
-          /etc/relayerd/identity.json is invalid or does not match the retained
-          TLS certificate. Restore the certificate, key, and identity metadata
-          from the same retained backup.
+    - name: Save the verified permanent Relayer P2P identity
+      ansible.builtin.set_fact:
+        acp_relayer_existing_identity: "{{ acp_relayer_existing_identity_result.stdout | from_json }}"
       when: acp_relayer_existing_files.results[10].stat.exists
 
     - name: Find retained manual backups
@@ -641,6 +735,8 @@
     - name: Initialize Relayer-compatible manual peer records
       ansible.builtin.set_fact:
         acp_relayer_peers: []
+        acp_relayer_rpc_nodes: []
+        acp_relayer_missing_validator_peers: []
         acp_relayer_validator_privacy: []
 
     - name: Build Relayer-compatible manual peer records
@@ -657,6 +753,35 @@
           }}
       loop: "{{ groups['validators'] }}"
 
+    - name: Build managed RPC NodeID records
+      ansible.builtin.set_fact:
+        acp_relayer_rpc_nodes: >-
+          {{
+            acp_relayer_rpc_nodes
+            + [
+              {
+                'name': item,
+                'nodeId': hostvars[item].acp_relayer_rpc_node_id
+              }
+            ]
+          }}
+      loop: "{{ groups['rpc'] }}"
+
+    - name: Record validators that are not visible to rpc[0]
+      ansible.builtin.set_fact:
+        acp_relayer_missing_validator_peers: >-
+          {{
+            acp_relayer_missing_validator_peers
+            + [
+              {
+                'name': item,
+                'nodeId': hostvars[item].acp_relayer_node_id
+              }
+            ]
+          }}
+      loop: "{{ groups['validators'] }}"
+      when: hostvars[item].acp_relayer_node_id not in acp_relayer_visible_peer_ids
+
     - name: Build all-validator protocol-privacy records
       ansible.builtin.set_fact:
         acp_relayer_validator_privacy: >-
@@ -668,7 +793,9 @@
                 'nodeId': hostvars[item].acp_relayer_node_id,
                 'validatorOnly': hostvars[item].acp_relayer_validator_only | bool,
                 'allowedNodes': hostvars[item].acp_relayer_allowed_nodes,
-                'source': hostvars[item].acp_relayer_subnet_config_source
+                'sourceMode': hostvars[item].acp_relayer_subnet_config_mode,
+                'source': hostvars[item].acp_relayer_subnet_config_source,
+                'runtimeConfigFresh': hostvars[item].acp_relayer_runtime_config_fresh | bool
               }
             ]
           }}
@@ -719,6 +846,8 @@
               'safeConsoleEnvPresent': acp_relayer_safe_console_env.stat.exists | bool,
               'safeConsoleEnvComplete': acp_relayer_safe_console_env_complete | bool,
               'peers': acp_relayer_peers,
+              'rpcNodes': acp_relayer_rpc_nodes,
+              'missingValidatorPeers': acp_relayer_missing_validator_peers,
               'validatorPrivacy': acp_relayer_validator_privacy,
               'infoRpcUrl': acp_relayer_info_rpc_url,
               'bootstrapPeerCount': acp_relayer_bootstrap_peer_ids | length,
@@ -740,13 +869,13 @@
                 and acp_relayer_existing_files.results[10].stat.exists
               ) | bool,
               'p2pNodeId': (
-                (acp_relayer_existing_identity_file.content | b64decode | from_json).p2pNodeId
-                if acp_relayer_existing_identity_file.content is defined
+                acp_relayer_existing_identity.p2pNodeId
+                if acp_relayer_existing_identity is defined
                 else ''
               ),
               'tlsCertificateSha256': (
-                (acp_relayer_existing_identity_file.content | b64decode | from_json).tlsCertificateSha256
-                if acp_relayer_existing_identity_file.content is defined
+                acp_relayer_existing_identity.tlsCertificateSha256
+                if acp_relayer_existing_identity is defined
                 else ''
               ),
               'restoreUtilityInstalled': acp_relayer_existing_files.results[8].stat.exists | bool,
@@ -770,8 +899,8 @@
                 if acp_relayer_latest_backup_manifest_file.content is defined
                 else {}
               ),
-              'daemonInstalled': 'relayerd.service' in ansible_facts.services,
-              'consoleInstalled': 'relayer-console.service' in ansible_facts.services
+              'daemonInstalled': acp_relayer_service_units.results[0].stat.exists | bool,
+              'consoleInstalled': acp_relayer_service_units.results[1].stat.exists | bool
             } | to_nice_json
           }}
         dest: "{{ acp_relayer_discovery_file }}"

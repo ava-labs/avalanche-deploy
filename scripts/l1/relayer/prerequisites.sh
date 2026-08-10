@@ -112,7 +112,7 @@ run_preflight() {
     }' >"$vars_file"
 
   (
-    cd "$ROOT_DIR/ansible"
+    cd "$ROOT_DIR/ansible" || exit 1
     ANSIBLE_CONFIG="$ROOT_DIR/ansible/ansible.cfg" \
       ansible-playbook -i "$INVENTORY_FILE" playbooks/l1/discover-relayer.yml -e "@$vars_file"
   )
@@ -120,6 +120,14 @@ run_preflight() {
     '.target == $target and .infoRpcUrl == $info_rpc_url and
      (.eligibleBootstrapPeerCount | type) == "number" and
      (.peers | length > 0) and (.architecture | length > 0) and
+     (.rpcNodes | type) == "array" and (.rpcNodes | length > 0) and
+     all(.rpcNodes[];
+       (.name | type) == "string" and
+       (.nodeId | startswith("NodeID-"))) and
+     (.missingValidatorPeers | type) == "array" and
+     all(.missingValidatorPeers[];
+       (.name | type) == "string" and
+       (.nodeId | startswith("NodeID-"))) and
      (.validatorPrivacy | type) == "array" and
      (.validatorPrivacy | length > 0) and
      all(.validatorPrivacy[];
@@ -128,13 +136,70 @@ run_preflight() {
        (.validatorOnly | type) == "boolean" and
        (.allowedNodes | type) == "array" and
        all(.allowedNodes[]; type == "string") and
-       (.source | type) == "string")' \
+       (.sourceMode == "file" or .sourceMode == "content") and
+       (.source | type) == "string" and
+       (.runtimeConfigFresh | type) == "boolean")' \
     "$DISCOVERY_FILE" >/dev/null || \
     die "Relayer discovery did not produce a complete result; inspect the Ansible preflight output above"
   if [[ "$enforce_bootstrap" == true ]]; then
     jq -e '.eligibleBootstrapPeerCount > 0' "$DISCOVERY_FILE" >/dev/null || \
       die "the managed Info API has no peers in the current Primary validator set; rerun make relayer-doctor for remediation"
   fi
+}
+
+run_authorization_preflight() {
+  local vars_file
+  discover_infrastructure
+  load_l1_metadata
+  DISCOVERY_FILE="$WORK_DIR/authorization-discovery.json"
+  vars_file="$WORK_DIR/authorization-discovery-vars.json"
+  jq -n \
+    --arg target "$TARGET_NAME" \
+    --arg output "$DISCOVERY_FILE" \
+    --arg subnet "$(jq -r '.subnetId' "$METADATA_FILE")" \
+    --argjson validator_private_ips "$VALIDATOR_PRIVATE_IPS" \
+    '{
+      acp_relayer_discovered_target: $target,
+      acp_relayer_discovery_file: $output,
+      acp_relayer_expected_subnet_id: $subnet,
+      acp_relayer_validator_private_ips: $validator_private_ips
+    }' >"$vars_file"
+
+  (
+    cd "$ROOT_DIR/ansible" || exit 1
+    ANSIBLE_CONFIG="$ROOT_DIR/ansible/ansible.cfg" \
+      ansible-playbook -i "$INVENTORY_FILE" playbooks/l1/discover-relayer-authorization.yml -e "@$vars_file"
+  )
+  jq -e --arg target "$TARGET_NAME" '
+    .target == $target and
+    (.architecture | length > 0) and
+    (.peers | type) == "array" and (.peers | length > 0) and
+    (.rpcNodes | type) == "array" and (.rpcNodes | length > 0) and
+    all(.rpcNodes[];
+      (.name | type) == "string" and
+      (.nodeId | startswith("NodeID-"))) and
+    (.missingValidatorPeers | type) == "array" and
+    all(.missingValidatorPeers[];
+      (.name | type) == "string" and
+      (.nodeId | startswith("NodeID-"))) and
+    (.validatorPrivacy | type) == "array" and
+    (.validatorPrivacy | length > 0) and
+    all(.validatorPrivacy[];
+      (.name | type) == "string" and
+      (.nodeId | startswith("NodeID-")) and
+      (.validatorOnly | type) == "boolean" and
+      (.allowedNodes | type) == "array" and
+      all(.allowedNodes[]; type == "string") and
+      (.sourceMode == "file" or .sourceMode == "content") and
+      (.source | type) == "string" and
+      (.runtimeConfigFresh | type) == "boolean") and
+    (.keystoreExists | type) == "boolean" and
+    (.tlsPairExists | type) == "boolean" and
+    (.tlsIdentityExists | type) == "boolean" and
+    (.daemonInstalled | type) == "boolean" and
+    (.consoleInstalled | type) == "boolean"
+  ' "$DISCOVERY_FILE" >/dev/null || \
+    die "authorization discovery did not produce a complete result; inspect the Ansible output above"
 }
 
 sha256_file() {

@@ -17,6 +17,14 @@
     - name: Gather Relayer service state
       ansible.builtin.service_facts:
 
+    - name: Inspect managed Relayer service definitions
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/systemd/system/relayerd.service
+        - /etc/systemd/system/relayer-console.service
+      register: acp_relayer_service_units
+
     - name: Query daemon health when installed
       ansible.builtin.uri:
         url: http://127.0.0.1:8081/health
@@ -25,7 +33,7 @@
       failed_when: false
       when:
         - acp_relayer_manage_action == 'status'
-        - "'relayerd.service' in ansible_facts.services"
+        - acp_relayer_service_units.results[0].stat.exists
 
     - name: Read funding metadata when present
       ansible.builtin.slurp:
@@ -38,8 +46,18 @@
       ansible.builtin.debug:
         msg:
           target: "{{ inventory_hostname }}"
-          daemon: "{{ ansible_facts.services['relayerd.service'].state | default('not installed') }}"
-          console: "{{ ansible_facts.services['relayer-console.service'].state | default('not installed') }}"
+          daemon: >-
+            {{
+              ansible_facts.services.get('relayerd.service', {}).get('state', 'not installed')
+              if acp_relayer_service_units.results[0].stat.exists
+              else 'not installed'
+            }}
+          console: >-
+            {{
+              ansible_facts.services.get('relayer-console.service', {}).get('state', 'not installed')
+              if acp_relayer_service_units.results[1].stat.exists
+              else 'not installed'
+            }}
           healthy: "{{ acp_relayer_health.status | default(0) == 200 }}"
           funding: "{{ (acp_relayer_funding.content | b64decode | from_json) if acp_relayer_funding.content is defined else 'unavailable' }}"
       when: acp_relayer_manage_action == 'status'
@@ -51,13 +69,13 @@
           ansible.builtin.systemd:
             name: relayer-console
             state: stopped
-          when: "'relayer-console.service' in ansible_facts.services"
+          when: acp_relayer_service_units.results[1].stat.exists
 
         - name: Gracefully drain relayerd before backup
           ansible.builtin.systemd:
             name: relayerd
             state: stopped
-          when: "'relayerd.service' in ansible_facts.services"
+          when: acp_relayer_service_units.results[0].stat.exists
 
         - name: Ensure backup directory exists
           ansible.builtin.file:
@@ -164,13 +182,13 @@
           ansible.builtin.systemd:
             name: relayerd
             state: started
-          when: "'relayerd.service' in ansible_facts.services"
+          when: acp_relayer_service_units.results[0].stat.exists
 
         - name: Restart console after backup
           ansible.builtin.systemd:
             name: relayer-console
             state: started
-          when: "'relayer-console.service' in ansible_facts.services"
+          when: acp_relayer_service_units.results[1].stat.exists
 
         - name: Report backup path
           ansible.builtin.debug:

@@ -66,9 +66,37 @@ doctor_safe_console_environment() {
   fi
 }
 
+doctor_peer_visibility() {
+  local discovery_file="$1"
+  local doctor_scope="$2"
+  local missing_count missing_names validator_count private_count
+  missing_count="$(jq '(.missingValidatorPeers // []) | length' "$discovery_file")"
+  if ((missing_count == 0)); then
+    doctor_result PASS VM.PEERS.VISIBLE "rpc[0] sees every deployed validator peer" none
+    return
+  fi
+
+  missing_names="$(jq -r \
+    '(.missingValidatorPeers // []) | map("\(.name) (\(.nodeId))") | join(", ")' \
+    "$discovery_file")"
+  validator_count="$(jq '(.validatorPrivacy // []) | length' "$discovery_file")"
+  private_count="$(jq '[(.validatorPrivacy // [])[] | select(.validatorOnly)] | length' "$discovery_file")"
+  if [[ "$doctor_scope" == install ]] && \
+    ((validator_count > 0 && private_count == validator_count)); then
+    doctor_result WARN VM.PEERS.VISIBLE \
+      "protocol-private validators are not visible to rpc[0]: $missing_names" \
+      "prepare or authorize the permanent identity; make relayer will offer managed authorization before runtime installation"
+  else
+    doctor_result FAIL VM.PEERS.VISIBLE \
+      "rpc[0] cannot see deployed validator peers: $missing_names" \
+      "add every managed RPC NodeID to allowedNodes on every protocol-private validator, restart affected AvalancheGo nodes, and rerun doctor"
+  fi
+}
+
 doctor_protocol_privacy() {
   local discovery_file="$1"
-  local validator_count private_count tls_identity_exists p2p_node_id missing_names
+  local doctor_scope="${2:-operations}"
+  local validator_count private_count tls_identity_exists p2p_node_id missing_names missing_rpc_names stale_names
   validator_count="$(jq '.validatorPrivacy | length' "$discovery_file")"
   private_count="$(jq '[.validatorPrivacy[] | select(.validatorOnly)] | length' "$discovery_file")"
   tls_identity_exists="$(jq -r '.tlsIdentityExists // false' "$discovery_file")"
@@ -84,18 +112,62 @@ doctor_protocol_privacy() {
   elif [[ "$tls_identity_exists" != true ]]; then
     doctor_result WARN VM.PROTOCOL.PRIVACY \
       "all validators enforce protocol privacy; the permanent Relayer NodeID has not been staged yet" \
-      "make relayer will stage the identity, print its NodeID, and stop before runtime installation if allowlisting is required"
+      "run make relayer-prepare to stage and print the permanent identity before authorization"
   else
     missing_names="$(jq -r --arg node_id "$p2p_node_id" \
       '[.validatorPrivacy[] | select(.allowedNodes | index($node_id) | not) | .name] | join(", ")' \
       "$discovery_file")"
     if [[ -n "$missing_names" ]]; then
-      doctor_result FAIL VM.PROTOCOL.PRIVACY \
-        "$p2p_node_id is absent from allowedNodes on: $missing_names" \
-        "add it on every validator, restart affected AvalancheGo nodes, and follow https://build.avax.network/docs/nodes/configure/avalanche-l1-configs#allowednodes-string-list"
+      if [[ "$doctor_scope" == install ]]; then
+        doctor_result WARN VM.PROTOCOL.PRIVACY \
+          "$p2p_node_id is absent from allowedNodes on: $missing_names" \
+          "make relayer will offer managed authorization before runtime installation"
+      else
+        doctor_result FAIL VM.PROTOCOL.PRIVACY \
+          "$p2p_node_id is absent from allowedNodes on: $missing_names" \
+          "add it on every validator, restart affected AvalancheGo nodes, or run make relayer-authorize"
+      fi
     else
-      doctor_result PASS VM.PROTOCOL.PRIVACY \
-        "all $validator_count protocol-private validator(s) allow $p2p_node_id" none
+      missing_rpc_names="$(jq -r '
+        [(.rpcNodes // [])[] as $rpc
+         | .validatorPrivacy[]
+         | select(.allowedNodes | index($rpc.nodeId) | not)
+         | "\($rpc.name) on \(.name)"]
+        | unique
+        | join(", ")
+      ' "$discovery_file")"
+      if [[ -n "$missing_rpc_names" ]]; then
+        if [[ "$doctor_scope" == install ]]; then
+          doctor_result WARN VM.PROTOCOL.PRIVACY \
+            "managed RPC NodeIDs are absent from protocol-private validator allowlists: $missing_rpc_names" \
+            "make relayer will offer managed authorization before runtime installation"
+        else
+          doctor_result FAIL VM.PROTOCOL.PRIVACY \
+            "managed RPC NodeIDs are absent from protocol-private validator allowlists: $missing_rpc_names" \
+            "add every managed RPC NodeID to every validator and restart them, or run make relayer-authorize"
+        fi
+      else
+        stale_names="$(jq -r '
+          [.validatorPrivacy[]
+           | select(.validatorOnly and (.runtimeConfigFresh | not))
+           | .name]
+          | join(", ")
+        ' "$discovery_file")"
+        if [[ -n "$stale_names" ]]; then
+          if [[ "$doctor_scope" == install ]]; then
+            doctor_result WARN VM.PROTOCOL.PRIVACY \
+              "protocol-private configuration is newer than the running AvalancheGo process on: $stale_names" \
+              "make relayer will offer managed validator restarts before runtime installation"
+          else
+            doctor_result FAIL VM.PROTOCOL.PRIVACY \
+              "protocol-private configuration is newer than the running AvalancheGo process on: $stale_names" \
+              "restart every listed validator or run make relayer-authorize"
+          fi
+        else
+          doctor_result PASS VM.PROTOCOL.PRIVACY \
+            "all $validator_count protocol-private validator(s) loaded allowlists for the permanent Relayer and managed RPC NodeIDs" none
+        fi
+      fi
     fi
   fi
 }
@@ -250,7 +322,7 @@ doctor_vm() {
     if (run_preflight false) >/dev/null 2>&1; then
       preflight_ok=true
       doctor_result PASS VM.RPC.HEALTH "rpc[0] matches the managed network, subnet, blockchain, and EVM chain" none
-      doctor_result PASS VM.PEERS.VISIBLE "rpc[0] sees every deployed validator peer" none
+      doctor_peer_visibility "$DISCOVERY_FILE" "$doctor_scope"
       local eligible_bootstrap_count bootstrap_info_url
       eligible_bootstrap_count="$(jq -r '.eligibleBootstrapPeerCount // 0' "$DISCOVERY_FILE")"
       bootstrap_info_url="$(jq -r '.infoRpcUrl // empty' "$DISCOVERY_FILE")"
@@ -264,7 +336,27 @@ doctor_vm() {
       fi
       doctor_result PASS VM.MANAGER.TOPOLOGY "official PoAManager and initialized owned ValidatorManager topology verified" none
       doctor_safe_integration "$DISCOVERY_FILE"
-      doctor_protocol_privacy "$DISCOVERY_FILE"
+      doctor_protocol_privacy "$DISCOVERY_FILE" "$doctor_scope"
+    elif (run_authorization_preflight) >/dev/null 2>&1 && \
+      [[ "$(jq '[.validatorPrivacy[] | select(.validatorOnly)] | length' "$DISCOVERY_FILE")" \
+        == "$(jq '.validatorPrivacy | length' "$DISCOVERY_FILE")" ]]; then
+      doctor_result FAIL VM.PREFLIGHT.REMOTE \
+        "full RPC, topology, or retained-state preflight failed on a consistently protocol-private L1" \
+        "complete make relayer-prepare and make relayer-authorize, then rerun doctor to expose any remaining blocker"
+      doctor_result SKIP VM.RPC.HEALTH \
+        "L1 RPC health was not confirmed by authorization-only discovery" \
+        "authorize every managed RPC NodeID on every validator and restart affected validators"
+      doctor_peer_visibility "$DISCOVERY_FILE" "$doctor_scope"
+      doctor_result SKIP VM.PEERS.BOOTSTRAP \
+        "Primary Network bootstrap eligibility was not checked by authorization-only discovery" \
+        "rerun doctor after protocol authorization"
+      doctor_result SKIP VM.MANAGER.TOPOLOGY \
+        "manager topology was not checked by authorization-only discovery" \
+        "rerun doctor after protocol authorization"
+      doctor_result SKIP VM.SAFE.DISCOVERY \
+        "EOA/Safe ownership was not checked by authorization-only discovery" \
+        "rerun doctor after protocol authorization"
+      doctor_protocol_privacy "$DISCOVERY_FILE" "$doctor_scope"
     else
       doctor_result FAIL VM.PREFLIGHT.REMOTE "remote RPC, peer, topology, or retained-state preflight failed" "run ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook -i ${INVENTORY_FILE#"$ROOT_DIR/"} ansible/playbooks/l1/discover-relayer.yml with the generated discovery variables, or rerun make relayer for detailed output"
       doctor_result SKIP VM.RPC.HEALTH "RPC health was not independently confirmed" "repair the remote preflight"

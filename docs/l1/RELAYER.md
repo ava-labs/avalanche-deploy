@@ -89,14 +89,78 @@ Discovery reads the effective Subnet config from every existing validator. If
 whose P2P ports are protected only by firewalls, no protocol allowlist is
 required and installation continues normally.
 
-If `validatorOnly` is enabled, `make relayer` prints the permanent Relayer
-NodeID and stops before funding metadata, daemon installation, or service
-startup unless that NodeID is present in `allowedNodes` on **every existing L1
-validator**. The chain owner must merge the printed NodeID into each
-validator's Subnet config and restart each affected AvalancheGo node. Updating
-only `rpc[0]` or one validator is insufficient. Follow the
-[AvalancheGo `allowedNodes` documentation](https://build.avax.network/docs/nodes/configure/avalanche-l1-configs#allowednodes-string-list),
-then rerun `make relayer`; the staged identity is reused.
+If `validatorOnly` is enabled, every managed RPC node must also be present in
+`allowedNodes` on every validator. RPC nodes are not L1 validators, so
+`validatorOnly` otherwise prevents them from exchanging this L1's messages and
+the Relayer cannot use them to verify topology or gather Warp signatures.
+
+For a fresh protocol-private installation, use this sequence:
+
+```bash
+make relayer-prepare
+# Authorize the printed NodeIDs by one of the methods below.
+make relayer
+```
+
+`make relayer-prepare` creates and stages the permanent Relayer identity. It
+does not install or start the Relayer. It prints the permanent Relayer NodeID,
+all managed RPC NodeIDs, every missing validator entry, and the effective
+configuration source on each validator.
+
+The chain owner can merge the printed NodeIDs into `allowedNodes` by using the
+owner's normal process. Each NodeID must be present on **every existing L1
+validator**. Restart each affected AvalancheGo node. Updating only `rpc[0]` or
+one validator is insufficient. Follow the
+[AvalancheGo `allowedNodes` documentation](https://build.avax.network/docs/nodes/configure/avalanche-l1-configs#allowednodes-string-list).
+
+Avalanche Deploy operators can instead run:
+
+```bash
+make relayer-authorize
+```
+
+This optional command audits every validator before it makes a change. It
+merges only the missing managed NodeIDs and preserves unrelated entries. It
+does not enable `validatorOnly`; the chain owner controls that policy. It then
+restarts one affected validator at a time. After each restart, it waits
+for the local Info API, L1 bootstrap, and RPC peer visibility. If a validator
+fails, the command restores that validator's exact previous configuration,
+restarts it, checks recovery, and stops before it changes a later validator.
+Validators that completed earlier keep the safe allowlist superset.
+
+If the owner completed authorization by another method, skip
+`make relayer-authorize` and run `make relayer`. The installer verifies the
+effective configuration, confirms that the running AvalancheGo process started
+after that configuration was written, and checks RPC peer visibility. A config
+edit without a validator restart is not accepted. If authorization or a restart
+is incomplete, `make relayer` offers to run the managed authorization command
+in the same invocation. If the operator accepts, all readiness checks run again
+before installation continues.
+
+Authorization discovery does not depend on a working L1 RPC connection. This
+lets the managed command restore RPC access after `validatorOnly` excludes an
+RPC node. Full RPC, contract topology, Safe, release, and installation checks
+still run before the Relayer starts.
+
+#### Relayers outside Avalanche Deploy
+
+An external Relayer operator must perform the same sequence with the operator's
+own configuration system:
+
+1. Run `relayer-setup` before the service starts. Retain its TLS certificate,
+   TLS key, and generated configuration as one permanent identity.
+2. Read `p2pNodeId` from the JSON setup result.
+3. Give the Relayer NodeID and every non-validator peer NodeID to the L1 owner.
+4. Merge all of those NodeIDs into `allowedNodes` on every validator that uses
+   `validatorOnly: true`.
+5. Restart the affected AvalancheGo validators and verify their recovery.
+6. Start `relayerd --config-file=<generated-config>` only after the effective
+   configuration is complete.
+
+`make relayer-authorize` applies only to validators in the active Avalanche
+Deploy Terraform and Ansible inventory. The Relayer binary cannot edit an
+external owner's validators. External operators must use the owner's normal
+configuration management, but they do not need a different Relayer release.
 
 The workflow also blocks a mixed validator set where only some validators have
 `validatorOnly` enabled. Apply one protocol-privacy policy consistently before
@@ -247,6 +311,8 @@ confirmed that no operation was persisted.
 | Command | Result |
 |---|---|
 | `make relayer-doctor` | Comprehensive read-only readiness check |
+| `make relayer-prepare` | Create or reuse the permanent NodeID without installing the runtime |
+| `make relayer-authorize` | Optionally update every managed validator and restart only affected nodes |
 | `make relayer-access` | Local console and L1 RPC tunnels |
 | `make relayer-status` | Lightweight runtime snapshot |
 | `make relayer-logs` | Follow runtime logs |
@@ -284,7 +350,15 @@ pre-restore archive, uses `relayer-restore` to replace bbolt state offline,
 restores the matching encrypted keys/TLS material, and checks readiness. A
 failed readiness check automatically reapplies the pre-restore state. If the
 workload was normally removed, restore leaves it removed and ready for an
-idempotent reinstall.
+idempotent reinstall. On a protocol-private L1, managed restore temporarily
+authorizes both the current NodeID and the validated backup NodeID when the
+owner has not already done so. After every successful restore, including one
+that the owner pre-authorized, it removes only obsolete NodeID entries recorded
+in its managed manifest. After a failed restore, it removes the temporary
+backup NodeID only when discovery confirms that the original identity was
+restored. If identity recovery cannot be confirmed, both NodeIDs remain
+authorized and the command stops for operator recovery instead of risking a
+P2P lockout.
 
 ## Removal and purge
 

@@ -39,13 +39,15 @@ source "$ROOT_DIR/scripts/l1/relayer/prerequisites.sh"
 source "$ROOT_DIR/scripts/l1/relayer/doctor.sh"
 # shellcheck source=scripts/l1/relayer/management.sh
 source "$ROOT_DIR/scripts/l1/relayer/management.sh"
+# shellcheck source=scripts/l1/relayer/authorization.sh
+source "$ROOT_DIR/scripts/l1/relayer/authorization.sh"
 # shellcheck source=scripts/l1/relayer/installation.sh
 source "$ROOT_DIR/scripts/l1/relayer/installation.sh"
 
 main() {
   [[ $# -le 1 ]] || usage
   validate_release_source
-  if [[ "$ACTION" =~ ^(doctor|install|restore|upgrade)$ ]]; then
+  if [[ "$ACTION" =~ ^(doctor|prepare|install|restore|upgrade)$ ]]; then
     resolve_release_version
     if [[ ! "$RELAYER_VERSION" =~ ^v[0-9A-Za-z][0-9A-Za-z.+-]*$ ]]; then
       printf 'ERROR: RELAYER_VERSION must be official-latest or a release tag such as v0.1.0\n' >&2
@@ -58,6 +60,12 @@ main() {
       ;;
     doctor)
       doctor_vm
+      ;;
+    prepare)
+      run_prepare
+      ;;
+    authorize)
+      run_authorization
       ;;
     install)
       run_install

@@ -1,0 +1,337 @@
+---
+- name: Validate managed Relayer authorization inputs
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Require complete managed authorization inputs
+      ansible.builtin.assert:
+        that:
+          - groups['validators'] is defined
+          - groups['validators'] | length > 0
+          - groups['rpc'] is defined
+          - groups['rpc'] | length > 0
+          - acp_relayer_subnet_id | length > 0
+          - acp_relayer_blockchain_id | length > 0
+          - acp_relayer_required_nodes | type_debug == 'list'
+          - acp_relayer_required_nodes | length > 0
+          - >-
+            acp_relayer_required_nodes
+            | map(attribute='nodeId')
+            | select('match', '^NodeID-')
+            | list
+            | length == acp_relayer_required_nodes | length
+          - acp_relayer_missing_validator_peer_ids | type_debug == 'list'
+          - >-
+            acp_relayer_missing_validator_peer_ids
+            | select('match', '^NodeID-')
+            | list
+            | length == acp_relayer_missing_validator_peer_ids | length
+          - acp_relayer_stale_validator_ids | type_debug == 'list'
+          - >-
+            acp_relayer_stale_validator_ids
+            | select('match', '^NodeID-')
+            | list
+            | length == acp_relayer_stale_validator_ids | length
+          - acp_relayer_authorization_run_id is match('^[0-9]{8}T[0-9]{6}Z$')
+        fail_msg: >-
+          Managed authorization requires the deployed validator and RPC inventory,
+          the L1 IDs, the complete required NodeID list, and a UTC run ID.
+
+- name: Audit every validator before the first change
+  hosts: validators
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Read the validator NodeID
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.getNodeID
+        return_content: true
+      register: relayer_authorize_node_id_result
+
+    - name: Inspect the effective subnet configuration
+      ansible.builtin.script:
+        cmd: >-
+          {{ playbook_dir }}/files/relayer-authorize-config.py
+          --mode inspect
+          --subnet-id {{ acp_relayer_subnet_id | quote }}
+          --required-nodes-json {{ acp_relayer_required_nodes | to_json | quote }}
+          --run-id {{ acp_relayer_authorization_run_id | quote }}
+          --host-name {{ inventory_hostname | quote }}
+      register: relayer_authorize_inspection_result
+      changed_when: false
+
+    - name: Save the validator authorization plan
+      ansible.builtin.set_fact:
+        relayer_authorize_node_id: "{{ relayer_authorize_node_id_result.json.result.nodeID }}"
+        relayer_authorize_inspection: "{{ relayer_authorize_inspection_result.stdout | from_json }}"
+
+    - name: Require an existing protocol-private policy
+      ansible.builtin.assert:
+        that:
+          - relayer_authorize_node_id is match('^NodeID-')
+          - relayer_authorize_inspection.validatorOnly | bool
+        fail_msg: >-
+          {{ inventory_hostname }} does not have validatorOnly=true. This command
+          does not enable protocol privacy. Apply one policy to all validators first.
+
+    - name: Classify the required action
+      ansible.builtin.set_fact:
+        relayer_authorize_needs_apply: >-
+          {{
+            relayer_authorize_inspection.configChanged | bool
+            or relayer_authorize_inspection.manifestChanged | bool
+          }}
+        relayer_authorize_needs_restart: >-
+          {{
+            relayer_authorize_inspection.configChanged | bool
+            or relayer_authorize_node_id in acp_relayer_missing_validator_peer_ids
+            or relayer_authorize_node_id in acp_relayer_stale_validator_ids
+          }}
+
+- name: Report the managed authorization plan
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Show each validator action
+      ansible.builtin.debug:
+        msg: >-
+          {{ item }}: source={{ hostvars[item].relayer_authorize_inspection.sourcePath }},
+          update={{ hostvars[item].relayer_authorize_needs_apply | bool }},
+          restart={{ hostvars[item].relayer_authorize_needs_restart | bool }},
+          missing={{ hostvars[item].relayer_authorize_inspection.missingRequiredNodeIds | join(',') | default('none', true) }}
+      loop: "{{ groups['validators'] }}"
+
+- name: Apply authorization with one validator restart at a time
+  hosts: validators
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Update and verify this validator
+      when:
+        - relayer_authorize_needs_apply | bool or relayer_authorize_needs_restart | bool
+      block:
+        - name: Merge managed NodeIDs into the effective subnet configuration
+          ansible.builtin.script:
+            cmd: >-
+              {{ playbook_dir }}/files/relayer-authorize-config.py
+              --mode apply
+              --subnet-id {{ acp_relayer_subnet_id | quote }}
+              --required-nodes-json {{ acp_relayer_required_nodes | to_json | quote }}
+              --run-id {{ acp_relayer_authorization_run_id | quote }}
+              --host-name {{ inventory_hostname | quote }}
+          register: relayer_authorize_apply_result
+          changed_when: (relayer_authorize_apply_result.stdout | from_json).changed | bool
+
+        - name: Save the applied authorization result
+          ansible.builtin.set_fact:
+            relayer_authorize_applied: "{{ relayer_authorize_apply_result.stdout | from_json }}"
+
+        - name: Restart AvalancheGo when configuration or runtime state changed
+          ansible.builtin.systemd:
+            name: avalanchego
+            state: restarted
+          when: relayer_authorize_needs_restart | bool
+
+        - name: Wait for the validator Info API
+          ansible.builtin.uri:
+            url: http://127.0.0.1:9650/ext/info
+            method: POST
+            body_format: json
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: info.getNodeID
+            return_content: true
+          register: relayer_authorize_api_ready
+          until:
+            - relayer_authorize_api_ready.status == 200
+            - relayer_authorize_api_ready.json.result.nodeID == relayer_authorize_node_id
+          retries: 30
+          delay: 5
+          when: relayer_authorize_needs_restart | bool
+
+        - name: Wait for the L1 to report bootstrapped
+          ansible.builtin.uri:
+            url: http://127.0.0.1:9650/ext/info
+            method: POST
+            body_format: json
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: info.isBootstrapped
+              params:
+                chain: "{{ acp_relayer_blockchain_id }}"
+            return_content: true
+          register: relayer_authorize_l1_ready
+          until:
+            - relayer_authorize_l1_ready.status == 200
+            - relayer_authorize_l1_ready.json.result.isBootstrapped | bool
+          retries: 60
+          delay: 5
+          when: relayer_authorize_needs_restart | bool
+
+        - name: Wait for rpc[0] to see this validator
+          ansible.builtin.uri:
+            url: http://127.0.0.1:9650/ext/info
+            method: POST
+            body_format: json
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: info.peers
+            return_content: true
+          delegate_to: "{{ groups['rpc'][0] }}"
+          become: false
+          register: relayer_authorize_peer_ready
+          until: >-
+            relayer_authorize_node_id in
+            (relayer_authorize_peer_ready.json.result.peers | map(attribute='nodeID') | list)
+          retries: 60
+          delay: 5
+          when: relayer_authorize_needs_restart | bool
+
+        - name: Verify the effective configuration after restart
+          ansible.builtin.script:
+            cmd: >-
+              {{ playbook_dir }}/files/relayer-authorize-config.py
+              --mode inspect
+              --subnet-id {{ acp_relayer_subnet_id | quote }}
+              --required-nodes-json {{ acp_relayer_required_nodes | to_json | quote }}
+              --run-id {{ acp_relayer_authorization_run_id | quote }}
+              --host-name {{ inventory_hostname | quote }}
+          register: relayer_authorize_verified_result
+          changed_when: false
+
+        - name: Require the complete effective allowlist
+          vars:
+            verified: "{{ relayer_authorize_verified_result.stdout | from_json }}"
+          ansible.builtin.assert:
+            that:
+              - verified.validatorOnly | bool
+              - verified.missingRequiredNodeIds | length == 0
+              - not (verified.configChanged | bool)
+            fail_msg: >-
+              {{ inventory_hostname }} does not have the complete effective
+              allowlist after authorization.
+      rescue:
+        - name: Restore this validator configuration when it changed
+          ansible.builtin.script:
+            cmd: >-
+              {{ playbook_dir }}/files/relayer-authorize-config.py
+              --mode rollback
+              --backup-dir {{ relayer_authorize_applied.backupDir | default('') | quote }}
+          register: relayer_authorize_rollback_result
+          failed_when: false
+          when:
+            - relayer_authorize_applied is defined
+            - relayer_authorize_applied.changed | default(false) | bool
+            - relayer_authorize_applied.backupDir | default('') | length > 0
+
+        - name: Restart AvalancheGo with the restored configuration
+          ansible.builtin.systemd:
+            name: avalanchego
+            state: restarted
+          register: relayer_authorize_recovery_restart
+          failed_when: false
+
+        - name: Check the recovered validator Info API
+          ansible.builtin.uri:
+            url: http://127.0.0.1:9650/ext/info
+            method: POST
+            body_format: json
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: info.getNodeID
+            return_content: true
+          register: relayer_authorize_recovery_api
+          failed_when: false
+          retries: 30
+          delay: 5
+          until: relayer_authorize_recovery_api.status | default(0) == 200
+
+        - name: Check the recovered validator L1
+          ansible.builtin.uri:
+            url: http://127.0.0.1:9650/ext/info
+            method: POST
+            body_format: json
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: info.isBootstrapped
+              params:
+                chain: "{{ acp_relayer_blockchain_id }}"
+            return_content: true
+          register: relayer_authorize_recovery_l1
+          failed_when: false
+          retries: 60
+          delay: 5
+          until: >-
+            relayer_authorize_recovery_l1.status | default(0) == 200 and
+            (relayer_authorize_recovery_l1.json | default({})).get('result', {}).get('isBootstrapped', false) | bool
+
+        - name: Stop after the failed validator transaction
+          ansible.builtin.fail:
+            msg: >-
+              Authorization failed on {{ inventory_hostname }}.
+              backup={{ relayer_authorize_applied.backupDir | default('not-created') }};
+              rollback_rc={{ relayer_authorize_rollback_result.rc | default('not-required') }};
+              restart_state={{ relayer_authorize_recovery_restart.status.ActiveState | default('unknown') }};
+              info_status={{ relayer_authorize_recovery_api.status | default(0) }};
+              l1_bootstrapped={{ (relayer_authorize_recovery_l1.json | default({})).get('result', {}).get('isBootstrapped', false) }}.
+              No later validator was changed. Repair this validator, then rerun
+              make relayer-authorize.
+
+- name: Verify final RPC-to-validator visibility
+  hosts: rpc[0]
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Read final visible peers
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.peers
+        return_content: true
+      register: relayer_authorize_final_peers
+
+    - name: Require every managed validator peer
+      ansible.builtin.assert:
+        that:
+          - hostvars[item].relayer_authorize_node_id in (relayer_authorize_final_peers.json.result.peers | map(attribute='nodeID') | list)
+        fail_msg: >-
+          rpc[0] still cannot see {{ item }} after authorization. Do not start the
+          Relayer. Inspect both AvalancheGo services and rerun doctor.
+      loop: "{{ groups['validators'] }}"
+
+    - name: Wait for the L1 to recover on rpc[0]
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.isBootstrapped
+          params:
+            chain: "{{ acp_relayer_blockchain_id }}"
+        return_content: true
+      register: relayer_authorize_final_l1_ready
+      until:
+        - relayer_authorize_final_l1_ready.status == 200
+        - relayer_authorize_final_l1_ready.json.result.isBootstrapped | bool
+      retries: 60
+      delay: 5

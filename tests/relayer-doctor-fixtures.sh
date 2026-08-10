@@ -142,22 +142,26 @@ write_privacy_fixture() {
         --arg node_id "$privacy_node_id" \
         --argjson first_private "$first_private" \
         --argjson second_private "$second_private" \
+        --arg rpc_node_id "NodeID-RpcDoctorFixture" \
         --argjson identity_exists "$identity_exists" \
         --argjson first_allowed "$first_allowed" \
         --argjson second_allowed "$second_allowed" \
         '{
           tlsIdentityExists: $identity_exists,
           p2pNodeId: (if $identity_exists then $node_id else "" end),
+          rpcNodes: [{name: "rpc-archive-1", nodeId: $rpc_node_id}],
           validatorPrivacy: [
             {
               name: "validator-1",
               validatorOnly: $first_private,
-              allowedNodes: (if $first_allowed then [$node_id] else [] end)
+              allowedNodes: (if $first_allowed then [$node_id, $rpc_node_id] else [] end),
+              runtimeConfigFresh: true
             },
             {
               name: "validator-2",
               validatorOnly: $second_private,
-              allowedNodes: (if $second_allowed then [$node_id] else [] end)
+              allowedNodes: (if $second_allowed then [$node_id, $rpc_node_id] else [] end),
+              runtimeConfigFresh: true
             }
           ]
         }' >"$path"
@@ -179,11 +183,18 @@ run_privacy_doctor_case() {
 privacy_open="$TMP_DIR/privacy-open.json"
 privacy_unstaged="$TMP_DIR/privacy-unstaged.json"
 privacy_allowed="$TMP_DIR/privacy-allowed.json"
+privacy_rpc_missing="$TMP_DIR/privacy-rpc-missing.json"
+privacy_stale="$TMP_DIR/privacy-stale.json"
 privacy_missing="$TMP_DIR/privacy-missing.json"
 privacy_mixed="$TMP_DIR/privacy-mixed.json"
 write_privacy_fixture "$privacy_open" false false false false false
 write_privacy_fixture "$privacy_unstaged" true true false false false
 write_privacy_fixture "$privacy_allowed" true true true true true
+jq --arg node_id "$privacy_node_id" \
+    '.validatorPrivacy[].allowedNodes = [$node_id]' \
+    "$privacy_allowed" >"$privacy_rpc_missing"
+jq '.validatorPrivacy[1].runtimeConfigFresh = false' \
+    "$privacy_allowed" >"$privacy_stale"
 write_privacy_fixture "$privacy_missing" true true true true false
 write_privacy_fixture "$privacy_mixed" true false true true false
 
@@ -192,11 +203,44 @@ run_privacy_doctor_case open 0 PASS \
 run_privacy_doctor_case unstaged 0 WARN \
     'all validators enforce protocol privacy; the permanent Relayer NodeID has not been staged yet' "$privacy_unstaged"
 run_privacy_doctor_case allowed 0 PASS \
-    "all 2 protocol-private validator(s) allow $privacy_node_id" "$privacy_allowed"
+    'all 2 protocol-private validator(s) loaded allowlists for the permanent Relayer and managed RPC NodeIDs' "$privacy_allowed"
+run_privacy_doctor_case stale 1 FAIL \
+    'protocol-private configuration is newer than the running AvalancheGo process on: validator-2' "$privacy_stale"
+run_privacy_doctor_case rpc-missing 1 FAIL \
+    'managed RPC NodeIDs are absent from protocol-private validator allowlists' "$privacy_rpc_missing"
 run_privacy_doctor_case missing 1 FAIL \
     "$privacy_node_id is absent from allowedNodes on: validator-2" "$privacy_missing"
 run_privacy_doctor_case mixed 1 FAIL \
     'validatorOnly is inconsistent across the L1 validator set (1 of 2 enabled)' "$privacy_mixed"
+
+peer_visibility_fixture="$TMP_DIR/peer-visibility.json"
+jq -n '{
+  tlsIdentityExists: false,
+  missingValidatorPeers: [{name: "validator-1", nodeId: "NodeID-Validator1"}],
+  validatorPrivacy: [
+    {name: "validator-1", validatorOnly: true},
+    {name: "validator-2", validatorOnly: true}
+  ]
+}' >"$peer_visibility_fixture"
+peer_visibility_output="$(bash -c '
+  source "$1"
+  doctor_peer_visibility "$2" install
+  doctor_finish
+' _ "$vm" "$peer_visibility_fixture" 2>&1)"
+grep -Fq 'WARN VM.PEERS.VISIBLE | protocol-private validators are not visible to rpc[0]' \
+  <<<"$peer_visibility_output" || fail "install peer-visibility fixture did not permit identity staging: $peer_visibility_output"
+set +e
+peer_visibility_output="$(bash -c '
+  source "$1"
+  doctor_peer_visibility "$2" operations
+  doctor_finish
+' _ "$vm" "$peer_visibility_fixture" 2>&1)"
+peer_visibility_status=$?
+set -e
+[[ "$peer_visibility_status" -eq 1 ]] || \
+  fail "operations peer-visibility fixture returned $peer_visibility_status, expected 1: $peer_visibility_output"
+grep -Fq 'FAIL VM.PEERS.VISIBLE | rpc[0] cannot see deployed validator peers' \
+  <<<"$peer_visibility_output" || fail "operations peer-visibility fixture did not block: $peer_visibility_output"
 
 run_state_case() {
     local name="$1" runtime_ready="$2" expected_level="$3" expected_summary="$4"

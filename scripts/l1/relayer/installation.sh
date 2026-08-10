@@ -73,60 +73,113 @@ stage_relayer_identity() {
     }' >"$vars_file"
 
   (
-    cd "$ROOT_DIR/ansible"
+    cd "$ROOT_DIR/ansible" || exit 1
     ANSIBLE_CONFIG="$ROOT_DIR/ansible/ansible.cfg" \
       ansible-playbook -i "$INVENTORY_FILE" playbooks/l1/stage-relayer-identity.yml -e "@$vars_file"
   )
 }
 
-protocol_privacy_gate() {
-  local p2p_node_id="$1"
-  local discovery_file="$2"
-  local blocked_message="${3:-The permanent identity has been retained on rpc[0]. Rerun make relayer after all validators are updated.}"
-  local validator_count
-  local private_count
-  local missing_count
-
-  validator_count="$(jq '.validatorPrivacy | length' "$discovery_file")"
-  private_count="$(jq '[.validatorPrivacy[] | select(.validatorOnly)] | length' "$discovery_file")"
-
-  if ((private_count == 0)); then
-    printf 'Protocol privacy: disabled on all %s validator(s); NodeID allowlisting is not required.\n' "$validator_count"
-    return 0
-  fi
-
-  printf 'Permanent Relayer P2P NodeID: %s\n' "$p2p_node_id"
-  if ((private_count != validator_count)); then
-    printf 'ERROR: validatorOnly is inconsistent across the L1 validator set (%s of %s enabled).\n' \
-      "$private_count" "$validator_count" >&2
-    printf 'Every validator must enforce the same protocol-privacy policy before Relayer installation can continue:\n' >&2
-    jq -r '.validatorPrivacy[] | "  - \(.name): validatorOnly=\(.validatorOnly) (\(.source))"' \
-      "$discovery_file" >&2
-    return 1
-  fi
-
-  missing_count="$(jq --arg node_id "$p2p_node_id" \
-    '[.validatorPrivacy[] | select(.allowedNodes | index($node_id) | not)] | length' \
-    "$discovery_file")"
-  if ((missing_count > 0)); then
-    printf 'ERROR: this protocol-private L1 does not allow the Relayer NodeID on every validator.\n' >&2
-    printf 'Add %s to allowedNodes in the Subnet config on ALL existing L1 validators.\n' \
-      "$p2p_node_id" >&2
-    printf 'Updating only rpc[0] or one validator is insufficient. Missing on:\n' >&2
-    jq -r --arg node_id "$p2p_node_id" \
-      '.validatorPrivacy[] | select(.allowedNodes | index($node_id) | not) | "  - \(.name) (\(.source))"' \
-      "$discovery_file" >&2
-    printf 'Required config shape: {"validatorOnly":true,"allowedNodes":["%s"]}\n' \
-      "$p2p_node_id" >&2
-    printf 'Merge the NodeID with any existing allowedNodes, apply the config through the chain owner\047s normal validator-management process, and restart each affected AvalancheGo node.\n' >&2
-    printf 'Documentation: https://build.avax.network/docs/nodes/configure/avalanche-l1-configs#allowednodes-string-list\n' >&2
-    printf '%s\n' "$blocked_message" >&2
-    return 1
-  fi
-
-  printf 'Protocol privacy: all %s validator(s) allow the permanent Relayer NodeID.\n' "$validator_count"
+generate_relayer_setup_bundle() {
+  local console_password="$1"
+  local bundle_dir="$2"
+  local setup_result="$3"
+  local peer
+  local -a setup_args
+  setup_args=(
+    --out "$bundle_dir"
+    --l1-env "$L1_ENV"
+    --pchain-rpc-url http://127.0.0.1:9650
+    --info-rpc-url "$INFO_RPC_URL"
+    --evm-rpc-url "http://127.0.0.1:9650/ext/bc/$(jq -r '.blockchainId' "$METADATA_FILE")/rpc"
+    --api-listen-addr 127.0.0.1:8081
+    --output json
+  )
+  while IFS= read -r peer; do
+    setup_args+=(--peer "$peer")
+  done < <(jq -r '.peers[] | .["node-id"] + "@" + .ip' "$DISCOVERY_FILE")
+  RELAYER_CONSOLE_PASSWORD="$console_password" "$RELEASE_SETUP" "${setup_args[@]}" >"$setup_result"
+  jq -e '
+    (.p2pNodeId | startswith("NodeID-")) and
+    (.tlsCertificateSha256 | test("^[0-9a-f]{64}$")) and
+    (.tlsCertFile | type) == "string" and
+    (.tlsKeyFile | type) == "string"
+  ' "$setup_result" >/dev/null || die "relayer-setup did not return a complete permanent P2P identity"
 }
 
+write_identity_metadata() {
+  local p2p_node_id="$1"
+  local tls_certificate_sha256="$2"
+  local identity_file="$3"
+  jq -n \
+    --arg node_id "$p2p_node_id" \
+    --arg certificate_sha256 "$tls_certificate_sha256" \
+    --arg version "$RELAYER_VERSION" \
+    '{
+      schemaVersion: 1,
+      p2pNodeId: $node_id,
+      tlsCertificateSha256: $certificate_sha256,
+      createdByVersion: $version
+    }' >"$identity_file"
+}
+
+run_prepare() {
+  local validator_count private_count tls_identity_exists tls_pair_exists
+  local p2p_node_id tls_certificate_sha256 answer bundle_dir setup_result identity_file
+  run_authorization_preflight
+  read -r validator_count private_count < <(protocol_privacy_counts "$DISCOVERY_FILE")
+  ((private_count == 0 || private_count == validator_count)) || \
+    die "validatorOnly is inconsistent across the L1 validator set; identity preparation made no changes"
+
+  tls_identity_exists="$(jq -r '.tlsIdentityExists' "$DISCOVERY_FILE")"
+  tls_pair_exists="$(jq -r '.tlsPairExists' "$DISCOVERY_FILE")"
+  if [[ "$tls_identity_exists" == true ]]; then
+    p2p_node_id="$(jq -r '.p2pNodeId' "$DISCOVERY_FILE")"
+    printf 'Reusing permanent Relayer P2P NodeID: %s\n' "$p2p_node_id"
+  else
+    if [[ "$tls_pair_exists" == true ]] || \
+      [[ "$(jq -r '.daemonInstalled or .consoleInstalled or .keystoreExists' "$DISCOVERY_FILE")" == true ]]; then
+      die "Relayer state is partial and has no complete permanent identity; restore matching state or explicitly purge it before preparation"
+    fi
+    printf 'Create and stage a permanent Relayer identity on %s (%s)? [y/N] ' "$TARGET_NAME" "$TARGET_HOST"
+    IFS= read -r answer
+    case "$answer" in
+      y | Y | yes | YES | Yes) ;;
+      *) printf 'Identity preparation cancelled; no changes were made.\n'; return 0 ;;
+    esac
+
+    prepare_release true
+    bundle_dir="$WORK_DIR/prepared-bundle"
+    setup_result="$WORK_DIR/prepared-setup-result.json"
+    generate_relayer_setup_bundle "" "$bundle_dir" "$setup_result"
+    p2p_node_id="$(jq -r '.p2pNodeId' "$setup_result")"
+    tls_certificate_sha256="$(jq -r '.tlsCertificateSha256' "$setup_result")"
+    identity_file="$WORK_DIR/identity.json"
+    write_identity_metadata "$p2p_node_id" "$tls_certificate_sha256" "$identity_file"
+    stage_relayer_identity \
+      "$p2p_node_id" \
+      "$tls_certificate_sha256" \
+      "$(jq -r '.tlsCertFile' "$setup_result")" \
+      "$(jq -r '.tlsKeyFile' "$setup_result")" \
+      "$identity_file"
+    run_authorization_preflight
+    [[ "$(jq -r '.tlsIdentityExists' "$DISCOVERY_FILE")" == true ]] || \
+      die "the permanent identity was not visible after staging"
+    [[ "$(jq -r '.p2pNodeId' "$DISCOVERY_FILE")" == "$p2p_node_id" ]] || \
+      die "the staged identity returned a different NodeID"
+    printf 'Permanent Relayer identity prepared: %s\n' "$p2p_node_id"
+  fi
+
+  if ((private_count == 0)); then
+    printf 'Protocol privacy is disabled. Run make relayer to install and start the Relayer.\n'
+  else
+    print_protocol_authorization "$p2p_node_id" "$DISCOVERY_FILE"
+    if authorization_needed "$p2p_node_id" "$DISCOVERY_FILE"; then
+      printf 'Authorize manually or run make relayer-authorize. Run make relayer after authorization.\n'
+    else
+      printf 'Authorization is already complete. Run make relayer.\n'
+    fi
+  fi
+}
 
 run_install() {
   local answer
@@ -149,13 +202,32 @@ run_install() {
   local safe_enabled
   local safe_address
   local vars_file
-  local peer
-  local -a setup_args
+  local validator_count private_count
 
+  run_authorization_preflight
+  read -r validator_count private_count < <(protocol_privacy_counts "$DISCOVERY_FILE")
+  if ((private_count > 0)); then
+    ((private_count == validator_count)) || \
+      die "validatorOnly is inconsistent across the L1 validator set"
+    if [[ "$(jq -r '.tlsIdentityExists' "$DISCOVERY_FILE")" != true ]]; then
+      printf 'ERROR: prepare the permanent Relayer identity before installing on a protocol-private L1.\n' >&2
+      printf 'Run: make relayer-prepare RELAYER_VERSION=%s\n' "$RELAYER_VERSION" >&2
+      return 1
+    fi
+    p2p_node_id="$(jq -r '.p2pNodeId' "$DISCOVERY_FILE")"
+    if authorization_needed "$p2p_node_id" "$DISCOVERY_FILE"; then
+      offer_managed_authorization "$p2p_node_id" || return 1
+    fi
+  fi
   if ! doctor_vm install; then
     die "Relayer doctor found blockers; apply the printed remediations before installation"
   fi
   run_preflight
+  if ((private_count > 0)); then
+    p2p_node_id="$(jq -r '.p2pNodeId' "$DISCOVERY_FILE")"
+    protocol_privacy_gate "$p2p_node_id" "$DISCOVERY_FILE" || return 1
+    peer_visibility_gate "$DISCOVERY_FILE" || return 1
+  fi
   target_label="$TARGET_NAME ($TARGET_HOST)"
   printf 'Install the relayer and console on %s? [y/N] ' "$target_label"
   IFS= read -r answer
@@ -180,26 +252,8 @@ run_install() {
   prepare_release true
   bundle_dir="$WORK_DIR/generated"
   setup_result="$WORK_DIR/setup-result.json"
-  setup_args=(
-    --out "$bundle_dir"
-    --l1-env "$L1_ENV"
-    --pchain-rpc-url http://127.0.0.1:9650
-    --info-rpc-url "$INFO_RPC_URL"
-    --evm-rpc-url "http://127.0.0.1:9650/ext/bc/$(jq -r '.blockchainId' "$METADATA_FILE")/rpc"
-    --api-listen-addr 127.0.0.1:8081
-    --output json
-  )
-  while IFS= read -r peer; do
-    setup_args+=(--peer "$peer")
-  done < <(jq -r '.peers[] | .["node-id"] + "@" + .ip' "$DISCOVERY_FILE")
-  RELAYER_CONSOLE_PASSWORD="$console_password" "$RELEASE_SETUP" "${setup_args[@]}" >"$setup_result"
+  generate_relayer_setup_bundle "$console_password" "$bundle_dir" "$setup_result"
   console_password=""
-  jq -e '
-    (.p2pNodeId | startswith("NodeID-")) and
-    (.tlsCertificateSha256 | test("^[0-9a-f]{64}$")) and
-    (.tlsCertFile | type) == "string" and
-    (.tlsKeyFile | type) == "string"
-  ' "$setup_result" >/dev/null || die "relayer-setup did not return a complete permanent P2P identity"
 
   tls_identity_exists="$(jq -r '.tlsIdentityExists' "$DISCOVERY_FILE")"
   tls_pair_exists="$(jq -r '.tlsPairExists' "$DISCOVERY_FILE")"
@@ -213,16 +267,7 @@ run_install() {
     p2p_node_id="$(jq -r '.p2pNodeId' "$setup_result")"
     tls_certificate_sha256="$(jq -r '.tlsCertificateSha256' "$setup_result")"
     identity_file="$WORK_DIR/identity.json"
-    jq -n \
-      --arg node_id "$p2p_node_id" \
-      --arg certificate_sha256 "$tls_certificate_sha256" \
-      --arg version "$RELAYER_VERSION" \
-      '{
-        schemaVersion: 1,
-        p2pNodeId: $node_id,
-        tlsCertificateSha256: $certificate_sha256,
-        createdByVersion: $version
-      }' >"$identity_file"
+    write_identity_metadata "$p2p_node_id" "$tls_certificate_sha256" "$identity_file"
     printf 'Staging permanent Relayer P2P NodeID before runtime installation: %s\n' "$p2p_node_id"
     stage_relayer_identity \
       "$p2p_node_id" \
@@ -233,6 +278,9 @@ run_install() {
   fi
 
   if ! protocol_privacy_gate "$p2p_node_id" "$DISCOVERY_FILE"; then
+    return 1
+  fi
+  if ! peer_visibility_gate "$DISCOVERY_FILE"; then
     return 1
   fi
 
@@ -309,7 +357,7 @@ run_install() {
     }' >"$vars_file"
 
   (
-    cd "$ROOT_DIR/ansible"
+    cd "$ROOT_DIR/ansible" || exit 1
     ANSIBLE_CONFIG="$ROOT_DIR/ansible/ansible.cfg" \
       ansible-playbook -i "$INVENTORY_FILE" playbooks/l1/deploy-relayer.yml -e "@$vars_file"
   )
@@ -346,7 +394,7 @@ run_upgrade() {
       acp_relayer_blockchain_id: $blockchain
     }' >"$vars_file"
   (
-    cd "$ROOT_DIR/ansible"
+    cd "$ROOT_DIR/ansible" || exit 1
     ANSIBLE_CONFIG="$ROOT_DIR/ansible/ansible.cfg" \
       ansible-playbook -i "$INVENTORY_FILE" playbooks/l1/deploy-relayer.yml -e "@$vars_file"
   )

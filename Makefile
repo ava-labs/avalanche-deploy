@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer relayer-prereqs relayer-doctor relayer relayer-access relayer-status relayer-logs relayer-upgrade relayer-backup relayer-restore relayer-remove init-validator-manager initialize-validator-manager primary-infra primary-infra-plan primary-deploy primary-status primary-destroy backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-erpc k8s-faucet k8s-blockscout k8s-graph-node k8s-safe k8s-backup-keys k8s-health-checks k8s-init-validator-manager k8s-reset-l1 k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
+.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer relayer-prereqs relayer-doctor relayer-prepare relayer-authorize relayer relayer-access relayer-status relayer-logs relayer-upgrade relayer-backup relayer-restore relayer-remove init-validator-manager initialize-validator-manager primary-infra primary-infra-plan primary-deploy primary-status primary-destroy backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-erpc k8s-faucet k8s-blockscout k8s-graph-node k8s-safe k8s-backup-keys k8s-health-checks k8s-init-validator-manager k8s-reset-l1 k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
 
 # Default cloud provider
 CLOUD ?= aws
@@ -238,6 +238,12 @@ relayer-prereqs:
 
 relayer-doctor:
 	@RELAYER_VERSION="$(RELAYER_VERSION)" RELAYER_PRERELEASE_FALLBACK="$(RELAYER_PRERELEASE_FALLBACK)" ./scripts/l1/relayer.sh doctor
+
+relayer-prepare:
+	@RELAYER_VERSION="$(RELAYER_VERSION)" RELAYER_PRERELEASE_FALLBACK="$(RELAYER_PRERELEASE_FALLBACK)" ./scripts/l1/relayer.sh prepare
+
+relayer-authorize:
+	@./scripts/l1/relayer.sh authorize
 
 relayer:
 	@RELAYER_VERSION="$(RELAYER_VERSION)" RELAYER_PRERELEASE_FALLBACK="$(RELAYER_PRERELEASE_FALLBACK)" ./scripts/l1/relayer.sh install
@@ -784,6 +790,8 @@ help-l1:
 	@echo "  make icm-relayer SUBNET_ID=... CHAIN_ID=... RELAYER_KEY=0x..."
 	@echo "  make relayer-prereqs                              (install local operator software)"
 	@echo "  make relayer-doctor                               (read-only comprehensive diagnostics)"
+	@echo "  make relayer-prepare                              (stage the permanent P2P identity)"
+	@echo "  make relayer-authorize                            (update managed private validator allowlists)"
 	@echo "  make relayer                                      (discover and install/reapply after PoAManager init)"
 	@echo "  make relayer-access | make relayer-status | make relayer-logs"
 	@echo "  make relayer-backup"
@@ -888,6 +896,8 @@ help-all:
 	@echo "  make icm-relayer       Deploy ICM Relayer for cross-chain messaging"
 	@echo "  make relayer-prereqs   Install local Relayer operator software"
 	@echo "  make relayer-doctor    Run read-only comprehensive diagnostics"
+	@echo "  make relayer-prepare   Stage the permanent P2P identity before private authorization"
+	@echo "  make relayer-authorize Update managed protocol-private validator allowlists"
 	@echo "  make relayer           Auto-discover and install/reapply daemon + console on rpc[0]"
 	@echo "  make relayer-access    Forward the Relayer console and L1 RPC"
 	@echo "  make relayer-status    Show a quick runtime snapshot"

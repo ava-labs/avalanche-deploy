@@ -26,6 +26,19 @@
     - name: Gather installed service state
       ansible.builtin.service_facts:
 
+    - name: Inspect managed Relayer service definitions
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/systemd/system/relayerd.service
+        - /etc/systemd/system/relayer-console.service
+      register: restore_service_units
+
+    - name: Save installed Relayer service facts
+      ansible.builtin.set_fact:
+        restore_daemon_service_installed: "{{ restore_service_units.results[0].stat.exists | bool }}"
+        restore_console_service_installed: "{{ restore_service_units.results[1].stat.exists | bool }}"
+
     - name: Create the root-only restore workspace
       ansible.builtin.file:
         path: "{{ item }}"
@@ -113,7 +126,9 @@
       loop:
         - relayer-console
         - relayerd
-      when: "item + '.service' in ansible_facts.services"
+      when: >-
+        (item == 'relayerd' and restore_daemon_service_installed) or
+        (item == 'relayer-console' and restore_console_service_installed)
 
     - name: Preserve current recovery material before restore
       ansible.builtin.command:
@@ -223,7 +238,9 @@
           loop:
             - relayerd
             - relayer-console
-          when: "item + '.service' in ansible_facts.services"
+          when: >-
+            (item == 'relayerd' and restore_daemon_service_installed) or
+            (item == 'relayer-console' and restore_console_service_installed)
 
         - name: Wait for restored daemon readiness
           ansible.builtin.uri:
@@ -233,7 +250,7 @@
           until: restored_ready.status == 200
           retries: 60
           delay: 5
-          when: "'relayerd.service' in ansible_facts.services"
+          when: restore_daemon_service_installed
 
       rescue:
         - name: Stop services before automatic restore rollback
@@ -244,7 +261,9 @@
             - relayer-console
             - relayerd
           failed_when: false
-          when: "item + '.service' in ansible_facts.services"
+          when: >-
+            (item == 'relayerd' and restore_daemon_service_installed) or
+            (item == 'relayer-console' and restore_console_service_installed)
 
         - name: Remove partially restored recovery directories
           ansible.builtin.file:
@@ -268,7 +287,9 @@
             - relayerd
             - relayer-console
           failed_when: false
-          when: "item + '.service' in ansible_facts.services"
+          when: >-
+            (item == 'relayerd' and restore_daemon_service_installed) or
+            (item == 'relayer-console' and restore_console_service_installed)
 
         - name: Report automatic rollback
           ansible.builtin.fail:
@@ -289,6 +310,6 @@
           {{ pre_restore_archive }}.
           {{
             'Services restarted and passed readiness.'
-            if 'relayerd.service' in ansible_facts.services
+            if restore_daemon_service_installed
             else 'Workload remains normally removed and is ready for make relayer.'
           }}
