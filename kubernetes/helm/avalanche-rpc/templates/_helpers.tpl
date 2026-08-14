@@ -64,7 +64,10 @@ Create the name of the service account to use
 Network ID based on network name
 */}}
 {{- define "l1-rpc.networkId" -}}
-{{- if eq .Values.network "mainnet" }}1{{- else }}5{{- end }}
+{{- if eq .Values.network "mainnet" -}}1
+{{- else if eq .Values.network "fuji" -}}5
+{{- else -}}{{ fail "avalanche-rpc: network must be fuji or mainnet" }}
+{{- end -}}
 {{- end }}
 
 {{/*

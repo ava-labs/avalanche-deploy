@@ -1,0 +1,151 @@
+name: Relayer Kubernetes
+
+# Static gates for the managed (Kubernetes) Relayer lifecycle: shell syntax and
+# lint, Helm chart lint and render, the Relayer acceptance and smoke harnesses,
+# and a dry run of every k8s-relayer-* Make target. Nothing here needs a
+# cluster, a registry, or the releases API, so the job stays hermetic and fast.
+
+on:
+  pull_request:
+    paths:
+      - "kubernetes/scripts/relayer.sh"
+      - "kubernetes/helm/relayerd/**"
+      - "scripts/l1/**"
+      - "scripts/shared/**"
+      - "ansible/playbooks/l1/**"
+      - "ansible/roles/acp_relayer/**"
+      - "ansible/roles/safe/**"
+      - "docs/l1/RELAYER.md"
+      - "tests/relayer-*.sh"
+      - "Makefile"
+      - ".github/workflows/relayer-k8s.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "kubernetes/scripts/relayer.sh"
+      - "kubernetes/helm/relayerd/**"
+      - "scripts/l1/**"
+      - "scripts/shared/**"
+      - "ansible/playbooks/l1/**"
+      - "ansible/roles/acp_relayer/**"
+      - "ansible/roles/safe/**"
+      - "docs/l1/RELAYER.md"
+      - "tests/relayer-*.sh"
+      - "Makefile"
+      - ".github/workflows/relayer-k8s.yml"
+  workflow_dispatch:
+
+# Least privilege: this workflow only checks out code and runs static checks.
+permissions:
+  contents: read
+
+jobs:
+  relayer-k8s:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      # Deliberately unquoted at the point of use so the loops word-split it.
+      RELAYER_SHELL_SOURCES: >-
+        kubernetes/scripts/relayer.sh
+        scripts/shared/relayer-prereqs.sh
+        tests/relayer-k8s-doctor-fixtures.sh
+        tests/relayer-k8s-discovery-smoke.sh
+        tests/relayer-k8s-restore-smoke.sh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq shellcheck
+
+      - name: Install Helm
+        working-directory: ${{ runner.temp }}
+        env:
+          HELM_VERSION: v4.2.0
+          HELM_SHA256: 97dbeb971be4ac4b27e3839976d9564c0fb35c6f3b1da89dd1e292d236af4096
+        run: |
+          curl -fsSL -o helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tar.gz" | sha256sum --check
+          tar -xzf helm.tar.gz linux-amd64/helm
+          sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
+          helm version
+
+      - name: bash -n
+        run: |
+          for source in ${RELAYER_SHELL_SOURCES}; do
+            echo "bash -n $source"
+            bash -n "$source"
+          done
+
+      - name: shellcheck
+        # -x follows the `# shellcheck source=` directives these scripts already
+        # declare (relayer.sh sources scripts/shared/relayer-doctor-lib.sh, the
+        # smoke tests source relayer.sh). Those paths are repo-root relative, so
+        # this must run from the repository root.
+        run: |
+          for source in ${RELAYER_SHELL_SOURCES}; do
+            echo "shellcheck $source"
+            shellcheck -x -S warning "$source"
+          done
+
+      - name: helm lint
+        run: helm lint kubernetes/helm/relayerd
+
+      - name: helm template
+        run: |
+          helm template relayer kubernetes/helm/relayerd \
+            --set runtimeSecret.name=relayer-runtime \
+            --set operatorIdentity=test-operator \
+            --set l1.subnetId=test-subnet \
+            --set l1.blockchainId=test-blockchain \
+            --set l1.evmChainId=99999 \
+            --set l1.chainName=test-chain \
+            --set l1.managerAddress=0x1111111111111111111111111111111111111111 \
+            --set l1.validatorManagerAddress=0x2222222222222222222222222222222222222222 \
+            >"${RUNNER_TEMP}/relayerd-render.yaml"
+          if [ ! -s "${RUNNER_TEMP}/relayerd-render.yaml" ]; then
+            echo "Fully-valued render produced no manifests."
+            exit 1
+          fi
+
+      - name: helm template fails closed
+        # The chart refuses to render without the required values so an operator
+        # can never install a Relayer with a half-populated L1 identity. That
+        # behaviour is load-bearing, so assert the bare render still fails.
+        run: |
+          if helm template relayer kubernetes/helm/relayerd >/dev/null 2>&1; then
+            echo "Bare render succeeded; relayerd no longer fails closed."
+            exit 1
+          fi
+          echo "Bare render failed as expected."
+
+      - name: Run Relayer Static Acceptance Checks
+        run: bash tests/relayer-static.sh
+
+      - name: Run Kubernetes Relayer Doctor Fixtures
+        # The only behavioural coverage of the managed doctor checks: it sources
+        # kubernetes/scripts/relayer.sh with stubbed kubectl/helm/curl on PATH and
+        # asserts each check's real PASS/WARN/FAIL verdict, which no amount of
+        # static grepping can substitute for.
+        run: bash tests/relayer-k8s-doctor-fixtures.sh
+
+      - name: Run Kubernetes Relayer Smoke Tests
+        run: |
+          bash tests/relayer-k8s-discovery-smoke.sh
+          bash tests/relayer-k8s-restore-smoke.sh
+
+      - name: Dry-Run Kubernetes Relayer Make Targets
+        run: |
+          for target in k8s-relayer k8s-relayer-prereqs k8s-relayer-doctor \
+            k8s-relayer-access k8s-relayer-status k8s-relayer-logs \
+            k8s-relayer-upgrade k8s-relayer-backup k8s-relayer-remove; do
+            echo "make -n $target"
+            make -n "$target" >/dev/null
+          done
+          echo "make -n k8s-relayer-restore"
+          make -n k8s-relayer-restore BACKUP=manual-19700101T000000Z.tar.gz >/dev/null

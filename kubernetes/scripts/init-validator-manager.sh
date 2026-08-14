@@ -35,6 +35,9 @@ ROOT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
 # Defaults
 RELEASE="l1-validators"
+NAMESPACE=""
+L1_ENV="l1.env"
+L1_ENV_EXPLICIT="false"
 SUBNET_ID=""
 CHAIN_ID=""
 CONVERSION_TX=""
@@ -62,6 +65,8 @@ Required:
 
 Optional:
   --release=NAME           Helm release name for validators (default: l1-validators)
+  --namespace=NAME         Kubernetes namespace (default: current context namespace)
+  --env=FILE               l1.env file to update with manager addresses (default: l1.env)
   --manager-type=TYPE      poa, native-staking, or erc20-staking (default: poa)
   --network=NAME           fuji or mainnet (default: fuji)
   --churn-period=SECS      Churn period in seconds (default: 0)
@@ -82,6 +87,8 @@ while [[ $# -gt 0 ]]; do
         --proxy-address=*) PROXY_ADDRESS="${1#*=}"; shift ;;
         --evm-chain-id=*) EVM_CHAIN_ID="${1#*=}"; shift ;;
         --release=*) RELEASE="${1#*=}"; shift ;;
+        --namespace=*) NAMESPACE="${1#*=}"; shift ;;
+        --env=*) L1_ENV="${1#*=}"; L1_ENV_EXPLICIT="true"; shift ;;
         --manager-type=*) MANAGER_TYPE="${1#*=}"; shift ;;
         --network=*) NETWORK="${1#*=}"; shift ;;
         --churn-period=*) CHURN_PERIOD="${1#*=}"; shift ;;
@@ -105,7 +112,6 @@ done
 # Colors
 red='\033[0;31m'
 green='\033[0;32m'
-yellow='\033[1;33m'
 reset='\033[0m'
 
 # --- Validate required parameters ---
@@ -133,7 +139,7 @@ if [[ -z "${AVALANCHE_PRIVATE_KEY:-}" ]]; then
     exit 1
 fi
 
-for cmd in kubectl curl forge cast go; do
+for cmd in kubectl curl forge cast go jq; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo -e "${red}Error: $cmd not found in PATH${reset}"
         if [[ "$cmd" == "forge" || "$cmd" == "cast" ]]; then
@@ -142,6 +148,14 @@ for cmd in kubectl curl forge cast go; do
         exit 1
     fi
 done
+
+if [[ -z "$NAMESPACE" ]]; then
+    NAMESPACE="$(kubectl config view --minify -o jsonpath='{..namespace}' 2>/dev/null || true)"
+    NAMESPACE="${NAMESPACE:-default}"
+fi
+if [[ "$L1_ENV_EXPLICIT" == "false" && -f "$ROOT_DIR/l1.env" ]]; then
+    L1_ENV="$ROOT_DIR/l1.env"
+fi
 
 echo -e "  ${green}OK${reset}"
 echo ""
@@ -170,7 +184,7 @@ fi
 
 echo "Getting validator pod IPs..."
 
-PODS="$(kubectl get pods \
+PODS="$(kubectl -n "$NAMESPACE" get pods \
     -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/name=l1-validator" \
     --field-selector=status.phase=Running \
     -o jsonpath='{.items[*].metadata.name}')"
@@ -182,7 +196,7 @@ fi
 
 VALIDATOR_IPS=""
 for pod in $PODS; do
-    ip="$(kubectl get pod "$pod" -o jsonpath='{.status.podIP}')"
+    ip="$(kubectl -n "$NAMESPACE" get pod "$pod" -o jsonpath='{.status.podIP}')"
     if [[ -n "$VALIDATOR_IPS" ]]; then
         VALIDATOR_IPS="$VALIDATOR_IPS,$ip"
     else
@@ -201,7 +215,7 @@ echo "Setting up port-forward to RPC pod..."
 first_pod="$(echo "$PODS" | awk '{print $1}')"
 PF_PORT="$((19650 + RANDOM % 1000))"
 
-kubectl port-forward --address 127.0.0.1 "pod/$first_pod" "${PF_PORT}:9650" >/dev/null 2>&1 &
+kubectl -n "$NAMESPACE" port-forward --address 127.0.0.1 "pod/$first_pod" "${PF_PORT}:9650" >/dev/null 2>&1 &
 PF_PID=$!
 
 cleanup() {
@@ -306,13 +320,13 @@ if [[ -n "$GLACIER_API_KEY" ]]; then
     init_args+=(--glacier-api-key="$GLACIER_API_KEY")
 fi
 
-INIT_OUTPUT="$("$TOOL_BIN" "${init_args[@]}")"
-INIT_EXIT=$?
-
-if [[ $INIT_EXIT -ne 0 ]]; then
+if INIT_OUTPUT="$("$TOOL_BIN" "${init_args[@]}")"; then
+    :
+else
+    INIT_EXIT=$?
     echo -e "${red}Error: initialize-validator-manager failed (exit code $INIT_EXIT)${reset}"
     echo "$INIT_OUTPUT"
-    exit 1
+    exit "$INIT_EXIT"
 fi
 
 echo "$INIT_OUTPUT"
@@ -320,9 +334,41 @@ echo ""
 
 # --- Parse and display results ---
 
-# Try to extract key fields from JSON output
-implementation="$(echo "$INIT_OUTPUT" | sed -n 's/.*"implementation":"\([^"]*\)".*/\1/p')"
-proxy="$(echo "$INIT_OUTPUT" | sed -n 's/.*"proxy":"\([^"]*\)".*/\1/p')"
+# Extract the machine-readable result and persist it for add-on discovery.
+if ! jq -e '.success == true' >/dev/null <<<"$INIT_OUTPUT"; then
+    echo -e "${red}Error: initializer did not return a successful JSON result${reset}"
+    exit 1
+fi
+implementation="$(jq -r '.implementation // empty' <<<"$INIT_OUTPUT")"
+proxy="$(jq -r '.proxy // empty' <<<"$INIT_OUTPUT")"
+poa_manager="$(jq -r '.poa_manager // empty' <<<"$INIT_OUTPUT")"
+
+upsert_env() {
+    local key="$1" value="$2" tmp
+    [[ -f "$L1_ENV" ]] || return 0
+    tmp="$(mktemp)"
+    awk -F= -v key="$key" -v value="$value" '
+        BEGIN { found = 0 }
+        $1 == key { print key "=" value; found = 1; next }
+        { print }
+        END { if (!found) print key "=" value }
+    ' "$L1_ENV" >"$tmp"
+    mv "$tmp" "$L1_ENV"
+}
+
+upsert_env VALIDATOR_MANAGER_IMPL "$implementation"
+upsert_env VALIDATOR_MANAGER_PROXY "$proxy"
+upsert_env POA_MANAGER "$poa_manager"
+
+kubectl -n "$NAMESPACE" create configmap l1-config --dry-run=client -o yaml | kubectl -n "$NAMESPACE" apply -f - >/dev/null
+kubectl -n "$NAMESPACE" label configmap l1-config --overwrite \
+    app.kubernetes.io/name=l1-config \
+    app.kubernetes.io/instance="$RELEASE" \
+    app.kubernetes.io/component=l1-metadata \
+    app.kubernetes.io/part-of=avalanche-deploy >/dev/null
+manager_patch="$(jq -cn --arg impl "$implementation" --arg proxy "$proxy" --arg poa "$poa_manager" \
+    '{data: {VALIDATOR_MANAGER_IMPL: $impl, VALIDATOR_MANAGER_PROXY: $proxy, POA_MANAGER: $poa}}')"
+kubectl -n "$NAMESPACE" patch configmap l1-config --type merge -p "$manager_patch" >/dev/null
 
 echo "============================================"
 echo -e "  ${green}ValidatorManager Initialized!${reset}"
@@ -334,7 +380,15 @@ fi
 if [[ -n "$proxy" ]]; then
     echo "  Proxy:          $proxy"
 fi
+if [[ -n "$poa_manager" ]]; then
+    echo "  PoAManager:     $poa_manager"
+fi
 echo "  Output saved:   $OUTPUT"
+if [[ -f "$L1_ENV" ]]; then
+    echo "  Metadata saved: $L1_ENV and $NAMESPACE/l1-config"
+else
+    echo "  Metadata saved: $NAMESPACE/l1-config"
+fi
 echo ""
 echo "  Your L1 validator manager is now active!"
 if [[ "$MANAGER_TYPE" == "poa" ]]; then

@@ -1,0 +1,41 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "relayerd.fullname" . }}-port-forward
+  labels:
+    {{- include "relayerd.labels" . | nindent 4 }}
+rules:
+  # kubectl port-forward service/<rpc> resolves the Service and lists its backing
+  # pods before opening the pod port-forward subresource. Kubernetes RBAC cannot
+  # constrain list or port-forward by pod label, so this is intentionally scoped
+  # to the discovered L1 namespace and the single discovered operator identity.
+  # No Secret, exec, log, or workload mutation access is granted.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/portforward"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames: [{{ .Values.avalanchego.serviceName | quote }}]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["l1-config"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "relayerd.fullname" . }}-port-forward
+  labels:
+    {{- include "relayerd.labels" . | nindent 4 }}
+subjects:
+  - kind: User
+    apiGroup: rbac.authorization.k8s.io
+    name: {{ required "operatorIdentity is required" .Values.operatorIdentity | quote }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "relayerd.fullname" . }}-port-forward

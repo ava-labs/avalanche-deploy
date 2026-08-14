@@ -35,6 +35,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ansible jq shellcheck
 
+      - name: Install Helm
+        # make test-unit runs tests/relayer-static.sh, which lints and renders the
+        # relayerd chart and asserts on the rendered manifests. Pin helm here so the
+        # dependency is explicit instead of inherited from the runner image.
+        working-directory: ${{ runner.temp }}
+        env:
+          HELM_VERSION: v4.2.0
+          HELM_SHA256: 97dbeb971be4ac4b27e3839976d9564c0fb35c6f3b1da89dd1e292d236af4096
+        run: |
+          curl -fsSL -o helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tar.gz" | sha256sum --check
+          tar -xzf helm.tar.gz linux-amd64/helm
+          sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
+          helm version
+
       - name: Install ansible-lint
         run: |
           python3 -m pip install --upgrade pip

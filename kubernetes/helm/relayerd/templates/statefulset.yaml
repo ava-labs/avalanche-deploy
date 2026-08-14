@@ -1,0 +1,343 @@
+{{- include "relayerd.validate" . -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "relayerd.fullname" . }}
+  labels:
+    {{- include "relayerd.labels" . | nindent 4 }}
+spec:
+  # A governing Service is deliberately not created. This field only supplies the
+  # stable StatefulSet pod identity; access is through pod port-forward.
+  serviceName: {{ include "relayerd.fullname" . }}
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      {{- include "relayerd.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "relayerd.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        # The installer owns this Secret. Hashing its data makes an optional console
+        # password rotation roll the pod without copying any secret into the manifest.
+        checksum/runtime-secret: {{ include "relayerd.runtimeSecretChecksum" . }}
+    spec:
+      serviceAccountName: {{ include "relayerd.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: initialize-keystore
+          image: {{ .Values.images.init.reference | quote }}
+          imagePullPolicy: {{ .Values.images.init.pullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              umask 077
+              mkdir -p /data/keystore /data/tls /data/backups
+              if [ ! -s /data/keystore/keystore.json ]; then
+                cp /runtime/keystore.json /data/keystore/keystore.json
+                chmod 0600 /data/keystore/keystore.json
+              fi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources.init | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: runtime-secret
+              mountPath: /runtime
+              readOnly: true
+      containers:
+        - name: relayerd
+          image: {{ .Values.images.relayerd.reference | quote }}
+          imagePullPolicy: {{ .Values.images.relayerd.pullPolicy }}
+          args:
+            - --config-file=/etc/relayerd/config.json
+          env:
+            - name: RELAYER_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "relayerd.runtimeSecretName" . }}
+                  key: keystore-password
+          # Every probe on this container measures the DAEMON and nothing else. kubelet
+          # restarts the container whose probe failed, so checking a daemon endpoint from
+          # the console container restarts the console forever while the wedged daemon is
+          # never touched. This is the Kubernetes form of the VM fix, which was not the
+          # systemd start limit but the dependency direction: relayer-console.service
+          # only Wants= relayerd.service, so a daemon that cannot answer stops taking the
+          # console down with it.
+          #
+          # These have to be exec probes. The daemon API is loopback-only (see
+          # api-listen-addr in the ConfigMap) and kubelet dials an httpGet probe from the
+          # node, not from the pod network namespace, so 127.0.0.1:{{ .Values.ports.api }} is only
+          # reachable from inside the container. wget exits non-zero both for a refused
+          # connection and for a 5xx, which is exactly the "process alive but not
+          # answering /health" case a liveness probe exists to catch.
+          #
+          # Startup budget: 30 x 10s = 300s. That is the wait the finished VM path proves
+          # is enough for relayerd to answer /ready (acp_relayer_ready_retries 60 x
+          # acp_relayer_ready_delay 5s). It must stay well under the installer's single
+          # RELAYER_TIMEOUT (15m) `helm upgrade --install --atomic --wait`, because the
+          # startupProbe suppresses readiness while it runs and everything from pod
+          # creation to pod Ready shares that one 900s budget: 300s here leaves ~600s for
+          # scheduling, PVC binding, three image pulls, and the init container. A budget
+          # larger than the installer's wait does not buy a slow start more time, it only
+          # guarantees helm rolls the release back before the budget can be spent.
+          # Exceeding it is not terminal either: kubelet restarts the container and
+          # retries indefinitely, which is the real analogue of StartLimitIntervalSec=0
+          # with Restart=always in relayerd.service.
+          #
+          # Liveness budget: 40 x 15s = 600s. /health also covers the P-Chain, Info, and
+          # EVM RPCs the daemon reaches through the discovered avalanchego Service, so a
+          # shorter budget would turn an RPC rollout or a network blip into a restart that
+          # discards in-flight acceptance work. 10 minutes still catches a wedged daemon.
+          #
+          # Readiness budget: 3 x 10s = 30s. It only withholds the pod from an operator,
+          # so it stays tight.
+          startupProbe:
+            exec:
+              command:
+                - wget
+                - -q
+                - -T
+                - "4"
+                - -O
+                - /dev/null
+                - {{ printf "http://127.0.0.1:%d/health" (int .Values.ports.api) | quote }}
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command:
+                - wget
+                - -q
+                - -T
+                - "4"
+                - -O
+                - /dev/null
+                - {{ printf "http://127.0.0.1:%d/health" (int .Values.ports.api) | quote }}
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 40
+          readinessProbe:
+            exec:
+              command:
+                - wget
+                - -q
+                - -T
+                - "4"
+                - -O
+                - /dev/null
+                - {{ printf "http://127.0.0.1:%d/ready" (int .Values.ports.api) | quote }}
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources.relayerd | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/relayerd/config.json
+              subPath: config.json
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+        - name: console
+          image: {{ .Values.images.console.reference | quote }}
+          imagePullPolicy: {{ .Values.images.console.pullPolicy }}
+          env:
+            - name: RELAYER_BASE_URL
+              value: http://127.0.0.1:{{ .Values.ports.api }}
+            - name: L1_RPC_URL
+              value: {{ include "relayerd.evmRpcUrl" . | quote }}
+            - name: BROWSER_RPC_URL
+              value: /api/rpc
+            # WALLET_RPC_URL is deliberately NOT set unless an operator overrides it.
+            #
+            # It used to default to http://127.0.0.1:<console.walletRpcTunnelPort>/ext/bc/<id>/rpc,
+            # which is only reachable from the operator's browser while k8s-relayer-access holds its
+            # port-forward of the L1 RPC Service. Whenever that forward was absent (tunnel dropped,
+            # different access path), the wallet had an undialable RPC saved for this chain and every
+            # wallet-side call failed as viem's opaque
+            # "An internal error was received. Details: Failed to fetch" (JSON-RPC -32603).
+            #
+            # Left unset, the console serves the wallet from its OWN origin (/api/wallet-rpc,
+            # capability-token authed) and the browser absolutizes it against window.location.origin.
+            # That is the same port already carrying the page — forwarded by k8s-relayer-access — so
+            # it needs no second forward and stays correct under any access topology. Set
+            # console.walletRpcUrl only to point the wallet at the L1 RPC directly, or when the
+            # console is behind a self-signed cert the extension will refuse.
+            # See console/README.md "Wallet RPC" in the relayer repo.
+            {{- with .Values.console.walletRpcUrl }}
+            - name: WALLET_RPC_URL
+              value: {{ . | quote }}
+            {{- end }}
+            - name: RELAYER_CONSOLE_ORIGIN
+              value: {{ .Values.console.origin | quote }}
+            # The supported Kubernetes surface is an HTTP loopback tunnel. Secure
+            # cookies cannot be stored there, so explicitly enable the console's
+            # documented tunnel-only cookie mode.
+            - name: RELAYER_CONSOLE_INSECURE_COOKIE
+              value: "1"
+            - name: RELAYER_CONSOLE_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "relayerd.runtimeSecretName" . }}
+                  key: console-session-secret
+            - name: RELAYER_CONSOLE_PASSWORD_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "relayerd.runtimeSecretName" . }}
+                  key: console-password-hash
+                  optional: true
+            {{- if .Values.safe.enabled }}
+            - name: SAFE_ADDRESS
+              value: {{ .Values.safe.address | quote }}
+            - name: SAFE_TX_SERVICE_URL
+              value: {{ .Values.safe.transactionServiceUrl | quote }}
+            {{- with .Values.safe.uiUrl }}
+            - name: SAFE_UI_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
+          ports:
+            - name: console
+              containerPort: {{ .Values.ports.console }}
+              protocol: TCP
+          # Startup and liveness here check the CONSOLE only. A daemon endpoint in this
+          # container's liveness probe would make kubelet restart the console for the
+          # daemon's fault, which is the mistake relayer-console.service already stopped
+          # making when it moved from Requires= to Wants= relayerd.service: a daemon that
+          # cannot answer must no longer take the operator's session down with it.
+          #
+          # Readiness is the one place the dependency belongs, because readiness only
+          # withholds the pod and never restarts anything, and an operator handed a
+          # console whose daemon cannot answer is worse off than one handed no console at
+          # all. It is also not a duplicate of the relayerd readinessProbe: this one
+          # exercises the console-to-daemon loopback hop that every page in the UI uses.
+          #
+          # Startup budget: 30 x 5s = 150s, the wait the VM path uses for the console on
+          # loopback (30 retries x 5s). It runs concurrently with the daemon's 300s
+          # startup budget, so the pair still fits the installer's 15m RELAYER_TIMEOUT
+          # `helm upgrade --install --atomic --wait` with room for pulls and the init
+          # container. Liveness budget: 20 x 15s = 300s, matching the TimeoutStartSec the
+          # VM unit allows this same image; five minutes of a wholly unresponsive HTTP
+          # server is unambiguously wedged, while anything tighter restarts the console
+          # over a slow first render. Readiness budget: 3 x 10s = 30s.
+          startupProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - {{ printf "fetch('http://127.0.0.1:%d/api/auth/session').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))" (int .Values.ports.console) | quote }}
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - {{ printf "fetch('http://127.0.0.1:%d/api/auth/session').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))" (int .Values.ports.console) | quote }}
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 20
+          readinessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - {{ printf "Promise.all([fetch('http://127.0.0.1:%d/api/auth/session'),fetch('http://127.0.0.1:%d/ready')]).then(rs=>{if(rs.some(r=>!r.ok))process.exit(1)}).catch(()=>process.exit(1))" (int .Values.ports.console) (int .Values.ports.api) | quote }}
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources.console | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: console-cache
+              mountPath: /app/.next/cache
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "relayerd.fullname" . }}-config
+        - name: runtime-secret
+          secret:
+            secretName: {{ include "relayerd.runtimeSecretName" . }}
+            defaultMode: 0440
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: console-cache
+          emptyDir:
+            sizeLimit: 128Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "relayerd.labels" . | nindent 10 }}
+      spec:
+        accessModes:
+          {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}

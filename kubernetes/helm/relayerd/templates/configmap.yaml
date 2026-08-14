@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "relayerd.fullname" . }}-config
+  labels:
+    {{- include "relayerd.labels" . | nindent 4 }}
+data:
+  # This file contains endpoints and public chain metadata only. Key material and
+  # console secrets live in the existing runtime Secret created by the installer.
+  config.json: |
+    {
+      "log-level": {{ .Values.logLevel | quote }},
+      "network-id": {{ include "relayerd.networkId" . }},
+      "subnet-id": {{ .Values.l1.subnetId | quote }},
+      "manager-address": {{ .Values.l1.managerAddress | quote }},
+      "validator-manager-address": {{ .Values.l1.validatorManagerAddress | quote }},
+      "coin-name": {{ default "TOKEN" .Values.l1.coinName | quote }},
+      "pchain-rpc-url": {{ include "relayerd.avalanchegoUrl" . | quote }},
+      "info-rpc-url": {{ include "relayerd.avalanchegoUrl" . | quote }},
+      "evm-rpc-url": {{ include "relayerd.evmRpcUrl" . | quote }},
+      "tls-cert-path": "/data/tls/staker.crt",
+      "tls-key-path": "/data/tls/staker.key",
+      "bbolt-path": "/data/relayer.db",
+      "api-listen-addr": "127.0.0.1:{{ .Values.ports.api }}",
+      "acceptance-timeout-seconds": {{ .Values.acceptanceTimeoutSeconds | int }},
+      "allow-private-ips": true,
+      "key-source": {
+        "backend": "encrypted-file",
+        "encrypted-file": "/data/keystore/keystore.json"
+      }{{- if .Values.manuallyTrackedPeers }},
+      "manually-tracked-peers": [
+        {{- range $index, $peer := .Values.manuallyTrackedPeers }}
+        {{- if $index }},{{ end }}
+        {"node-id": {{ $peer.nodeId | quote }}, "ip": {{ $peer.ip | quote }}}
+        {{- end }}
+      ]{{- end }}{{- if .Values.stateBackup.enabled }},
+      "state-backup": {
+        "dir": "/data/backups",
+        "interval-seconds": {{ .Values.stateBackup.intervalSeconds | int }}
+      }{{- end }}
+    }
+  metadata.json: |
+    {
+      "network": {{ .Values.network | quote }},
+      "subnetId": {{ .Values.l1.subnetId | quote }},
+      "blockchainId": {{ .Values.l1.blockchainId | quote }},
+      "evmChainId": {{ .Values.l1.evmChainId | int64 }},
+      "chainName": {{ .Values.l1.chainName | quote }},
+      "managerAddress": {{ .Values.l1.managerAddress | quote }},
+      "validatorManagerAddress": {{ .Values.l1.validatorManagerAddress | quote }}
+    }

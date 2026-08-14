@@ -1,0 +1,43 @@
+# RENDERING AND REVIEW FIXTURE - NOT A DEPLOYABLE CONFIGURATION.
+#
+# The chart fails closed on every deployment-specific value, so neither
+# values.yaml nor values-kind.yaml can be rendered on its own. This file exists
+# only so a reviewer or a CI job can read the manifests the chart produces:
+#
+#   helm template relayer kubernetes/helm/relayerd \
+#     -f kubernetes/helm/relayerd/values-example.yaml
+#
+# Never pass this file to helm install or helm upgrade. Every value below is a
+# placeholder picked to satisfy a template guard in templates/_helpers.tpl: the
+# identifiers belong to no L1, the two addresses hold no contract, and the named
+# runtime Secret does not exist, so a workload built from this file would have no
+# keys, no state, and no chain to reach.
+#
+# Real values are generated, never hand-written: `make k8s-relayer` discovers the
+# namespace, l1-config, RPC and validator releases, on-chain PoAManager topology,
+# release image digests, and operator identity, then renders this same chart with
+# a values file it writes itself. Deployment-wide defaults belong in values.yaml;
+# nothing here is read by the installer.
+#
+# Everything the guards do not require is deliberately left at its values.yaml
+# default so this fixture keeps rendering whatever those defaults become.
+
+l1:
+  # Non-empty is the only guard on these two. Nothing resolves them.
+  subnetId: ExampleSubnetIdNotARealCB58Identifier
+  blockchainId: ExampleBlockchainIdNotARealCB58Identifier
+  evmChainId: 999999
+  chainName: example-chain
+  # Each address must be 20-byte hex and the two must differ: the only supported
+  # topology is a PoAManager that owns a separate ValidatorManager proxy.
+  managerAddress: "0x1111111111111111111111111111111111111111"
+  validatorManagerAddress: "0x2222222222222222222222222222222222222222"
+
+# The chart never creates or owns key material; it only references the Secret the
+# installer created first. This name is fake on purpose.
+runtimeSecret:
+  name: example-relayer-runtime
+
+# The sole subject granted pod port-forward by the chart's RoleBinding. The
+# installer records the real `kubectl auth whoami` username.
+operatorIdentity: example-operator@example.invalid
