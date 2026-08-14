@@ -6,6 +6,11 @@ For stable `PASS`/`WARN`/`FAIL`/`SKIP` diagnostics and exact remediation of a
 managed validator-lifecycle Relayer, run `make relayer-doctor` and see the
 [managed Relayer runbook](l1/RELAYER.md#what-doctor-checks).
 
+If `VM.PROTOCOL.PRIVACY` fails, first run `make relayer-prepare`. For validators
+managed by this repository's Terraform/Ansible inventory, run
+`make relayer-authorize`. If the L1 owner manages validators externally, follow
+the [manual protocol-private authorization procedure](l1/RELAYER-AUTHORIZATION.md#manual-or-external-authorization).
+
 ## Connection Issues
 
 ### Ansible can't connect to nodes

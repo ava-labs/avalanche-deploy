@@ -45,6 +45,7 @@ docs/         Guides and reference docs
 - [Troubleshooting](docs/TROUBLESHOOTING.md) — Common issues and fixes
 - [Kubernetes](kubernetes/README.md) — Helm-based deployment alternative
 - [Managed validator-lifecycle Relayer](docs/l1/RELAYER.md) — Terraform/Ansible doctor, installation, access, funding, recovery, upgrades, and removal
+- [Protocol-private Relayer authorization](docs/l1/RELAYER-AUTHORIZATION.md) — Managed Terraform/Ansible automation and manual/external validator configuration
 - [Security](SECURITY.md) — Security expectations and guidelines
 
 ## Command Help

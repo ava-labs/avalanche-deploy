@@ -6,6 +6,14 @@ acp_relayer_version: "v0.1.0"
 acp_relayer_binary_local_src: ""
 acp_relayer_restore_binary_local_src: ""
 acp_relayer_console_image: ""
+acp_relayer_current_state_schema: 1
+acp_relayer_target_config_schema: 1
+acp_relayer_target_state_schema: 1
+acp_relayer_target_min_readable_state_schema: 1
+acp_relayer_target_min_automatic_rollback_state_schema: 1
+acp_relayer_scanner_enabled: false
+acp_relayer_scanner_poll_seconds: 5
+acp_relayer_scanner_start_block: 0
 
 acp_relayer_user: relayerd
 acp_relayer_group: relayerd

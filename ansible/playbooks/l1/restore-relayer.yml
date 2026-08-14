@@ -38,6 +38,16 @@
       ansible.builtin.set_fact:
         restore_daemon_service_installed: "{{ restore_service_units.results[0].stat.exists | bool }}"
         restore_console_service_installed: "{{ restore_service_units.results[1].stat.exists | bool }}"
+        restore_daemon_was_running: >-
+          {{
+            restore_service_units.results[0].stat.exists and
+            ansible_facts.services.get('relayerd.service', {}).get('state', '') == 'running'
+          }}
+        restore_console_was_running: >-
+          {{
+            restore_service_units.results[1].stat.exists and
+            ansible_facts.services.get('relayer-console.service', {}).get('state', '') == 'running'
+          }}
 
     - name: Create the root-only restore workspace
       ansible.builtin.file:
@@ -161,6 +171,16 @@
               - /var/lib/relayerd/relayer.db
           changed_when: true
 
+        - name: Restore relayerd ownership on the database and lock sidecar
+          ansible.builtin.file:
+            path: "{{ item }}"
+            owner: relayerd
+            group: relayerd
+            mode: "0600"
+          loop:
+            - /var/lib/relayerd/relayer.db
+            - /var/lib/relayerd/relayer.db.lock
+
         - name: Restore matching daemon configuration
           ansible.builtin.copy:
             src: "{{ restore_stage }}/etc/relayerd/config.json"
@@ -239,8 +259,8 @@
             - relayerd
             - relayer-console
           when: >-
-            (item == 'relayerd' and restore_daemon_service_installed) or
-            (item == 'relayer-console' and restore_console_service_installed)
+            (item == 'relayerd' and restore_daemon_was_running) or
+            (item == 'relayer-console' and restore_console_was_running)
 
         - name: Wait for restored daemon readiness
           ansible.builtin.uri:
@@ -250,7 +270,7 @@
           until: restored_ready.status == 200
           retries: 60
           delay: 5
-          when: restore_daemon_service_installed
+          when: restore_daemon_was_running
 
       rescue:
         - name: Stop services before automatic restore rollback
@@ -262,8 +282,8 @@
             - relayerd
           failed_when: false
           when: >-
-            (item == 'relayerd' and restore_daemon_service_installed) or
-            (item == 'relayer-console' and restore_console_service_installed)
+            (item == 'relayerd' and restore_daemon_was_running) or
+            (item == 'relayer-console' and restore_console_was_running)
 
         - name: Remove partially restored recovery directories
           ansible.builtin.file:
@@ -288,8 +308,8 @@
             - relayer-console
           failed_when: false
           when: >-
-            (item == 'relayerd' and restore_daemon_service_installed) or
-            (item == 'relayer-console' and restore_console_service_installed)
+            (item == 'relayerd' and restore_daemon_was_running) or
+            (item == 'relayer-console' and restore_console_was_running)
 
         - name: Report automatic rollback
           ansible.builtin.fail:
@@ -310,6 +330,10 @@
           {{ pre_restore_archive }}.
           {{
             'Services restarted and passed readiness.'
-            if restore_daemon_service_installed
-            else 'Workload remains normally removed and is ready for make relayer.'
+            if restore_daemon_was_running
+            else (
+              'Services remain stopped, matching their pre-restore state.'
+              if restore_daemon_service_installed
+              else 'Workload remains normally removed and is ready for make relayer.'
+            )
           }}

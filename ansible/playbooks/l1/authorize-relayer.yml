@@ -152,9 +152,9 @@
               method: info.getNodeID
             return_content: true
           register: relayer_authorize_api_ready
-          until:
-            - relayer_authorize_api_ready.status == 200
-            - relayer_authorize_api_ready.json.result.nodeID == relayer_authorize_node_id
+          until: >-
+            relayer_authorize_api_ready.status | default(0) == 200 and
+            (relayer_authorize_api_ready.json | default({})).get('result', {}).get('nodeID', '') == relayer_authorize_node_id
           retries: 30
           delay: 5
           when: relayer_authorize_needs_restart | bool
@@ -172,29 +172,9 @@
                 chain: "{{ acp_relayer_blockchain_id }}"
             return_content: true
           register: relayer_authorize_l1_ready
-          until:
-            - relayer_authorize_l1_ready.status == 200
-            - relayer_authorize_l1_ready.json.result.isBootstrapped | bool
-          retries: 60
-          delay: 5
-          when: relayer_authorize_needs_restart | bool
-
-        - name: Wait for rpc[0] to see this validator
-          ansible.builtin.uri:
-            url: http://127.0.0.1:9650/ext/info
-            method: POST
-            body_format: json
-            body:
-              jsonrpc: "2.0"
-              id: 1
-              method: info.peers
-            return_content: true
-          delegate_to: "{{ groups['rpc'][0] }}"
-          become: false
-          register: relayer_authorize_peer_ready
           until: >-
-            relayer_authorize_node_id in
-            (relayer_authorize_peer_ready.json.result.peers | map(attribute='nodeID') | list)
+            relayer_authorize_l1_ready.status | default(0) == 200 and
+            (relayer_authorize_l1_ready.json | default({})).get('result', {}).get('isBootstrapped', false) | bool
           retries: 60
           delay: 5
           when: relayer_authorize_needs_restart | bool
@@ -291,6 +271,124 @@
               No later validator was changed. Repair this validator, then rerun
               make relayer-authorize.
 
+- name: Restore managed RPC peering after validator restarts
+  hosts: rpc
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Read the RPC NodeID before any recovery restart
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.getNodeID
+        return_content: true
+      register: relayer_authorize_rpc_node_id_result
+
+    - name: Require a valid RPC NodeID
+      ansible.builtin.assert:
+        that:
+          - relayer_authorize_rpc_node_id_result.status | default(0) == 200
+          - (relayer_authorize_rpc_node_id_result.json | default({})).get('result', {}).get('nodeID', '') is match('^NodeID-')
+
+    - name: Read current RPC peer visibility
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.peers
+        return_content: true
+      register: relayer_authorize_rpc_peers_before
+
+    - name: Classify RPC peer recovery
+      ansible.builtin.set_fact:
+        relayer_authorize_rpc_node_id: >-
+          {{ (relayer_authorize_rpc_node_id_result.json | default({})).get('result', {}).get('nodeID', '') }}
+        relayer_authorize_required_validator_node_ids: >-
+          {{ groups['validators'] | map('extract', hostvars, 'relayer_authorize_node_id') | list }}
+        relayer_authorize_rpc_visible_node_ids: >-
+          {{ (relayer_authorize_rpc_peers_before.json | default({})).get('result', {}).get('peers', [])
+             | map(attribute='nodeID') | list }}
+
+    - name: Record validators missing from this RPC
+      ansible.builtin.set_fact:
+        relayer_authorize_rpc_missing_validator_node_ids: >-
+          {{ relayer_authorize_required_validator_node_ids
+             | difference(relayer_authorize_rpc_visible_node_ids) }}
+
+    - name: Restart the RPC only when validator peering did not recover
+      ansible.builtin.systemd:
+        name: avalanchego
+        state: restarted
+      when: relayer_authorize_rpc_missing_validator_node_ids | length > 0
+
+    - name: Wait for the RPC Info API after recovery restart
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.getNodeID
+        return_content: true
+      register: relayer_authorize_rpc_api_ready
+      until: >-
+        relayer_authorize_rpc_api_ready.status | default(0) == 200 and
+        (relayer_authorize_rpc_api_ready.json | default({})).get('result', {}).get('nodeID', '') == relayer_authorize_rpc_node_id
+      retries: 30
+      delay: 5
+      when: relayer_authorize_rpc_missing_validator_node_ids | length > 0
+
+    - name: Wait for the L1 to report bootstrapped on the recovered RPC
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.isBootstrapped
+          params:
+            chain: "{{ acp_relayer_blockchain_id }}"
+        return_content: true
+      register: relayer_authorize_rpc_l1_ready
+      until: >-
+        relayer_authorize_rpc_l1_ready.status | default(0) == 200 and
+        (relayer_authorize_rpc_l1_ready.json | default({})).get('result', {}).get('isBootstrapped', false) | bool
+      retries: 60
+      delay: 5
+      when: relayer_authorize_rpc_missing_validator_node_ids | length > 0
+
+    - name: Wait for every validator peer on this RPC
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.peers
+        return_content: true
+      register: relayer_authorize_rpc_peers_ready
+      until: >-
+        (relayer_authorize_required_validator_node_ids
+         | difference(
+             (relayer_authorize_rpc_peers_ready.json | default({})).get('result', {}).get('peers', [])
+             | map(attribute='nodeID') | list
+           )
+         | length) == 0
+      retries: 60
+      delay: 5
+
 - name: Verify final RPC-to-validator visibility
   hosts: rpc[0]
   become: false
@@ -311,7 +409,10 @@
     - name: Require every managed validator peer
       ansible.builtin.assert:
         that:
-          - hostvars[item].relayer_authorize_node_id in (relayer_authorize_final_peers.json.result.peers | map(attribute='nodeID') | list)
+          - >-
+            hostvars[item].relayer_authorize_node_id in
+            ((relayer_authorize_final_peers.json | default({})).get('result', {}).get('peers', [])
+             | map(attribute='nodeID') | list)
         fail_msg: >-
           rpc[0] still cannot see {{ item }} after authorization. Do not start the
           Relayer. Inspect both AvalancheGo services and rerun doctor.
@@ -330,8 +431,8 @@
             chain: "{{ acp_relayer_blockchain_id }}"
         return_content: true
       register: relayer_authorize_final_l1_ready
-      until:
-        - relayer_authorize_final_l1_ready.status == 200
-        - relayer_authorize_final_l1_ready.json.result.isBootstrapped | bool
+      until: >-
+        relayer_authorize_final_l1_ready.status | default(0) == 200 and
+        (relayer_authorize_final_l1_ready.json | default({})).get('result', {}).get('isBootstrapped', false) | bool
       retries: 60
       delay: 5

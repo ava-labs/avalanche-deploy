@@ -122,6 +122,91 @@ write_identity_metadata() {
     }' >"$identity_file"
 }
 
+derive_scanner_start_block() {
+  local manager_metadata="$ROOT_DIR/validator-manager.json"
+  local anchors vars_file result_file result
+  if [[ ! -f "$manager_metadata" ]]; then
+    printf 'Scanner start: validator-manager.json is unavailable; using genesis for complete coverage.\n' >&2
+    printf '0\n'
+    return 0
+  fi
+  if ! jq -e \
+    --arg manager "$(jq -r '.managerAddress' "$METADATA_FILE")" \
+    --arg proxy "$(jq -r '.validatorManagerAddress' "$METADATA_FILE")" '
+      ((.poa_manager // "") | ascii_downcase) == ($manager | ascii_downcase) and
+      ((.proxy // "") | ascii_downcase) == ($proxy | ascii_downcase)
+    ' "$manager_metadata" >/dev/null; then
+    printf 'Scanner start: validator-manager.json does not match l1.env; using genesis.\n' >&2
+    printf '0\n'
+    return 0
+  fi
+  anchors="$(jq -c '
+    [
+      {txHash: .init_settings_tx, selector: "0x736c87be"},
+      {txHash: .init_validators_tx, selector: "0x20d91b7a"}
+    ]
+    | map(select(.txHash | type == "string" and test("^0x[0-9a-fA-F]{64}$")))
+    | unique_by(.txHash, .selector)
+  ' "$manager_metadata")"
+  if [[ "$(jq 'length' <<<"$anchors")" -eq 0 ]]; then
+    printf 'Scanner start: manager initialization transactions are unavailable; using genesis.\n' >&2
+    printf '0\n'
+    return 0
+  fi
+
+  vars_file="$WORK_DIR/scanner-start-vars.json"
+  result_file="$WORK_DIR/scanner-start-result.json"
+  jq -n \
+    --arg blockchain "$(jq -r '.blockchainId' "$METADATA_FILE")" \
+    --arg manager "$(jq -r '.managerAddress' "$METADATA_FILE")" \
+    --arg proxy "$(jq -r '.validatorManagerAddress' "$METADATA_FILE")" \
+    --arg output "$result_file" \
+    --argjson anchors "$anchors" \
+    '{
+      relayer_scanner_blockchain_id: $blockchain,
+      relayer_scanner_anchors: $anchors,
+      relayer_scanner_manager_addresses: [$proxy],
+      relayer_scanner_result_local: $output
+    }' >"$vars_file"
+  (
+    cd "$ROOT_DIR/ansible" || exit 1
+    ANSIBLE_CONFIG="$ROOT_DIR/ansible/ansible.cfg" \
+      ansible-playbook -i "$INVENTORY_FILE" playbooks/l1/derive-relayer-scanner-start.yml -e "@$vars_file"
+  ) >/dev/null
+  result="$(jq -r '.startBlock' "$result_file")"
+  if [[ "$(jq -r '.derived' "$result_file")" == true ]]; then
+    printf 'Scanner start: verified finalized manager initialization block %s.\n' "$result" >&2
+  else
+    printf 'Scanner start: %s; using genesis for complete coverage.\n' \
+      "$(jq -r '.reason // "anchor derivation failed"' "$result_file")" >&2
+  fi
+  printf '%s\n' "$result"
+}
+
+resolve_install_scanner_settings() {
+  local operation="$1"
+  local discovery_file="$2"
+  EFFECTIVE_RELAYER_SCANNER_POLL_SECONDS="$RELAYER_SCANNER_POLL_SECONDS"
+  EFFECTIVE_RELAYER_SCANNER_START_BLOCK="$RELAYER_SCANNER_START_BLOCK"
+  if [[ "$operation" != install && "$RESOLVED_RELAYER_SCANNER_ENABLED" == true ]]; then
+    if [[ -z "$RELAYER_SCANNER_POLL_SECONDS_EXPLICIT" ]]; then
+      EFFECTIVE_RELAYER_SCANNER_POLL_SECONDS="$(
+        jq -r --argjson fallback "$RELAYER_SCANNER_POLL_SECONDS" \
+          '.existingScanner["poll-interval-seconds"] // $fallback' "$discovery_file"
+      )"
+    fi
+    if [[ -z "$RELAYER_SCANNER_START_BLOCK_EXPLICIT" ]]; then
+      if jq -e '.existingScanner["start-block"] | type == "number"' "$discovery_file" >/dev/null; then
+        EFFECTIVE_RELAYER_SCANNER_START_BLOCK="$(jq -r '.existingScanner["start-block"]' "$discovery_file")"
+      else
+        EFFECTIVE_RELAYER_SCANNER_START_BLOCK="$(derive_scanner_start_block)"
+      fi
+    fi
+  elif [[ "$operation" == install && "$RESOLVED_RELAYER_SCANNER_ENABLED" == true && -z "$RELAYER_SCANNER_START_BLOCK_EXPLICIT" ]]; then
+    EFFECTIVE_RELAYER_SCANNER_START_BLOCK="$(derive_scanner_start_block)"
+  fi
+}
+
 run_prepare() {
   local validator_count private_count tls_identity_exists tls_pair_exists
   local p2p_node_id tls_certificate_sha256 answer bundle_dir setup_result identity_file
@@ -174,7 +259,9 @@ run_prepare() {
   else
     print_protocol_authorization "$p2p_node_id" "$DISCOVERY_FILE"
     if authorization_needed "$p2p_node_id" "$DISCOVERY_FILE"; then
-      printf 'Authorize manually or run make relayer-authorize. Run make relayer after authorization.\n'
+      printf 'For Terraform/Ansible-managed nodes, run make relayer-authorize.\n'
+      printf 'For manual or external nodes, follow %s\n' "$RELAYER_MANUAL_AUTHORIZATION_URL"
+      printf 'Run make relayer after authorization.\n'
     else
       printf 'Authorization is already complete. Run make relayer.\n'
     fi
@@ -202,6 +289,9 @@ run_install() {
   local safe_enabled
   local safe_address
   local vars_file
+  local role_operation
+  local current_state_schema
+  local effective_scanner_poll effective_scanner_start
   local validator_count private_count
 
   run_authorization_preflight
@@ -244,12 +334,21 @@ run_install() {
     die "console password entry was interrupted; installation was not started"
   fi
 
+  # Verify target artifacts and capabilities before any backup or VM mutation.
+  prepare_release true
+  role_operation=install
+  current_state_schema=1
   if [[ "$(jq -r '.keystoreExists and .releaseMetadataExists' "$DISCOVERY_FILE")" == true ]]; then
+    role_operation=reapply
+    current_state_schema="$(jq -r '.recordedRelease.stateSchema // 1' "$DISCOVERY_FILE")"
+  fi
+  resolve_install_scanner_settings "$role_operation" "$DISCOVERY_FILE"
+  effective_scanner_poll="$EFFECTIVE_RELAYER_SCANNER_POLL_SECONDS"
+  effective_scanner_start="$EFFECTIVE_RELAYER_SCANNER_START_BLOCK"
+  if [[ "$role_operation" == reapply ]]; then
     printf 'Existing Relayer state was found; creating a recovery backup before reapplying.\n'
     run_manage_playbook backup
   fi
-
-  prepare_release true
   bundle_dir="$WORK_DIR/generated"
   setup_result="$WORK_DIR/setup-result.json"
   generate_relayer_setup_bundle "$console_password" "$bundle_dir" "$setup_result"
@@ -286,19 +385,38 @@ run_install() {
 
   setup_config="$(jq -r '.configFile' "$setup_result")"
   rewritten_config="$WORK_DIR/config.json"
+  # The scanner block is written here rather than left to the daemon's defaults because
+  # this file is regenerated on every install and reapply — a hand-edit on the host would
+  # be silently reverted the next time anyone runs `make relayer`.
+  #
+  # NOTE: relayerd rejects ANY config key it does not recognise (UnmarshalExact) and
+  # refuses to boot. So this block may only be emitted against a release that parses it.
+  # Capability resolution happens only after the checksummed archive is extracted;
+  # legacy releases (including rc.8) omit this key entirely.
   jq \
     --arg keystore /var/lib/relayerd/keystore.json \
     --arg tls_cert /var/lib/relayerd/tls/staker.crt \
     --arg tls_key /var/lib/relayerd/tls/staker.key \
     --arg database /var/lib/relayerd/relayer.db \
     --arg backups /var/backups/relayerd \
+    --argjson scanner_enabled "$RESOLVED_RELAYER_SCANNER_ENABLED" \
+    --argjson scanner_poll "$effective_scanner_poll" \
+    --argjson scanner_start_block "$effective_scanner_start" \
     '."tls-cert-path" = $tls_cert |
      ."tls-key-path" = $tls_key |
      ."bbolt-path" = $database |
      ."api-listen-addr" = "127.0.0.1:8081" |
      ."key-source"."backend" = "encrypted-file" |
      ."key-source"."encrypted-file" = $keystore |
-     ."state-backup" = {"dir": $backups, "interval-seconds": 300}' \
+     ."state-backup" = {"dir": $backups, "interval-seconds": 300} |
+     (if $scanner_enabled then
+        ."scanner" = {
+          "enabled": true,
+          "poll-interval-seconds": $scanner_poll,
+          "start-block": $scanner_start_block,
+          "pause-file": "/etc/relayerd/scanner-pause"
+        }
+      else . end)' \
     "$setup_config" >"$rewritten_config"
 
   funding_file="$WORK_DIR/funding.json"
@@ -334,9 +452,18 @@ run_install() {
     --argjson password_reset "$console_password_reset" \
     --argjson preserve "$preserve_keystore" \
     --argjson safe_enabled "$safe_enabled" \
+    --arg role_operation "$role_operation" \
+    --argjson target_config_schema "$RELEASE_CONFIG_SCHEMA" \
+    --argjson current_state_schema "$current_state_schema" \
+    --argjson target_state_schema "$RELEASE_STATE_SCHEMA" \
+    --argjson target_min_readable_state_schema "$RELEASE_MIN_READABLE_STATE_SCHEMA" \
+    --argjson target_min_automatic_rollback_state_schema "$RELEASE_MIN_AUTOMATIC_ROLLBACK_STATE_SCHEMA" \
+    --argjson scanner_enabled "$RESOLVED_RELAYER_SCANNER_ENABLED" \
+    --argjson scanner_poll "$effective_scanner_poll" \
+    --argjson scanner_start_block "$effective_scanner_start" \
     '{
       acp_relayer_discovered_target: $target,
-      acp_relayer_operation: "install",
+      acp_relayer_operation: $role_operation,
       acp_relayer_version: $version,
       acp_relayer_binary_local_src: $binary,
       acp_relayer_restore_binary_local_src: $restore_binary,
@@ -353,7 +480,15 @@ run_install() {
       acp_relayer_expected_tls_certificate_sha256: $tls_certificate_sha256,
       acp_relayer_preserve_keystore: $preserve,
       acp_relayer_safe_enabled: $safe_enabled,
-      acp_relayer_safe_address: $safe_address
+      acp_relayer_safe_address: $safe_address,
+      acp_relayer_target_config_schema: $target_config_schema,
+      acp_relayer_current_state_schema: $current_state_schema,
+      acp_relayer_target_state_schema: $target_state_schema,
+      acp_relayer_target_min_readable_state_schema: $target_min_readable_state_schema,
+      acp_relayer_target_min_automatic_rollback_state_schema: $target_min_automatic_rollback_state_schema,
+      acp_relayer_scanner_enabled: $scanner_enabled,
+      acp_relayer_scanner_poll_seconds: $scanner_poll,
+      acp_relayer_scanner_start_block: $scanner_start_block
     }' >"$vars_file"
 
   (
@@ -364,7 +499,7 @@ run_install() {
 }
 
 run_upgrade() {
-  local vars_file private_count
+  local vars_file private_count current_state_schema effective_scanner_poll effective_scanner_start
   run_preflight
   private_count="$(jq '[.validatorPrivacy[] | select(.validatorOnly)] | length' "$DISCOVERY_FILE")"
   if ((private_count > 0)) && [[ "$(jq -r '.tlsIdentityExists' "$DISCOVERY_FILE")" != true ]]; then
@@ -374,8 +509,12 @@ run_upgrade() {
     "The upgrade was not started. Update every validator, then rerun make relayer-upgrade."; then
     return 1
   fi
-  run_manage_playbook backup
   prepare_release false
+  current_state_schema="$(jq -r '.recordedRelease.stateSchema // 1' "$DISCOVERY_FILE")"
+  resolve_install_scanner_settings upgrade "$DISCOVERY_FILE"
+  effective_scanner_poll="$EFFECTIVE_RELAYER_SCANNER_POLL_SECONDS"
+  effective_scanner_start="$EFFECTIVE_RELAYER_SCANNER_START_BLOCK"
+  run_manage_playbook backup
   vars_file="$WORK_DIR/upgrade-vars.json"
   jq -n \
     --arg target "$TARGET_NAME" \
@@ -384,6 +523,14 @@ run_upgrade() {
     --arg restore_binary "$RELEASE_RESTORE" \
     --arg image "$CONSOLE_IMAGE" \
     --arg blockchain "$(jq -r '.blockchainId' "$METADATA_FILE")" \
+    --argjson current_state_schema "$current_state_schema" \
+    --argjson target_config_schema "$RELEASE_CONFIG_SCHEMA" \
+    --argjson target_state_schema "$RELEASE_STATE_SCHEMA" \
+    --argjson target_min_readable_state_schema "$RELEASE_MIN_READABLE_STATE_SCHEMA" \
+    --argjson target_min_automatic_rollback_state_schema "$RELEASE_MIN_AUTOMATIC_ROLLBACK_STATE_SCHEMA" \
+    --argjson scanner_enabled "$RESOLVED_RELAYER_SCANNER_ENABLED" \
+    --argjson scanner_poll "$effective_scanner_poll" \
+    --argjson scanner_start_block "$effective_scanner_start" \
     '{
       acp_relayer_discovered_target: $target,
       acp_relayer_operation: "upgrade",
@@ -391,7 +538,15 @@ run_upgrade() {
       acp_relayer_binary_local_src: $binary,
       acp_relayer_restore_binary_local_src: $restore_binary,
       acp_relayer_console_image: $image,
-      acp_relayer_blockchain_id: $blockchain
+      acp_relayer_blockchain_id: $blockchain,
+      acp_relayer_current_state_schema: $current_state_schema,
+      acp_relayer_target_config_schema: $target_config_schema,
+      acp_relayer_target_state_schema: $target_state_schema,
+      acp_relayer_target_min_readable_state_schema: $target_min_readable_state_schema,
+      acp_relayer_target_min_automatic_rollback_state_schema: $target_min_automatic_rollback_state_schema,
+      acp_relayer_scanner_enabled: $scanner_enabled,
+      acp_relayer_scanner_poll_seconds: $scanner_poll,
+      acp_relayer_scanner_start_block: $scanner_start_block
     }' >"$vars_file"
   (
     cd "$ROOT_DIR/ansible" || exit 1

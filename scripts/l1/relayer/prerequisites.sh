@@ -12,6 +12,10 @@ validate_release_source() {
     [[ "${RELAYER_DEVELOPMENT:-false}" == "true" ]] || \
       die "repository or authentication overrides require RELAYER_DEVELOPMENT=true and are not part of the supported operator flow"
   fi
+  [[ "$RELAYER_SCANNER_POLL_SECONDS" =~ ^[1-9][0-9]*$ ]] ||
+    die "RELAYER_SCANNER_POLL_SECONDS must be a positive integer"
+  [[ "$RELAYER_SCANNER_START_BLOCK" =~ ^[0-9]+$ ]] ||
+    die "RELAYER_SCANNER_START_BLOCK must be a non-negative integer"
 }
 
 
@@ -249,6 +253,46 @@ verify_release_asset() {
   [[ "$actual" == "$expected" ]] || die "SHA256 mismatch for published Relayer asset $asset"
 }
 
+resolve_release_capabilities() {
+	RELEASE_CONFIG_SCHEMA=1
+	RELEASE_STATE_SCHEMA=1
+	RELEASE_MIN_READABLE_STATE_SCHEMA=1
+	RELEASE_MIN_AUTOMATIC_ROLLBACK_STATE_SCHEMA=1
+	local scanner_supported=false
+	if [[ -f "$RELEASE_CAPABILITIES" ]]; then
+		jq -e '
+		  def positive_integer: type == "number" and . >= 1 and floor == .;
+		  .schemaVersion == 1 and
+		  (.configSchema | positive_integer) and
+		  (.stateSchema | positive_integer) and
+		  (.minimumReadableStateSchema | positive_integer) and
+		  (.minimumAutomaticRollbackStateSchema | positive_integer) and
+		  .minimumReadableStateSchema <= .stateSchema and
+		  .minimumAutomaticRollbackStateSchema <= .stateSchema and
+		  (.capabilities.scannerConfig | type) == "boolean"
+		' "$RELEASE_CAPABILITIES" >/dev/null || die "release CAPABILITIES.json is malformed"
+		RELEASE_CONFIG_SCHEMA="$(jq -r '.configSchema' "$RELEASE_CAPABILITIES")"
+		RELEASE_STATE_SCHEMA="$(jq -r '.stateSchema' "$RELEASE_CAPABILITIES")"
+		RELEASE_MIN_READABLE_STATE_SCHEMA="$(jq -r '.minimumReadableStateSchema' "$RELEASE_CAPABILITIES")"
+		RELEASE_MIN_AUTOMATIC_ROLLBACK_STATE_SCHEMA="$(jq -r '.minimumAutomaticRollbackStateSchema' "$RELEASE_CAPABILITIES")"
+		scanner_supported="$(jq -r '.capabilities.scannerConfig' "$RELEASE_CAPABILITIES")"
+	fi
+	case "$RELAYER_SCANNER_ENABLED" in
+		auto) RESOLVED_RELAYER_SCANNER_ENABLED="$scanner_supported" ;;
+		true)
+			[[ "$scanner_supported" == true ]] || die "RELAYER_SCANNER_ENABLED=true requires a release whose verified CAPABILITIES.json declares scannerConfig support; $RELAYER_VERSION is legacy/incompatible"
+			RESOLVED_RELAYER_SCANNER_ENABLED=true
+			;;
+		false) RESOLVED_RELAYER_SCANNER_ENABLED=false ;;
+		*) die "RELAYER_SCANNER_ENABLED must be auto, true, or false" ;;
+	esac
+	if [[ "$RESOLVED_RELAYER_SCANNER_ENABLED" == true ]]; then
+		printf 'Verified release capability enables the autonomous scanner (config schema %s, state schema %s).\n' "$RELEASE_CONFIG_SCHEMA" "$RELEASE_STATE_SCHEMA" >&2
+	else
+		printf 'Scanner config omitted for target release %s (policy=%s, capability=%s).\n' "$RELAYER_VERSION" "$RELAYER_SCANNER_ENABLED" "$scanner_supported" >&2
+	fi
+}
+
 prepare_release() {
   local need_setup="$1"
   local release_dir
@@ -290,8 +334,10 @@ prepare_release() {
   daemon_bundle="$release_dir/${daemon_asset%.tar.gz}"
   RELEASE_BINARY="$daemon_bundle/relayerd"
   [[ -x "$RELEASE_BINARY" ]] || die "$daemon_asset does not contain an executable relayerd"
-  RELEASE_RESTORE="$daemon_bundle/relayer-restore"
-  [[ -x "$RELEASE_RESTORE" ]] || die "$daemon_asset does not contain an executable relayer-restore"
+	RELEASE_RESTORE="$daemon_bundle/relayer-restore"
+	[[ -x "$RELEASE_RESTORE" ]] || die "$daemon_asset does not contain an executable relayer-restore"
+	RELEASE_CAPABILITIES="$daemon_bundle/CAPABILITIES.json"
+	resolve_release_capabilities
 
   image_file="$release_dir/relayer-console-image.txt"
   download_release_asset relayer-console-image.txt "$image_file"

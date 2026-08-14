@@ -6,7 +6,6 @@
     owner: root
     group: root
     mode: "0755"
-  notify: Restart relayerd
 
 - name: Record the installed Relayer release
   ansible.builtin.copy:

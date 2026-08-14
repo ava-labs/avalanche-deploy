@@ -10,6 +10,18 @@ OFFICIAL_RELAYER_REPOSITORY="ava-labs/avalanche-vmc-relayer"
 DEFAULT_RELAYER_VERSION_SELECTOR="official-latest"
 RELAYER_VERSION="${RELAYER_VERSION:-$DEFAULT_RELAYER_VERSION_SELECTOR}"
 RELAYER_PRERELEASE_FALLBACK="${RELAYER_PRERELEASE_FALLBACK:-v0.1.0-rc.8}"
+
+# On-chain listener policy. auto enables it only when the verified release
+# CAPABILITIES.json declares scannerConfig support. Explicit true against a
+# legacy archive fails before any VM mutation; false always omits the config.
+RELAYER_SCANNER_ENABLED="${RELAYER_SCANNER_ENABLED:-auto}"
+RELAYER_SCANNER_POLL_SECONDS_EXPLICIT="${RELAYER_SCANNER_POLL_SECONDS+x}"
+RELAYER_SCANNER_POLL_SECONDS="${RELAYER_SCANNER_POLL_SECONDS:-5}"
+# 0 scans from genesis. Correct, and fine on the archive rpc[0] this deploys by default;
+# set it to the ValidatorManager's deployment block to skip the empty prefix, and note a
+# PRUNED node returns nothing at all for history it no longer holds.
+RELAYER_SCANNER_START_BLOCK_EXPLICIT="${RELAYER_SCANNER_START_BLOCK+x}"
+RELAYER_SCANNER_START_BLOCK="${RELAYER_SCANNER_START_BLOCK:-0}"
 L1_ENV="$ROOT_DIR/l1.env"
 RELAYER_REPOSITORY="${RELAYER_DEVELOPMENT_REPOSITORY:-$OFFICIAL_RELAYER_REPOSITORY}"
 RELAYER_DEVELOPMENT_TOKEN="${RELAYER_DEVELOPMENT_TOKEN:-}"
@@ -26,6 +38,12 @@ DISCOVERY_FILE=""
 RELEASE_BINARY=""
 RELEASE_SETUP=""
 RELEASE_RESTORE=""
+RELEASE_CAPABILITIES=""
+RELEASE_CONFIG_SCHEMA=1
+RELEASE_STATE_SCHEMA=1
+RELEASE_MIN_READABLE_STATE_SCHEMA=1
+RELEASE_MIN_AUTOMATIC_ROLLBACK_STATE_SCHEMA=1
+RESOLVED_RELAYER_SCANNER_ENABLED=false
 CONSOLE_IMAGE=""
 INFO_RPC_URL=""
 
@@ -90,6 +108,9 @@ main() {
       ;;
     restore)
       run_restore
+      ;;
+    reset-scanner)
+      run_reset_scanner
       ;;
     upgrade)
       run_upgrade

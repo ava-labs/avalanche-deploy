@@ -1,6 +1,9 @@
 # shellcheck shell=bash
 # Protocol-private authorization reporting and managed validator updates.
 
+RELAYER_AUTHORIZATION_RUNBOOK_URL="https://github.com/ava-labs/avalanche-deploy/blob/main/docs/l1/RELAYER-AUTHORIZATION.md"
+RELAYER_MANUAL_AUTHORIZATION_URL="${RELAYER_AUTHORIZATION_RUNBOOK_URL}#manual-or-external-authorization"
+
 required_protocol_nodes() {
   local p2p_node_id="$1"
   local discovery_file="$2"
@@ -75,8 +78,12 @@ print_protocol_authorization() {
   printf 'Required config shape: '
   jq -cn --argjson required "$required_nodes" \
     '{validatorOnly: true, allowedNodes: [$required[].nodeId]}'
-  printf 'Documentation: https://build.avax.network/docs/nodes/configure/avalanche-l1-configs#allowednodes-string-list\n'
-  printf 'Managed option: make relayer-authorize\n'
+  printf 'Authorization guide: %s\n' "$RELAYER_AUTHORIZATION_RUNBOOK_URL"
+  printf 'AvalancheGo reference: https://build.avax.network/docs/nodes/chain-configs/avalanche-l1s/avalanche-l1-configs#allowednodes-string-list\n'
+  printf 'Terraform/Ansible-managed option: make relayer-authorize\n'
+  printf '  Avalanche Deploy updates the managed validator allowlists, performs rolling restarts, and verifies RPC peering.\n'
+  printf 'Manual or external infrastructure: %s\n' "$RELAYER_MANUAL_AUTHORIZATION_URL"
+  printf '  Follow that runbook when the L1 owner will apply and restart the validator configuration.\n'
 }
 
 protocol_privacy_gate() {
@@ -272,7 +279,9 @@ offer_managed_authorization() {
   case "$answer" in
     y | Y | yes | YES | Yes) run_authorization true "$p2p_node_id" ;;
     *)
-      printf 'Installation stopped. Authorize the validators manually or run make relayer-authorize.\n'
+      printf 'Installation stopped.\n'
+      printf 'Terraform/Ansible-managed authorization: make relayer-authorize\n'
+      printf 'Manual or external authorization: %s\n' "$RELAYER_MANUAL_AUTHORIZATION_URL"
       return 1
       ;;
   esac

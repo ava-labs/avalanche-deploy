@@ -858,6 +858,11 @@
                 if acp_relayer_existing_config_file.content is defined
                 else ''
               ),
+              'existingScanner': (
+                ((acp_relayer_existing_config_file.content | b64decode | from_json).scanner | default({}))
+                if acp_relayer_existing_config_file.content is defined
+                else {}
+              ),
               'keystoreExists': acp_relayer_existing_files.results[0].stat.exists | bool,
               'tlsPairExists': (
                 acp_relayer_existing_files.results[5].stat.exists

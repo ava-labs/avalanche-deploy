@@ -28,6 +28,24 @@ run_manage_playbook() {
 }
 
 
+run_reset_scanner() {
+  local answer start_block
+  run_preflight
+  start_block="$(jq -r '.existingScanner["start-block"] // 0' "$DISCOVERY_FILE")"
+  printf 'Reset the scanner cursor for a same-L1, same-manager rescan and discard its queued triggers on %s (%s)? [y/N] ' \
+    "$TARGET_NAME" "$TARGET_HOST"
+  IFS= read -r answer
+  case "$answer" in
+    y | Y | yes | YES | Yes) ;;
+    *) printf 'Scanner reset cancelled; no changes made.\n'; return 0 ;;
+  esac
+  printf 'Creating a retained backup before scanner reset; this refuses if any operation records exist, and the next scan resumes from configured block %s.\n' \
+    "$start_block"
+  run_manage_playbook backup || return $?
+  run_manage_playbook reset-scanner
+}
+
+
 validate_restore_archive_identity() {
   local backup="$1" manifest="$2"
   python3 - "$backup" "$manifest" <<'PY'
@@ -44,6 +62,7 @@ required = {
     "etc/relayerd/config.json",
     "etc/relayerd/funding.json",
     "etc/relayerd/identity.json",
+    "etc/relayerd/release.json",
     "etc/relayerd/secrets/keystore-password",
     "etc/relayerd/secrets/console-session-secret",
     "etc/relayerd/secrets/console.env",
@@ -96,12 +115,15 @@ try:
             fail("backup is missing required members: " + ", ".join(missing))
 
         identity_member = normalized_members["etc/relayerd/identity.json"]
+        release_member = normalized_members["etc/relayerd/release.json"]
         certificate_member = normalized_members["var/lib/relayerd/tls/staker.crt"]
         identity_file = archive.extractfile(identity_member)
+        release_file = archive.extractfile(release_member)
         certificate_file = archive.extractfile(certificate_member)
-        if identity_file is None or certificate_file is None:
-            fail("backup identity metadata or TLS certificate is unreadable")
+        if identity_file is None or release_file is None or certificate_file is None:
+            fail("backup identity, release metadata, or TLS certificate is unreadable")
         identity_bytes = identity_file.read()
+        release_bytes = release_file.read()
         certificate_pem = certificate_file.read()
 except (OSError, tarfile.TarError) as error:
     fail(f"backup archive is unreadable: {error}")
@@ -110,6 +132,32 @@ try:
     identity = json.loads(identity_bytes.decode("utf-8"))
 except (UnicodeDecodeError, json.JSONDecodeError) as error:
     fail(f"archived identity metadata is invalid JSON: {error}")
+
+try:
+    release = json.loads(release_bytes.decode("utf-8"))
+except (UnicodeDecodeError, json.JSONDecodeError) as error:
+    fail(f"archived release metadata is invalid JSON: {error}")
+
+
+def positive_integer(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+schema_fields = (
+    "configSchema",
+    "stateSchema",
+    "minimumReadableStateSchema",
+    "minimumAutomaticRollbackStateSchema",
+)
+for field in schema_fields:
+    manifest_value = manifest.get(field, 1)
+    release_value = release.get(field, 1)
+    if not positive_integer(manifest_value) or not positive_integer(release_value):
+        fail(f"backup {field} must be a positive integer")
+    if manifest_value != release_value:
+        fail(f"backup manifest {field} does not match archived release metadata")
+if manifest.get("version") != release.get("version"):
+    fail("backup manifest version does not match archived release metadata")
 
 node_id = identity.get("p2pNodeId")
 certificate_sha = identity.get("tlsCertificateSha256")
@@ -140,6 +188,44 @@ PY
 }
 
 
+validate_restore_runtime_schema() {
+  local manifest="$1" discovery="$2"
+  local backup_config backup_state runtime_config runtime_state runtime_min source_label
+  backup_config="$(jq -r '.configSchema // 1' "$manifest")"
+  backup_state="$(jq -r '.stateSchema // 1' "$manifest")"
+  if [[ "$(jq -r '.daemonInstalled' "$discovery")" == true ]]; then
+    runtime_config="$(jq -r '.recordedRelease.configSchema // 1' "$discovery")"
+    runtime_state="$(jq -r '.recordedRelease.stateSchema // 1' "$discovery")"
+    runtime_min="$(jq -r '.recordedRelease.minimumReadableStateSchema // 1' "$discovery")"
+    source_label="installed Relayer runtime"
+  else
+    runtime_config="$RELEASE_CONFIG_SCHEMA"
+    runtime_state="$RELEASE_STATE_SCHEMA"
+    runtime_min="$RELEASE_MIN_READABLE_STATE_SCHEMA"
+    source_label="selected $RELAYER_VERSION release for the subsequent reapply"
+  fi
+  for schema_value in "$backup_config" "$backup_state" "$runtime_config" "$runtime_state" "$runtime_min"; do
+    [[ "$schema_value" =~ ^[1-9][0-9]*$ ]] || {
+      printf 'ERROR: restore compatibility metadata contains a non-positive or non-integer schema value.\n' >&2
+      return 1
+    }
+  done
+  if ((backup_config > runtime_config)); then
+    printf 'ERROR: backup config schema %s is newer than the %s config schema %s.\n' \
+      "$backup_config" "$source_label" "$runtime_config" >&2
+    printf 'Select or install a Relayer release that supports config schema %s before restoring.\n' \
+      "$backup_config" >&2
+    return 1
+  fi
+  if ((backup_state < runtime_min || backup_state > runtime_state)); then
+    printf 'ERROR: backup state schema %s is outside the %s readable range %s..%s.\n' \
+      "$backup_state" "$source_label" "$runtime_min" "$runtime_state" >&2
+    printf 'Select or install a compatible Relayer release before restoring; no VM state was changed.\n' >&2
+    return 1
+  fi
+}
+
+
 run_restore() {
   local backup="${BACKUP:-}" manifest expected actual answer vars_file backup_node_id backup_tls_sha authorize_answer
   local current_node_id="" authorization_managed=false authorization_status=0 restore_status=0 cleanup_status=0
@@ -163,7 +249,10 @@ run_restore() {
   jq -e --arg file "$(basename "$backup")" \
     '.schemaVersion == 1 and .kind == "avalanche-deploy-relayer-backup" and
      .archive.file == $file and (.p2pNodeId | startswith("NodeID-")) and
-     (.tlsCertificateSha256 | test("^[0-9a-f]{64}$"))' \
+     (.tlsCertificateSha256 | test("^[0-9a-f]{64}$")) and
+     ([(.configSchema // 1), (.stateSchema // 1),
+       (.minimumReadableStateSchema // 1), (.minimumAutomaticRollbackStateSchema // 1)] |
+       all(.[]; type == "number" and . >= 1 and floor == .))' \
     "$manifest" >/dev/null || die "backup manifest schema or archive name is invalid"
   validate_restore_archive_identity "$backup" "$manifest" || \
     die "backup identity metadata, TLS certificate, and manifest do not describe one permanent NodeID"
@@ -189,12 +278,19 @@ run_restore() {
      (.validatorManagerAddress | ascii_downcase) == ($validator_manager | ascii_downcase)' \
     "$manifest" >/dev/null || die "backup manifest belongs to a different Avalanche Deploy L1"
 
+  # The restore playbook restores config and bbolt state, not a daemon binary.
+  # Prove the currently installed runtime can read them; if the workload was
+  # removed, prove the explicitly selected release can read them before the
+  # operator later reapplies it. This runs before authorization or VM mutation.
+  prepare_release false
+  validate_restore_runtime_schema "$manifest" "$DISCOVERY_FILE" ||
+    die "backup schemas are incompatible with the runtime that would read them"
+
   printf 'Restore %s to %s (%s) and retain an automatic pre-restore rollback? [y/N] ' \
     "$(basename "$backup")" "$TARGET_NAME" "$TARGET_HOST"
   IFS= read -r answer
   case "$answer" in y|Y|yes|YES|Yes) ;; *) printf 'Restore cancelled; no changes made.\n'; return 0 ;; esac
 
-  prepare_release false
   vars_file="$WORK_DIR/restore-vars.json"
   jq -n \
     --arg archive "$backup" \
@@ -249,7 +345,9 @@ run_restore() {
   if ((restore_status == 0)); then
     # Reconcile even when the owner pre-authorized the backup manually. The
     # helper removes only obsolete NodeIDs recorded in its managed manifest.
-    (run_authorization_cleanup "$backup_node_id") || cleanup_status=$?
+    if [[ "$current_node_id" != "$backup_node_id" ]]; then
+      (run_authorization_cleanup "$backup_node_id") || cleanup_status=$?
+    fi
   elif [[ "$authorization_managed" == true ]]; then
     if observed_node_id="$(
       (run_authorization_preflight >/dev/null && \

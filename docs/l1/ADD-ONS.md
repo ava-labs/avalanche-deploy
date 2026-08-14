@@ -148,7 +148,11 @@ This optional service completes official PoAManager validator registration,
 weight, and removal handshakes across the L1 and P-Chain. It is different from
 the ICM Relayer below. Installation, diagnostics, funding, tunnel access,
 backup/restore, upgrades, reversible removal, and purge are documented in the
-[managed Relayer operator runbook](RELAYER.md).
+[managed Relayer operator runbook](RELAYER.md). If the L1 uses
+`validatorOnly: true`, use the [protocol-private authorization guide](RELAYER-AUTHORIZATION.md).
+Avalanche Deploy can update Terraform/Ansible-managed validators with
+`make relayer-authorize`; operators using external infrastructure can follow
+the manual procedure in the same guide.
 
 ## ICM Relayer (Cross-Chain Messaging)
 

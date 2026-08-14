@@ -13,13 +13,15 @@ Avalanche Deploy repository unless a guide says otherwise.
 
 - [Add-ons](l1/ADD-ONS.md)
 - [Managed validator-lifecycle Relayer for Terraform/Ansible](l1/RELAYER.md)
+- [Authorize a Relayer on a protocol-private L1](l1/RELAYER-AUTHORIZATION.md)
 - [Operations](OPERATIONS.md)
 - [Troubleshooting](TROUBLESHOOTING.md)
 
 ## Security
 
 - [Repository security policy](../SECURITY.md)
-- [Managed Relayer authorization, secrets, and tunnel-only access](l1/RELAYER.md#security-and-authorization)
+- [Protocol-private Relayer authorization](l1/RELAYER-AUTHORIZATION.md)
+- [Managed Relayer secrets and tunnel-only access](l1/RELAYER.md#security-and-authorization)
 
 The validator-lifecycle Relayer is different from the ICM Relayer. Use the
 [managed Relayer runbook](l1/RELAYER.md) for PoAManager validator registration,

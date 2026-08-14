@@ -46,6 +46,7 @@ for target in \
     relayer-backup relayer-upgrade relayer-remove; do
     make -n "$target" >/dev/null || fail "make $target is not dry-runnable"
 done
+make -n relayer-reset-scanner >/dev/null || fail "VM scanner reset target is not dry-runnable"
 make -n relayer-restore BACKUP=/tmp/relayer-20260716T120000.tar.gz >/dev/null || fail "VM restore target is not dry-runnable"
 
 vm_help="$(make help-l1)"
@@ -140,14 +141,24 @@ require_file_text "$MANAGEMENT_MODULE" 'BACKUP must be an absolute path'
 require_file_text "$MANAGEMENT_MODULE" 'unsupported link or special archive member'
 require_file_text "$MANAGEMENT_MODULE" 'duplicate archive member'
 require_file_text "$MANAGEMENT_MODULE" '"etc/relayerd/identity.json"'
+require_file_text "$MANAGEMENT_MODULE" '"etc/relayerd/release.json"'
+require_file_text "$MANAGEMENT_MODULE" 'backup manifest {field} does not match archived release metadata'
+require_file_text "$MANAGEMENT_MODULE" 'backup schemas are incompatible with the runtime that would read them'
+require_file_text "$MANAGEMENT_MODULE" 'run_manage_playbook reset-scanner'
+require_file_text ansible/playbooks/l1/manage-relayer.yml '/usr/local/bin/relayer-restore'
+require_file_text ansible/playbooks/l1/manage-relayer.yml 'Atomically clear scanner cursor and queued triggers'
 require_file_text "$MANAGEMENT_MODULE" 'archived TLS certificate does not derive the archived P2P NodeID'
 require_file_text "$MANAGEMENT_MODULE" 'backup manifest P2P NodeID does not match archived identity metadata'
 require_file_text "$MANAGEMENT_MODULE" 'protocol_privacy_gate "$backup_node_id"'
 require_file_text "$MANAGEMENT_MODULE" 'run_authorization_cleanup "$backup_node_id"'
 require_file_text "$MANAGEMENT_MODULE" 'run_authorization_cleanup "$current_node_id"'
+require_file_text ansible/playbooks/l1/manage-relayer.yml 'acp_relayer_daemon_was_running'
+require_file_text ansible/playbooks/l1/manage-relayer.yml 'acp_relayer_console_was_running'
 require_file_text ansible/playbooks/l1/restore-relayer.yml '/etc/relayerd/identity.json'
 require_file_text ansible/playbooks/l1/restore-relayer.yml 'Bind staged restore identity to the admitted backup manifest'
 require_file_text ansible/playbooks/l1/restore-relayer.yml 'restore_certificate.stat.checksum == restore_expected_tls_certificate_sha256'
+require_file_text ansible/playbooks/l1/restore-relayer.yml 'Restore relayerd ownership on the database and lock sidecar'
+require_file_text ansible/playbooks/l1/restore-relayer.yml '/var/lib/relayerd/relayer.db.lock'
 require_file_text Makefile 'RELAYER_VERSION ?= official-latest'
 require_file_text Makefile 'RELAYER_PRERELEASE_FALLBACK ?= v0.1.0-rc.8'
 require_file_text "$VM_SCRIPT" 'ava-labs/avalanche-vmc-relayer'
@@ -222,7 +233,8 @@ grep -q 'when:' <<<"$docker_enable_block" && \
     fail "relayer.sh's RELAYER_SSH_HOST_KEY_CHECKING whitelist no longer accepts accept-new/yes/ask as opt-in values"
 
 # run_install must re-back-up existing Relayer state before reapplying over it,
-# guarded by the keystore/release predicate, and only once, before prepare_release.
+# guarded by the keystore/release predicate and only once. Target artifacts and
+# capabilities must be verified before the first VM-side backup/mutation.
 run_install_body="$(function_body "$INSTALLATION_MODULE" run_install)"
 [[ -n "$run_install_body" ]] || fail "run_install function body could not be located in $INSTALLATION_MODULE"
 [[ "$(grep -Fc "jq -r '.keystoreExists and .releaseMetadataExists'" <<<"$run_install_body")" -eq 1 ]] || \
@@ -235,9 +247,9 @@ backup_call_line="$(grep -Fn 'run_manage_playbook backup' <<<"$run_install_body"
 prepare_release_line="$(grep -Fn 'prepare_release true' <<<"$run_install_body" | cut -d: -f1)"
 [[ -n "$console_password_line" && -n "$keystore_check_line" && -n "$backup_call_line" && -n "$prepare_release_line" ]] || \
     fail "run_install is missing one of the console-password/backup-guard/prepare-release markers"
-[[ "$console_password_line" -lt "$keystore_check_line" && "$keystore_check_line" -lt "$backup_call_line" && \
-    "$backup_call_line" -lt "$prepare_release_line" ]] || \
-    fail "run_install no longer backs up existing state after the console password prompt but before prepare_release"
+[[ "$console_password_line" -lt "$prepare_release_line" && "$prepare_release_line" -lt "$keystore_check_line" && \
+    "$keystore_check_line" -lt "$backup_call_line" ]] || \
+    fail "run_install must verify the target before backing up or mutating an existing VM"
 
 identity_stage_line="$(grep -Fn 'stage_relayer_identity' <<<"$run_install_body" | head -1 | cut -d: -f1)"
 privacy_gate_line="$(grep -Fn 'protocol_privacy_gate "$p2p_node_id"' <<<"$run_install_body" | tail -1 | cut -d: -f1)"
@@ -248,12 +260,21 @@ deploy_line="$(grep -Fn 'playbooks/l1/deploy-relayer.yml' <<<"$run_install_body"
     fail "run_install must stage the permanent identity, enforce protocol privacy, then install the runtime"
 require_file_text "$INSTALLATION_MODULE" 'peer_visibility_gate "$DISCOVERY_FILE"'
 require_file_text "$AUTHORIZATION_MODULE" 'complete effective allowlist'
+require_file_text "$AUTHORIZATION_MODULE" 'Terraform/Ansible-managed option: make relayer-authorize'
+require_file_text "$AUTHORIZATION_MODULE" 'Manual or external infrastructure:'
+require_file_text "$AUTHORIZATION_MODULE" 'RELAYER_AUTHORIZATION_RUNBOOK_URL="https://github.com/ava-labs/avalanche-deploy/blob/main/docs/l1/RELAYER-AUTHORIZATION.md"'
+require_file_text "$AUTHORIZATION_MODULE" 'RELAYER_MANUAL_AUTHORIZATION_URL="${RELAYER_AUTHORIZATION_RUNBOOK_URL}#manual-or-external-authorization"'
+require_file_text docs/l1/RELAYER-AUTHORIZATION.md 'query `info.peers` on every RPC node'
+require_file_text docs/l1/DEPLOYMENT.md 'Skip that command if the L1 owner'
 require_file_text ansible/playbooks/l1/authorize-relayer.yml 'serial: 1'
 require_file_text ansible/playbooks/l1/authorize-relayer.yml 'acp_relayer_stale_validator_ids'
 require_file_text ansible/playbooks/l1/authorize-relayer.yml 'mode rollback'
 require_file_text ansible/playbooks/l1/authorize-relayer.yml 'Wait for the L1 to recover on rpc[0]'
 require_file_text ansible/playbooks/l1/authorize-relayer.yml 'Check the recovered validator L1'
 require_file_text ansible/playbooks/l1/authorize-relayer.yml 'No later validator was changed.'
+require_file_text ansible/playbooks/l1/authorize-relayer.yml 'Restore managed RPC peering after validator restarts'
+require_file_text ansible/playbooks/l1/authorize-relayer.yml 'Restart the RPC only when validator peering did not recover'
+require_file_text ansible/playbooks/l1/authorize-relayer.yml "get('result', {}).get('isBootstrapped', false)"
 require_file_text ansible/playbooks/l1/discover-relayer.yml 'Inspect managed Relayer service definitions'
 require_file_text ansible/playbooks/l1/discover-relayer.yml "'daemonInstalled': acp_relayer_service_units.results[0].stat.exists"
 
@@ -282,5 +303,51 @@ require_file_text "$DOCTOR_MODULE" 'RELAYER_LISTENERS_SCANNED'
 require_file_text ansible/roles/acp_relayer/templates/relayerd.service.j2 'StartLimitIntervalSec=0'
 require_file_text ansible/roles/acp_relayer/templates/relayerd.service.j2 'Restart=always'
 require_file_text ansible/roles/acp_relayer/templates/relayer-console.service.j2 'Wants=relayerd.service'
+
+# Existing-installation candidates must be side-effect-free until the rollback
+# boundary is closed: no queued recovery, scanner, auto-top-up, public API, or
+# console. The console may start only after the final config is committed.
+quiescent_line="$(grep -Fn -- '- name: Require side-effect-free state before candidate daemon validation' "$acp_main" | cut -d: -f1)"
+hide_api_line="$(grep -Fn -- '- name: Hide mutation endpoints and scanner work before the rollback boundary' "$acp_main" | cut -d: -f1)"
+candidate_daemon_line="$(grep -Fn -- '- name: Enable and start the candidate relayerd daemon' "$acp_main" | cut -d: -f1)"
+commit_line="$(grep -Fn -- '- name: Commit an existing-installation change after rollback-safe validation' "$acp_main" | cut -d: -f1)"
+committed_console_line="$(grep -Fn -- '- name: Start the console only after the rollback boundary is closed' "$acp_main" | cut -d: -f1)"
+[[ -n "$quiescent_line" && -n "$hide_api_line" && -n "$candidate_daemon_line" && -n "$commit_line" && -n "$committed_console_line" ]] || \
+    fail "$acp_main is missing a candidate side-effect boundary task"
+[[ "$quiescent_line" -lt "$hide_api_line" && "$hide_api_line" -lt "$candidate_daemon_line" && \
+    "$candidate_daemon_line" -lt "$commit_line" && "$commit_line" -lt "$committed_console_line" ]] || \
+    fail "$acp_main no longer orders quiescence/private validation before commit and console exposure"
+require_file_text "$acp_main" "'api-listen-addr': '127.0.0.1:18081'"
+require_file_text "$acp_main" "'auto-top-up': false"
+require_file_text "$acp_main" "'enabled': false, 'auto-top-up': false"
+require_file_text "$acp_main" 'check-quiescent'
+require_file_text "$acp_main" 'acp_relayer_scanner_pause_before.stat.exists'
+require_file_text "$acp_main" '0 non-terminal operation records and [1-9][0-9]* queued scanner triggers remain$'
+require_file_text "$acp_main" 'Verify rolled-back daemon readiness or intentional scanner pause'
+require_file_text "$acp_main" 'Verify daemon readiness or intentional scanner pause after commit'
+require_file_text "$acp_main" 'not ready: scanner unhealthy: paused by operator'
+fresh_console_line="$(grep -Fn -- '- name: Enable and start the console for a fresh installation' "$acp_main" | cut -d: -f1)"
+fresh_console_block="$(sed -n "${fresh_console_line},$((fresh_console_line + 10))p" "$acp_main")"
+grep -Fq "when: acp_relayer_operation == 'install'" <<<"$fresh_console_block" || \
+    fail "candidate console can start before the existing-installation rollback boundary"
+require_file_text "$acp_main" 'Stop and disable services after a failed fresh installation'
+require_file_text "$acp_main" 'Verify a failed fresh installation left no autonomous service running'
+require_file_text "$acp_main" 'Verify a failed fresh installation left no autonomous service enabled'
+require_file_text "$acp_main" 'both autonomous services were stopped and disabled'
+require_file_text "$acp_main" 'Disable autonomous work while retaining the new runtime and database'
+require_file_text "$acp_main" 'Verify post-commit recovery left the console inactive'
+require_file_text "$acp_main" 'Verify post-commit recovery left the console disabled'
+require_file_text "$acp_main" 'Stop and disable relayerd when fail-closed restart cannot be verified'
+require_file_text "$acp_main" 'Verify failed post-commit daemon recovery left relayerd inactive'
+require_file_text "$acp_main" 'Verify failed post-commit daemon recovery left relayerd disabled'
+require_file_text "$acp_main" 'scanner and float monitoring were'
+postcommit_disable_line="$(grep -Fn -- '- name: Disable autonomous work while retaining the new runtime and database' "$acp_main" | cut -d: -f1)"
+postcommit_daemon_fallback_line="$(grep -Fn -- '- name: Stop and disable relayerd when fail-closed restart cannot be verified' "$acp_main" | cut -d: -f1)"
+postcommit_console_verify_line="$(grep -Fn -- '- name: Verify post-commit recovery left the console inactive' "$acp_main" | cut -d: -f1)"
+[[ -n "$postcommit_disable_line" && -n "$postcommit_daemon_fallback_line" && -n "$postcommit_console_verify_line" ]] || \
+    fail "$acp_main is missing a post-commit fail-closed recovery task"
+[[ "$postcommit_disable_line" -lt "$postcommit_console_verify_line" && \
+    "$postcommit_daemon_fallback_line" -lt "$postcommit_console_verify_line" ]] || \
+    fail "$acp_main can verify the console before parking the post-commit daemon"
 
 echo "Relayer static acceptance checks passed"

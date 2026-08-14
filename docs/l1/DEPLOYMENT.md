@@ -266,14 +266,20 @@ the managed Relayer workflow:
 ```bash
 make relayer-prereqs
 make relayer-doctor
+make relayer-prepare       # Required before protocol-private authorization
+make relayer-authorize     # Optional managed Terraform/Ansible authorization
 make relayer
 ```
 
 This explicit post-deployment command discovers the managed L1, validates it,
-and installs one tunnel-only daemon/console pair on `rpc[0]`; validators are not
-modified. It is different from the ICM Relayer. See the [managed Relayer
-operator runbook](RELAYER.md) for authorization, funding, access, lifecycle,
-backup/restore, and release details.
+and installs one tunnel-only daemon/console pair on `rpc[0]`. It is different
+from the ICM Relayer. On a protocol-private L1, `make relayer-authorize` can
+merge the required NodeIDs into Terraform/Ansible-managed validators, perform
+rolling restarts, and recover RPC peering. Skip that command if the L1 owner
+completed authorization through another configuration system. See the
+[protocol-private authorization guide](RELAYER-AUTHORIZATION.md) for both
+paths, and the [managed Relayer operator runbook](RELAYER.md) for funding,
+access, lifecycle, backup/restore, and release details.
 
 ## Genesis Configuration
 

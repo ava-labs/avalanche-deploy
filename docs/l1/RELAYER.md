@@ -98,7 +98,10 @@ For a fresh protocol-private installation, use this sequence:
 
 ```bash
 make relayer-prepare
-# Authorize the printed NodeIDs by one of the methods below.
+# Terraform/Ansible-managed validators:
+make relayer-authorize
+# Or skip that command and follow RELAYER-AUTHORIZATION.md when the L1 owner
+# manages validator configuration manually or with an external system.
 make relayer
 ```
 
@@ -110,10 +113,12 @@ configuration source on each validator.
 The chain owner can merge the printed NodeIDs into `allowedNodes` by using the
 owner's normal process. Each NodeID must be present on **every existing L1
 validator**. Restart each affected AvalancheGo node. Updating only `rpc[0]` or
-one validator is insufficient. Follow the
-[AvalancheGo `allowedNodes` documentation](https://build.avax.network/docs/nodes/configure/avalanche-l1-configs#allowednodes-string-list).
+one validator is insufficient. Follow the dedicated
+[Relayer authorization runbook](RELAYER-AUTHORIZATION.md) and the
+[AvalancheGo `allowedNodes` documentation](https://build.avax.network/docs/nodes/chain-configs/avalanche-l1s/avalanche-l1-configs#allowednodes-string-list).
 
-Avalanche Deploy operators can instead run:
+When every validator is present in the active Terraform state and Ansible
+inventory, Avalanche Deploy operators can run:
 
 ```bash
 make relayer-authorize
@@ -122,13 +127,17 @@ make relayer-authorize
 This optional command audits every validator before it makes a change. It
 merges only the missing managed NodeIDs and preserves unrelated entries. It
 does not enable `validatorOnly`; the chain owner controls that policy. It then
-restarts one affected validator at a time. After each restart, it waits
-for the local Info API, L1 bootstrap, and RPC peer visibility. If a validator
-fails, the command restores that validator's exact previous configuration,
-restarts it, checks recovery, and stops before it changes a later validator.
-Validators that completed earlier keep the safe allowlist superset.
+restarts one affected validator at a time. After each restart, it waits for the
+local Info API and L1 bootstrap. If a validator fails, the command restores that
+validator's exact previous configuration, restarts it, checks recovery, and
+stops before it changes a later validator. Validators that completed earlier
+keep the safe allowlist superset. After the validator rollout, the command
+checks every managed RPC node. It restarts only an RPC whose validator sessions
+did not reconnect, then verifies the RPC's NodeID, L1 bootstrap, and complete
+validator peer visibility.
 
-If the owner completed authorization by another method, skip
+If the owner completed authorization manually or through another configuration
+system, skip
 `make relayer-authorize` and run `make relayer`. The installer verifies the
 effective configuration, confirms that the running AvalancheGo process started
 after that configuration was written, and checks RPC peer visibility. A config
@@ -153,8 +162,12 @@ own configuration system:
 3. Give the Relayer NodeID and every non-validator peer NodeID to the L1 owner.
 4. Merge all of those NodeIDs into `allowedNodes` on every validator that uses
    `validatorOnly: true`.
-5. Restart the affected AvalancheGo validators and verify their recovery.
-6. Start `relayerd --config-file=<generated-config>` only after the effective
+5. Restart the affected AvalancheGo validators one at a time and verify their
+   local Info API and L1 bootstrap after each restart.
+6. Check every non-validator RPC peer after the validator rollout. Restart only
+   an RPC whose validator sessions did not reconnect, then verify its stable
+   NodeID, L1 bootstrap, and complete validator peer visibility.
+7. Start `relayerd --config-file=<generated-config>` only after the effective
    configuration is complete.
 
 `make relayer-authorize` applies only to validators in the active Avalanche

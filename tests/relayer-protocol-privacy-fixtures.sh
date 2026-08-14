@@ -83,7 +83,10 @@ if protocol_privacy_gate "$node_id" "$fixture_dir/private-missing.json" >"$fixtu
 fi
 grep -Fq 'this protocol-private L1 does not authorize every required NodeID' "$fixture_dir/missing.out"
 grep -Fq 'validator-2' "$fixture_dir/missing.out"
-grep -Fq 'https://build.avax.network/docs/nodes/configure/avalanche-l1-configs#allowednodes-string-list' "$fixture_dir/missing.out"
+grep -Fq 'Authorization guide: https://github.com/ava-labs/avalanche-deploy/blob/main/docs/l1/RELAYER-AUTHORIZATION.md' "$fixture_dir/missing.out"
+grep -Fq 'Terraform/Ansible-managed option: make relayer-authorize' "$fixture_dir/missing.out"
+grep -Fq 'Manual or external infrastructure: https://github.com/ava-labs/avalanche-deploy/blob/main/docs/l1/RELAYER-AUTHORIZATION.md#manual-or-external-authorization' "$fixture_dir/missing.out"
+grep -Fq 'AvalancheGo reference: https://build.avax.network/docs/nodes/chain-configs/avalanche-l1s/avalanche-l1-configs#allowednodes-string-list' "$fixture_dir/missing.out"
 
 if protocol_privacy_gate "$node_id" "$fixture_dir/mixed.json" >"$fixture_dir/mixed.out" 2>&1; then
   printf 'Expected an inconsistent validatorOnly failure\n' >&2
