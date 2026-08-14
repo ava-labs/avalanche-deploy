@@ -9,7 +9,7 @@
 #   make destroy    - Tear down everything
 
 SHELL := /bin/bash
-.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer relayer-prereqs relayer-doctor relayer-prepare relayer-authorize relayer relayer-access relayer-status relayer-logs relayer-upgrade relayer-backup relayer-restore relayer-remove init-validator-manager initialize-validator-manager primary-infra primary-infra-plan primary-deploy primary-status primary-destroy backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-erpc k8s-faucet k8s-blockscout k8s-graph-node k8s-safe k8s-backup-keys k8s-health-checks k8s-init-validator-manager k8s-reset-l1 k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
+.PHONY: setup doctor infra infra-plan deploy configure-l1 status create-l1 deploy-blockscout safe reset-l1 destroy clean logs rolling-restart health-checks monitoring faucet upgrade graph-node erpc icm-relayer relayer-prereqs relayer-doctor relayer-prepare relayer-authorize relayer relayer-access relayer-status relayer-logs relayer-upgrade relayer-backup relayer-restore relayer-remove init-validator-manager initialize-validator-manager primary-infra primary-infra-plan primary-deploy primary-status primary-destroy backup-keys restore-keys prepare-migration migrate-validator create-snapshot restore-snapshot list-snapshots k8s-help k8s-help-l1 k8s-help-primary k8s-l1 k8s-primary k8s-kind k8s-l1-deploy k8s-l1-wait k8s-l1-create k8s-l1-configure k8s-l1-status k8s-primary-deploy k8s-primary-wait k8s-primary-status k8s-monitoring k8s-icm-relayer k8s-relayer-prereqs k8s-relayer-doctor k8s-relayer k8s-relayer-access k8s-relayer-status k8s-relayer-logs k8s-relayer-upgrade k8s-relayer-backup k8s-relayer-restore k8s-relayer-remove k8s-erpc k8s-faucet k8s-blockscout k8s-graph-node k8s-safe k8s-backup-keys k8s-health-checks k8s-init-validator-manager k8s-reset-l1 k8s-cleanup lint validate-config-layout validate test-unit test-incremental test test-e2e-l1 test-e2e-primary test-e2e-l1-dry test-e2e-primary-dry test-e2e-dry check-primary-cloud help help-l1 help-primary help-all
 
 # Default cloud provider
 CLOUD ?= aws
@@ -421,6 +421,18 @@ k8s-help:
 	@echo "  make k8s-graph-node    # Deploy The Graph Node (subgraph indexing)"
 	@echo "  make k8s-safe          # Deploy Safe multisig infrastructure"
 	@echo ""
+	@echo "Validator-lifecycle Relayer:"
+	@echo "  make k8s-relayer-prereqs # Install local Relayer operator software"
+	@echo "  make k8s-relayer-doctor  # Read-only managed Relayer diagnostics"
+	@echo "  make k8s-relayer         # Discover and install/reapply the Relayer"
+	@echo "  make k8s-relayer-access  # Forward the Relayer console and L1 RPC"
+	@echo "  make k8s-relayer-status  # Quick Relayer runtime snapshot"
+	@echo "  make k8s-relayer-logs    # Follow Relayer logs"
+	@echo "  make k8s-relayer-backup  # Create a retained consistent backup"
+	@echo "  make k8s-relayer-restore BACKUP=manual-...tar.gz"
+	@echo "  make k8s-relayer-upgrade RELAYER_VERSION=vX.Y.Z"
+	@echo "  make k8s-relayer-remove [PURGE=true]"
+	@echo ""
 	@echo "Operations:"
 	@echo "  make k8s-backup-keys   # Deploy staking key backup CronJob"
 	@echo "  make k8s-health-checks # Run comprehensive health checks"
@@ -437,6 +449,15 @@ k8s-help-l1:
 	@echo "  make k8s-l1-create NETWORK=fuji K8S_CHAIN_NAME=mychain [K8S_L1_KEY_NAME=<key-name>]"
 	@echo "  make k8s-l1-configure"
 	@echo "  make k8s-l1-status"
+	@echo ""
+	@echo "  make k8s-relayer-prereqs"
+	@echo "  make k8s-relayer-doctor"
+	@echo "  make k8s-relayer"
+	@echo "  make k8s-relayer-access | make k8s-relayer-status | make k8s-relayer-logs"
+	@echo "  make k8s-relayer-backup"
+	@echo "  make k8s-relayer-restore BACKUP=manual-YYYYMMDDTHHMMSSZ.tar.gz"
+	@echo "  make k8s-relayer-upgrade RELAYER_VERSION=vX.Y.Z"
+	@echo "  make k8s-relayer-remove [PURGE=true]"
 
 k8s-help-primary:
 	@echo "Kubernetes Primary Network Workflow"
@@ -529,6 +550,37 @@ k8s-icm-relayer:
 		--set "l1.blockchainId=$(CHAIN_ID)" \
 		--set "relayerPrivateKey=$(RELAYER_KEY)" \
 		--set "network=$(NETWORK)"
+
+k8s-relayer:
+	@cd "$(K8S_DIR)" && RELAYER_VERSION="$(RELAYER_VERSION)" RELAYER_PRERELEASE_FALLBACK="$(RELAYER_PRERELEASE_FALLBACK)" ./scripts/relayer.sh install
+
+k8s-relayer-prereqs:
+	@cd "$(K8S_DIR)" && ./scripts/relayer.sh prereqs
+
+k8s-relayer-doctor:
+	@cd "$(K8S_DIR)" && RELAYER_VERSION="$(RELAYER_VERSION)" RELAYER_PRERELEASE_FALLBACK="$(RELAYER_PRERELEASE_FALLBACK)" ./scripts/relayer.sh doctor
+
+k8s-relayer-access:
+	@cd "$(K8S_DIR)" && ./scripts/relayer.sh access
+
+k8s-relayer-status:
+	@cd "$(K8S_DIR)" && ./scripts/relayer.sh status
+
+k8s-relayer-logs:
+	@cd "$(K8S_DIR)" && ./scripts/relayer.sh logs
+
+k8s-relayer-upgrade:
+	@cd "$(K8S_DIR)" && RELAYER_VERSION="$(RELAYER_VERSION)" RELAYER_PRERELEASE_FALLBACK="$(RELAYER_PRERELEASE_FALLBACK)" ./scripts/relayer.sh upgrade
+
+k8s-relayer-backup:
+	@cd "$(K8S_DIR)" && ./scripts/relayer.sh backup
+
+k8s-relayer-restore:
+	@if [ -z "$(BACKUP)" ]; then echo "Usage: make k8s-relayer-restore BACKUP=manual-YYYYMMDDTHHMMSSZ.tar.gz"; exit 2; fi
+	@cd "$(K8S_DIR)" && BACKUP="$(BACKUP)" RELAYER_VERSION="$(RELAYER_VERSION)" RELAYER_PRERELEASE_FALLBACK="$(RELAYER_PRERELEASE_FALLBACK)" ./scripts/relayer.sh restore
+
+k8s-relayer-remove:
+	@cd "$(K8S_DIR)" && PURGE="$(PURGE)" ./scripts/relayer.sh remove
 
 k8s-erpc:
 	@if [ -z "$(CHAIN_ID)" ]; then echo "Usage: make k8s-erpc CHAIN_ID=xxx EVM_CHAIN_ID=yyy"; exit 1; fi
@@ -724,6 +776,9 @@ test-unit:
 	@./tests/relayer-static.sh
 	@./tests/relayer-protocol-privacy-fixtures.sh
 	@./tests/relayer-doctor-fixtures.sh
+	@./tests/relayer-k8s-doctor-fixtures.sh
+	@./tests/relayer-k8s-discovery-smoke.sh
+	@./tests/relayer-k8s-restore-smoke.sh
 	@./tests/safe-deploy-contracts.sh
 	@echo "✓ Unit tests passed"
 
@@ -871,6 +926,16 @@ help-all:
 	@echo "  make k8s-primary-status Check Primary release status"
 	@echo "  make k8s-monitoring     Install/upgrade monitoring chart"
 	@echo "  make k8s-icm-relayer    Deploy ICM Relayer for cross-chain messaging"
+	@echo "  make k8s-relayer-prereqs Install local Relayer operator software"
+	@echo "  make k8s-relayer-doctor Read-only managed Relayer diagnostics"
+	@echo "  make k8s-relayer        Discover and install/reapply the Relayer"
+	@echo "  make k8s-relayer-access Forward the Relayer console and L1 RPC"
+	@echo "  make k8s-relayer-status Quick Relayer runtime snapshot"
+	@echo "  make k8s-relayer-logs   Follow Relayer logs"
+	@echo "  make k8s-relayer-backup Create a retained consistent backup"
+	@echo "  make k8s-relayer-restore BACKUP=manual-...tar.gz"
+	@echo "  make k8s-relayer-upgrade RELAYER_VERSION=vX.Y.Z"
+	@echo "  make k8s-relayer-remove [PURGE=true]"
 	@echo "  make k8s-erpc           Deploy eRPC load balancer"
 	@echo "  make k8s-faucet         Deploy token faucet"
 	@echo "  make k8s-blockscout     Deploy Blockscout block explorer"

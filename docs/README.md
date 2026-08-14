@@ -13,6 +13,7 @@ Avalanche Deploy repository unless a guide says otherwise.
 
 - [Add-ons](l1/ADD-ONS.md)
 - [Managed validator-lifecycle Relayer for Terraform/Ansible](l1/RELAYER.md)
+- [Managed validator-lifecycle Relayer for Kubernetes](../kubernetes/README.md#validator-lifecycle-relayer-relayerd)
 - [Operations](OPERATIONS.md)
 - [Troubleshooting](TROUBLESHOOTING.md)
 
@@ -22,6 +23,8 @@ Avalanche Deploy repository unless a guide says otherwise.
 - [Managed Relayer authorization, secrets, and tunnel-only access](l1/RELAYER.md#security-and-authorization)
 
 The validator-lifecycle Relayer is different from the ICM Relayer. Use the
-[managed Relayer runbook](l1/RELAYER.md) for PoAManager validator registration,
-weight, and removal operations. Use the [add-ons guide](l1/ADD-ONS.md#icm-relayer-cross-chain-messaging)
+[managed Relayer runbook](l1/RELAYER.md), or the
+[Kubernetes relayer section](../kubernetes/README.md#validator-lifecycle-relayer-relayerd)
+for a Kubernetes install, for PoAManager validator registration, weight, and
+removal operations. Use the [add-ons guide](l1/ADD-ONS.md#icm-relayer-cross-chain-messaging)
 for application-message delivery.

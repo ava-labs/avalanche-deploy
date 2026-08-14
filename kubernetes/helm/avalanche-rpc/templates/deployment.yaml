@@ -1,3 +1,6 @@
+{{- if and .Values.l1_rpc_persistence.enabled (or (ne (int .Values.l1_rpc_replicas) 1) .Values.l1_rpc_autoscaling.enabled) }}
+{{- fail "avalanche-rpc: persistent storage requires l1_rpc_replicas=1 and autoscaling disabled; deploy separate releases for independent RPC databases" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,6 +9,11 @@ metadata:
     {{- include "l1-rpc.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.l1_rpc_replicas }}
+  {{- if .Values.l1_rpc_persistence.enabled }}
+  # Release the ReadWriteOnce claim before starting the replacement pod.
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "l1-rpc.selectorLabels" . | nindent 6 }}

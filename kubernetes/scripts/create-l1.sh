@@ -12,6 +12,7 @@ RELEASE="l1-validators"
 OUTPUT="l1.env"
 GENESIS=""
 KEY_NAME=""
+GENESIS_PROXY_ADDRESS=""
 
 usage() {
     cat <<USAGE
@@ -22,6 +23,8 @@ Usage: $0 [options]
   --genesis=FILE           Genesis file (default: auto-find)
   --output=FILE            Output file (default: l1.env)
   --key-name=NAME          platform-cli key name (optional; otherwise uses default key or env fallback)
+  --genesis-proxy-address=ADDRESS
+                           ValidatorManager proxy predeploy (default: auto-detect standard genesis allocation)
   -h, --help               Show this help
 USAGE
 }
@@ -34,6 +37,7 @@ while [[ $# -gt 0 ]]; do
         --genesis=*) GENESIS="${1#*=}"; shift ;;
         --output=*) OUTPUT="${1#*=}"; shift ;;
         --key-name=*) KEY_NAME="${1#*=}"; shift ;;
+        --genesis-proxy-address=*) GENESIS_PROXY_ADDRESS="${1#*=}"; shift ;;
         -h|--help)
             usage
             exit 0
@@ -67,10 +71,12 @@ if [[ "$needs_build" == "true" ]]; then
     (cd "$ROOT_DIR/tools/create-l1" && go build -o create-l1 .)
 fi
 
-if ! command -v curl >/dev/null 2>&1; then
-    echo "Error: curl not found in PATH"
-    exit 1
-fi
+for cmd in curl jq kubectl; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "Error: $cmd not found in PATH"
+        exit 1
+    fi
+done
 
 echo "Getting running L1 validator pods for release '$RELEASE'..."
 PODS="$(kubectl get pods \
@@ -110,6 +116,20 @@ if [[ -z "$GENESIS" ]]; then
 fi
 
 echo "Genesis: $GENESIS"
+
+if [[ -z "$GENESIS_PROXY_ADDRESS" ]]; then
+    GENESIS_PROXY_ADDRESS="$(jq -r '
+        .alloc // {} | keys[] |
+        select(ascii_downcase == "facade0000000000000000000000000000000000") |
+        "0x" + .
+    ' "$GENESIS" | head -n 1)"
+fi
+if [[ -z "$GENESIS_PROXY_ADDRESS" ]]; then
+    echo "Error: the standard ValidatorManager proxy allocation was not found in $GENESIS."
+    echo "Regenerate the Avalanche Deploy genesis or pass --genesis-proxy-address explicitly."
+    exit 1
+fi
+echo "Genesis ValidatorManager Proxy: $GENESIS_PROXY_ADDRESS"
 echo "Network: $NETWORK"
 echo "Chain Name: $CHAIN_NAME"
 if [[ -n "$KEY_NAME" ]]; then
@@ -181,6 +201,7 @@ create_l1_args=(
 if [[ -n "$KEY_NAME" ]]; then
     create_l1_args+=(--key-name="$KEY_NAME")
 fi
+create_l1_args+=(--genesis-proxy-address="$GENESIS_PROXY_ADDRESS")
 
 "$CREATE_L1" \
     "${create_l1_args[@]}"
