@@ -64,7 +64,7 @@ check-primary-cloud:
 #
 setup:
 	@echo "Installing dependencies..."
-	@which terraform > /dev/null || brew install terraform
+	@which terraform > /dev/null || (brew tap hashicorp/tap && brew install hashicorp/tap/terraform)
 	@which ansible > /dev/null || brew install ansible
 	@which aws > /dev/null || brew install awscli
 	@which jq > /dev/null || brew install jq
