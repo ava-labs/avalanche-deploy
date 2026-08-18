@@ -34,6 +34,13 @@ safe_cgw_image: "safeglobal/safe-client-gateway-nest"
 safe_ui_version: "v1.32.1"
 safe_ui_digest: "sha256:af16e7b074d3d4f2bc5a4e8fb978afe44a4cfbf7b4a49444b097b4b032807637"
 
+# Safe Wallet Web v1.32.1 fails to initialize its wallet-onboarding modal when
+# NEXT_PUBLIC_WC_PROJECT_ID is empty, including for injected wallets such as
+# Core and MetaMask. This valid-format placeholder keeps injected wallets
+# working without contacting WalletConnect. Override it with a public
+# Reown/WalletConnect Cloud project ID to enable QR/mobile connections.
+safe_walletconnect_project_id: "deadbeefdeadbeefdeadbeefdeadbeef"
+
 # Database configuration
 safe_txs_db_name: "safe_txs"
 safe_cfg_db_name: "safe_cfg"

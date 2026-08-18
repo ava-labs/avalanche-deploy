@@ -1,0 +1,37 @@
+---
+- name: Derive the Relayer scanner initialization block on rpc[0]
+  hosts: rpc[0]
+  become: false
+  gather_facts: false
+  vars:
+    scanner_blockchain_id: "{{ relayer_scanner_blockchain_id }}"
+    scanner_anchors: "{{ relayer_scanner_anchors | default([]) }}"
+    scanner_manager_addresses: "{{ relayer_scanner_manager_addresses }}"
+    scanner_result_local: "{{ relayer_scanner_result_local }}"
+  tasks:
+    - name: Query finalized canonical manager initialization receipts
+      ansible.builtin.script:
+        cmd: >-
+          {{ playbook_dir }}/files/relayer-scanner-start.py
+          --rpc-url http://127.0.0.1:9650/ext/bc/{{ scanner_blockchain_id }}/rpc
+          {% for address in scanner_manager_addresses %}--expected-address {{ address }} {% endfor %}
+          {% for anchor in scanner_anchors %}--anchor {{ anchor.txHash }} {{ anchor.selector }} {% endfor %}
+        executable: python3
+      register: scanner_anchor_result
+      changed_when: false
+
+    - name: Validate scanner anchor result shape
+      vars:
+        result: "{{ scanner_anchor_result.stdout | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - result.derived is boolean
+          - result.startBlock is number
+          - result.startBlock | int >= 0
+
+    - name: Return scanner anchor result to the control host
+      ansible.builtin.copy:
+        content: "{{ scanner_anchor_result.stdout | from_json | to_nice_json }}"
+        dest: "{{ scanner_result_local }}"
+        mode: "0600"
+      delegate_to: localhost

@@ -15,29 +15,46 @@ if [[ -z "${PRIVATE_KEY}" ]]; then
   exit 1
 fi
 
-# Contract name -> canonical address mapping
-declare -A CONTRACTS=(
-  ["SafeL2"]="0x29fcB43b46531BcA003ddC8FCB67FFE91900C762"
-  ["SafeProxyFactory"]="0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67"
-  ["MultiSend"]="0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526"
-  ["MultiSendCallOnly"]="0x9641d764fc13c8B624c04430C7356C1C7C8102e2"
-  ["CompatibilityFallbackHandler"]="0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99"
-  ["CreateCall"]="0x9b35Af71d77eaf8d7e40252370304687390A1A52"
-  ["SignMessageLib"]="0xd53cd0aB83D845Ac265BE939c57F53AD838012c9"
-  ["SimulateTxAccessor"]="0x3d4BA2E0884aa488718476ca2FB8Efc291A46199"
+# Keep these as parallel indexed arrays. macOS ships Bash 3.2, which does not
+# support associative arrays (`declare -A`).
+CONTRACT_NAMES=(
+  "SafeL2"
+  "SafeProxyFactory"
+  "MultiSend"
+  "MultiSendCallOnly"
+  "CompatibilityFallbackHandler"
+  "CreateCall"
+  "SignMessageLib"
+  "SimulateTxAccessor"
 )
 
-# Gas limits per contract
-declare -A GAS_LIMITS=(
-  ["SafeL2"]="6000000"
-  ["SafeProxyFactory"]="3000000"
-  ["MultiSend"]="3000000"
-  ["MultiSendCallOnly"]="3000000"
-  ["CompatibilityFallbackHandler"]="3000000"
-  ["CreateCall"]="3000000"
-  ["SignMessageLib"]="3000000"
-  ["SimulateTxAccessor"]="3000000"
+CONTRACT_ADDRESSES=(
+  "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762"
+  "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67"
+  "0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526"
+  "0x9641d764fc13c8B624c04430C7356C1C7C8102e2"
+  "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99"
+  "0x9b35Af71d77eaf8d7e40252370304687390A1A52"
+  "0xd53cd0aB83D845Ac265BE939c57F53AD838012c9"
+  "0x3d4BA2E0884aa488718476ca2FB8Efc291A46199"
 )
+
+CONTRACT_GAS_LIMITS=(
+  "6000000"
+  "3000000"
+  "3000000"
+  "3000000"
+  "3000000"
+  "3000000"
+  "3000000"
+  "3000000"
+)
+
+if [[ ${#CONTRACT_NAMES[@]} -ne ${#CONTRACT_ADDRESSES[@]} ]] ||
+   [[ ${#CONTRACT_NAMES[@]} -ne ${#CONTRACT_GAS_LIMITS[@]} ]]; then
+  echo "Error: Safe contract names, addresses, and gas limits are not fully mapped"
+  exit 2
+fi
 
 # Verify Singleton Factory is deployed
 factory_code=$(cast code "${SINGLETON_FACTORY}" --rpc-url "${RPC_URL}" 2>/dev/null || true)
@@ -63,9 +80,10 @@ deployed=0
 skipped=0
 failed=0
 
-for name in SafeL2 SafeProxyFactory MultiSend MultiSendCallOnly CompatibilityFallbackHandler CreateCall SignMessageLib SimulateTxAccessor; do
-  addr="${CONTRACTS[$name]}"
-  gas="${GAS_LIMITS[$name]}"
+for index in "${!CONTRACT_NAMES[@]}"; do
+  name="${CONTRACT_NAMES[$index]}"
+  addr="${CONTRACT_ADDRESSES[$index]}"
+  gas="${CONTRACT_GAS_LIMITS[$index]}"
   initcode_file="${INITCODES_DIR}/${name}.hex"
 
   if [[ ! -f "${initcode_file}" ]]; then

@@ -35,6 +35,17 @@
     - role: safe
 
   post_tasks:
+    - name: Verify Safe HTTPS ingress
+      ansible.builtin.uri:
+        url: "https://127.0.0.1/health"
+        method: GET
+        validate_certs: false
+        status_code: 200
+      register: safe_https_health
+      retries: 3
+      delay: 5
+      until: safe_https_health.status == 200
+
     - name: Verify Transaction Service health
       ansible.builtin.uri:
         url: "http://localhost:{{ safe_txs_port }}/api/v1/about/"

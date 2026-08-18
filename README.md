@@ -7,7 +7,7 @@ Production infrastructure automation for Avalanche blockchains.
 | | **Launch an Avalanche L1** | **Run Primary Network Validators** |
 |---|---|---|
 | **What** | Deploy your own L1 blockchain with validators, RPC nodes, and a full service stack | Operate production Avalanche Primary Network validators |
-| **Features** | Validators, archive + pruned RPC, eRPC load balancer (built-in), monitoring, block explorer, faucet, The Graph, ICM Relayer, Safe | Validators, staking key backup, database snapshots, near-zero-downtime migration, monitoring |
+| **Features** | Validators, archive + pruned RPC, eRPC load balancer (built-in), monitoring, block explorer, faucet, The Graph, ICM Relayer, validator-lifecycle Relayer (Terraform/Ansible), Safe | Validators, staking key backup, database snapshots, near-zero-downtime migration, monitoring |
 | **Clouds** | AWS, GCP, Azure | AWS |
 | **Guide** | [L1 Deployment](docs/l1/DEPLOYMENT.md) | [Primary Network](docs/primary-network/DEPLOYMENT.md) |
 
@@ -37,12 +37,15 @@ docs/         Guides and reference docs
 
 ## Documentation
 
+- [Documentation index](docs/README.md) — Deployment, operations, troubleshooting, security, and services
 - [L1 Deployment](docs/l1/DEPLOYMENT.md) — Full L1 runbook
 - [Primary Network](docs/primary-network/DEPLOYMENT.md) — Validator deployment, snapshots, migration
-- [Add-ons](docs/l1/ADD-ONS.md) — Blockscout, faucet, eRPC, The Graph, ICM Relayer, Safe
+- [Add-ons](docs/l1/ADD-ONS.md) — Blockscout, faucet, eRPC, The Graph, ICM Relayer, validator-lifecycle Relayer, Safe
 - [Operations](docs/OPERATIONS.md) — Upgrades, health checks, monitoring, rolling restarts
 - [Troubleshooting](docs/TROUBLESHOOTING.md) — Common issues and fixes
 - [Kubernetes](kubernetes/README.md) — Helm-based deployment alternative
+- [Managed validator-lifecycle Relayer](docs/l1/RELAYER.md) — Terraform/Ansible doctor, installation, access, funding, recovery, upgrades, and removal
+- [Protocol-private Relayer authorization](docs/l1/RELAYER-AUTHORIZATION.md) — Managed Terraform/Ansible automation and manual/external validator configuration
 - [Security](SECURITY.md) — Security expectations and guidelines
 
 ## Command Help

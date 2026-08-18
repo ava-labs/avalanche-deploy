@@ -1,0 +1,914 @@
+---
+- name: Discover validator identities from the deployed nodes
+  hosts: validators
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read each validator NodeID
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.getNodeID
+        return_content: true
+      register: acp_relayer_validator_node_id
+
+    - name: Validate each validator NodeID
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_validator_node_id.status == 200
+          - acp_relayer_validator_node_id.json.error is not defined
+          - acp_relayer_validator_node_id.json.result.nodeID is match('^NodeID-')
+        fail_msg: >-
+          Validator {{ inventory_hostname }} did not return a NodeID from its
+          AvalancheGo Info API. Confirm avalanchego is running and the inventory
+          points at the deployed L1.
+
+    - name: Save the discovered validator NodeID
+      ansible.builtin.set_fact:
+        acp_relayer_node_id: "{{ acp_relayer_validator_node_id.json.result.nodeID }}"
+
+    - name: Read the effective AvalancheGo node configuration
+      ansible.builtin.slurp:
+        src: /etc/avalanchego/node.json
+      register: acp_relayer_validator_node_config_file
+
+    - name: Resolve the validator Subnet configuration source
+      vars:
+        node_config: "{{ acp_relayer_validator_node_config_file.content | b64decode | from_json }}"
+      ansible.builtin.set_fact:
+        acp_relayer_subnet_config_content: "{{ node_config['subnet-config-content'] | default('') }}"
+        acp_relayer_subnet_config_dir: >-
+          {{
+            node_config['subnet-config-dir']
+            | default('/home/avalanche/.avalanchego/configs/subnets')
+          }}
+
+    - name: Inspect the validator Subnet configuration file
+      ansible.builtin.stat:
+        path: "{{ acp_relayer_subnet_config_dir }}/{{ acp_relayer_expected_subnet_id }}.json"
+      register: acp_relayer_validator_subnet_config_stat
+      when: acp_relayer_subnet_config_content | length == 0
+
+    - name: Read the validator Subnet configuration file
+      ansible.builtin.slurp:
+        src: "{{ acp_relayer_subnet_config_dir }}/{{ acp_relayer_expected_subnet_id }}.json"
+      register: acp_relayer_validator_subnet_config_file
+      when:
+        - acp_relayer_subnet_config_content | length == 0
+        - acp_relayer_validator_subnet_config_stat.stat.exists | default(false)
+
+    - name: Resolve effective protocol-privacy configuration
+      vars:
+        inline_configs: >-
+          {{
+            acp_relayer_subnet_config_content | b64decode | from_json
+            if acp_relayer_subnet_config_content | length > 0
+            else {}
+          }}
+      ansible.builtin.set_fact:
+        acp_relayer_subnet_config: >-
+          {{
+            inline_configs[acp_relayer_expected_subnet_id] | default({})
+            if acp_relayer_subnet_config_content | length > 0
+            else (
+              acp_relayer_validator_subnet_config_file.content | b64decode | from_json
+              if acp_relayer_validator_subnet_config_file.content is defined
+              else {}
+            )
+          }}
+
+    - name: Resolve the effective validator Subnet configuration path
+      ansible.builtin.set_fact:
+        acp_relayer_effective_subnet_config_path: >-
+          {{
+            '/etc/avalanchego/node.json'
+            if acp_relayer_subnet_config_content | length > 0
+            else acp_relayer_subnet_config_dir ~ '/' ~ acp_relayer_expected_subnet_id ~ '.json'
+          }}
+
+    - name: Inspect the effective validator Subnet configuration source
+      ansible.builtin.stat:
+        path: "{{ acp_relayer_effective_subnet_config_path }}"
+      register: acp_relayer_effective_subnet_config_stat
+
+    - name: Read the running AvalancheGo process ID
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - avalanchego.service
+          - --property=MainPID
+          - --value
+      register: acp_relayer_avalanchego_main_pid
+      changed_when: false
+
+    - name: Require a running AvalancheGo process
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_avalanchego_main_pid.rc == 0
+          - acp_relayer_avalanchego_main_pid.stdout | trim is match('^[1-9][0-9]*$')
+        fail_msg: >-
+          Validator {{ inventory_hostname }} does not have a running
+          avalanchego.service. Repair it before Relayer discovery.
+
+    - name: Inspect the running AvalancheGo process
+      ansible.builtin.stat:
+        path: "/proc/{{ acp_relayer_avalanchego_main_pid.stdout | trim }}"
+      register: acp_relayer_avalanchego_process_stat
+
+    - name: Require a stable process and private configuration source
+      vars:
+        validator_only: "{{ acp_relayer_subnet_config.validatorOnly | default(false) }}"
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_avalanchego_process_stat.stat.exists
+          - not (validator_only | bool) or acp_relayer_effective_subnet_config_stat.stat.exists
+        fail_msg: >-
+          Validator {{ inventory_hostname }} changed state during discovery or
+          has no effective protocol-private subnet configuration source.
+
+    - name: Save effective validator protocol-privacy facts
+      ansible.builtin.set_fact:
+        acp_relayer_validator_only: "{{ acp_relayer_subnet_config.validatorOnly | default(false) | bool }}"
+        acp_relayer_allowed_nodes: "{{ acp_relayer_subnet_config.allowedNodes | default([]) }}"
+        acp_relayer_subnet_config_mode: >-
+          {{
+            'content'
+            if acp_relayer_subnet_config_content | length > 0
+            else 'file'
+          }}
+        acp_relayer_subnet_config_source: >-
+          {{
+            '/etc/avalanchego/node.json:subnet-config-content'
+            if acp_relayer_subnet_config_content | length > 0
+            else acp_relayer_subnet_config_dir ~ '/' ~ acp_relayer_expected_subnet_id ~ '.json'
+          }}
+        acp_relayer_runtime_config_fresh: >-
+          {{
+            not (acp_relayer_subnet_config.validatorOnly | default(false) | bool)
+            or (
+              acp_relayer_effective_subnet_config_stat.stat.exists
+              and (
+                acp_relayer_effective_subnet_config_stat.stat.mtime | float
+                < acp_relayer_avalanchego_process_stat.stat.mtime | float
+              )
+            )
+          }}
+
+- name: Discover RPC identities required by protocol-private L1s
+  hosts: rpc
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read each RPC NodeID
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.getNodeID
+        return_content: true
+      register: acp_relayer_rpc_node_id_result
+
+    - name: Validate each RPC NodeID
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_rpc_node_id_result.status == 200
+          - acp_relayer_rpc_node_id_result.json.error is not defined
+          - acp_relayer_rpc_node_id_result.json.result.nodeID is match('^NodeID-')
+        fail_msg: >-
+          RPC {{ inventory_hostname }} did not return a NodeID from its AvalancheGo
+          Info API. Confirm avalanchego is running and the inventory points at the
+          deployed L1.
+
+    - name: Save the discovered RPC NodeID
+      ansible.builtin.set_fact:
+        acp_relayer_rpc_node_id: "{{ acp_relayer_rpc_node_id_result.json.result.nodeID }}"
+
+- name: Verify L1 metadata, contracts, RPC health, and peer visibility
+  hosts: rpc[0]
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Validate discovery inputs from l1.env and Terraform
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_expected_network_id | int in [1, 5]
+          - acp_relayer_expected_evm_chain_id | int > 0
+          - acp_relayer_expected_subnet_id | length > 0
+          - acp_relayer_expected_blockchain_id | length > 0
+          - acp_relayer_expected_chain_name | length > 0
+          - acp_relayer_expected_manager_address is match('^0x[0-9a-fA-F]{40}$')
+          - acp_relayer_expected_validator_manager_address is match('^0x[0-9a-fA-F]{40}$')
+          - (acp_relayer_expected_manager_address | lower) != (acp_relayer_expected_validator_manager_address | lower)
+          - >-
+            (acp_relayer_expected_network_id | int == 5 and
+             acp_relayer_info_rpc_url == 'https://api.avax-test.network') or
+            (acp_relayer_expected_network_id | int == 1 and
+             acp_relayer_info_rpc_url == 'https://api.avax.network')
+          - groups['validators'] is defined
+          - groups['validators'] | length > 0
+        fail_msg: >-
+          The generated l1.env or Terraform inventory is incomplete. The zero-input
+          installer requires a Fuji/Mainnet network, subnet and blockchain IDs, EVM
+          chain ID, chain name, PoAManager, ValidatorManager proxy, validators,
+          and the matching managed Avalanche Info API.
+
+    - name: Query the AvalancheGo network ID
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.getNetworkID
+        return_content: true
+      register: acp_relayer_network_id
+
+    - name: Query visible AvalancheGo peers
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.peers
+        return_content: true
+      register: acp_relayer_info_peers
+
+    - name: Query the managed Info API network ID
+      ansible.builtin.uri:
+        url: "{{ acp_relayer_info_rpc_url }}/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.getNetworkID
+        return_content: true
+      register: acp_relayer_bootstrap_network_id
+
+    - name: Query Primary bootstrap candidates from the managed Info API
+      ansible.builtin.uri:
+        url: "{{ acp_relayer_info_rpc_url }}/ext/info"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.peers
+        return_content: true
+      register: acp_relayer_bootstrap_info_peers
+
+    - name: Query current Primary Network validators from the local P-Chain
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/bc/P
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: platform.getCurrentValidators
+          params: {}
+        return_content: true
+      register: acp_relayer_primary_validators
+
+    - name: Query the blockchain status from the P-Chain
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/bc/P
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: platform.getBlockchainStatus
+          params:
+            blockchainID: "{{ acp_relayer_expected_blockchain_id }}"
+        return_content: true
+      register: acp_relayer_blockchain_status
+
+    - name: Query registered blockchains from the P-Chain
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/bc/P
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: platform.getBlockchains
+          params: {}
+        return_content: true
+      register: acp_relayer_blockchains
+
+    - name: Query the L1 EVM chain ID
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/bc/{{ acp_relayer_expected_blockchain_id }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: eth_chainId
+          params: []
+        return_content: true
+      register: acp_relayer_evm_chain_id
+
+    - name: Read PoAManager bytecode
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/bc/{{ acp_relayer_expected_blockchain_id }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: eth_getCode
+          params:
+            - "{{ acp_relayer_expected_manager_address }}"
+            - latest
+        return_content: true
+      register: acp_relayer_manager_code
+
+    - name: Read ValidatorManager bytecode
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/bc/{{ acp_relayer_expected_blockchain_id }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: eth_getCode
+          params:
+            - "{{ acp_relayer_expected_validator_manager_address }}"
+            - latest
+        return_content: true
+      register: acp_relayer_validator_manager_code
+
+    - name: Read the PoAManager owner
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/bc/{{ acp_relayer_expected_blockchain_id }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: eth_call
+          params:
+            - to: "{{ acp_relayer_expected_manager_address }}"
+              data: "0x8da5cb5b"
+            - latest
+        return_content: true
+      register: acp_relayer_manager_owner_call
+
+    - name: Read the ValidatorManager owner
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/bc/{{ acp_relayer_expected_blockchain_id }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: eth_call
+          params:
+            - to: "{{ acp_relayer_expected_validator_manager_address }}"
+              data: "0x8da5cb5b"
+            - latest
+        return_content: true
+      register: acp_relayer_validator_manager_owner_call
+
+    - name: Read ValidatorManager initialization state
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/bc/{{ acp_relayer_expected_blockchain_id }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: eth_call
+          params:
+            - to: "{{ acp_relayer_expected_validator_manager_address }}"
+              data: "0x5bd93e88"
+            - latest
+        return_content: true
+      register: acp_relayer_validator_manager_initialized_call
+
+    - name: Validate RPC health and official PoAManager topology
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_network_id.status == 200
+          - (acp_relayer_network_id.json.result.networkID | int) == (acp_relayer_expected_network_id | int)
+          - acp_relayer_info_peers.status == 200
+          - acp_relayer_info_peers.json.result.peers is defined
+          - acp_relayer_bootstrap_network_id.status == 200
+          - acp_relayer_bootstrap_network_id.json.error is not defined
+          - (acp_relayer_bootstrap_network_id.json.result.networkID | int) == (acp_relayer_expected_network_id | int)
+          - acp_relayer_bootstrap_info_peers.status == 200
+          - acp_relayer_bootstrap_info_peers.json.error is not defined
+          - acp_relayer_bootstrap_info_peers.json.result.peers is defined
+          - acp_relayer_primary_validators.status == 200
+          - acp_relayer_primary_validators.json.error is not defined
+          - acp_relayer_primary_validators.json.result.validators is defined
+          - acp_relayer_blockchain_status.status == 200
+          - acp_relayer_blockchain_status.json.result.status | default('Unknown') != 'Unknown'
+          - acp_relayer_blockchains.status == 200
+          - >-
+            acp_relayer_blockchains.json.result.blockchains |
+            selectattr('id', 'equalto', acp_relayer_expected_blockchain_id) |
+            map(attribute='subnetID') | first == acp_relayer_expected_subnet_id
+          - >-
+            acp_relayer_blockchains.json.result.blockchains |
+            selectattr('id', 'equalto', acp_relayer_expected_blockchain_id) |
+            map(attribute='name') | first == acp_relayer_expected_chain_name
+          - acp_relayer_evm_chain_id.status == 200
+          - (acp_relayer_evm_chain_id.json.result | int(base=16)) == (acp_relayer_expected_evm_chain_id | int)
+          - acp_relayer_manager_code.json.result | default('0x') not in ['0x', '0x0', '']
+          # transferValidatorManagerOwnership(address) exists on the official
+          # PoAManager wrapper and not on a bare ValidatorManager.
+          - "'89f9f85b' in (acp_relayer_manager_code.json.result | default('') | lower)"
+          - acp_relayer_validator_manager_code.json.result | default('0x') not in ['0x', '0x0', '']
+          - acp_relayer_manager_owner_call.json.result | default('') is match('^0x[0-9a-fA-F]{64}$')
+          - acp_relayer_validator_manager_owner_call.json.result | default('') is match('^0x[0-9a-fA-F]{64}$')
+          - (acp_relayer_validator_manager_initialized_call.json.result | default('0x0') | int(base=16)) == 1
+        fail_msg: >-
+          The rpc[0] preflight does not match l1.env or the supported official
+          PoAManager topology. Verify the node tracks this subnet, the EVM chain ID
+          is correct, and POA_MANAGER / VALIDATOR_MANAGER_PROXY are the initialized
+          official contracts created by Avalanche Deploy. Custom wrappers and bare
+          ValidatorManagers are unsupported.
+
+    - name: Decode manager ownership
+      ansible.builtin.set_fact:
+        acp_relayer_manager_owner: "0x{{ acp_relayer_manager_owner_call.json.result[-40:] }}"
+        acp_relayer_validator_manager_owner: "0x{{ acp_relayer_validator_manager_owner_call.json.result[-40:] }}"
+        acp_relayer_visible_peer_ids: "{{ acp_relayer_info_peers.json.result.peers | map(attribute='nodeID') | list }}"
+        acp_relayer_bootstrap_peer_ids: "{{ acp_relayer_bootstrap_info_peers.json.result.peers | map(attribute='nodeID') | list }}"
+        acp_relayer_primary_validator_ids: "{{ acp_relayer_primary_validators.json.result.validators | map(attribute='nodeID') | list }}"
+
+    - name: Find Info API peers eligible to bootstrap the Relayer P2P client
+      ansible.builtin.set_fact:
+        acp_relayer_eligible_bootstrap_peer_ids: >-
+          {{
+            acp_relayer_bootstrap_peer_ids
+            | intersect(acp_relayer_primary_validator_ids)
+          }}
+
+    - name: Verify the ValidatorManager is owned by the PoAManager
+      ansible.builtin.assert:
+        that:
+          - (acp_relayer_validator_manager_owner | lower) == (acp_relayer_expected_manager_address | lower)
+        fail_msg: >-
+          ValidatorManager {{ acp_relayer_expected_validator_manager_address }} is
+          owned by {{ acp_relayer_validator_manager_owner }}, not the discovered
+          PoAManager {{ acp_relayer_expected_manager_address }}. Bare managers and
+          custom wrappers are unsupported.
+
+    - name: Read owner bytecode to distinguish EOA from Safe
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/bc/{{ acp_relayer_expected_blockchain_id }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: eth_getCode
+          params:
+            - "{{ acp_relayer_manager_owner }}"
+            - latest
+        return_content: true
+      register: acp_relayer_owner_code
+
+    - name: Reject an unresolved or renounced PoAManager owner
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_owner_code.status == 200
+          - acp_relayer_owner_code.json.error is not defined
+          - acp_relayer_owner_code.json.result is defined
+          - (acp_relayer_manager_owner | lower) != '0x0000000000000000000000000000000000000000'
+        fail_msg: >-
+          The PoAManager owner could not be classified as an EOA or a Safe. Owner
+          {{ acp_relayer_manager_owner }} is the zero address, or the L1 RPC did not
+          answer eth_getCode for it. A renounced owner and an unanswered owner lookup
+          are both unsupported; repair the L1 RPC or restore PoAManager ownership
+          before installing.
+
+    - name: Read a contract owner's Safe threshold
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/bc/{{ acp_relayer_expected_blockchain_id }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: eth_call
+          params:
+            - to: "{{ acp_relayer_manager_owner }}"
+              data: "0xe75235b8"
+            - latest
+        return_content: true
+      register: acp_relayer_safe_threshold
+      when: acp_relayer_owner_code.json.result | default('0x') not in ['0x', '0x0', '']
+
+    - name: Read a contract owner's Safe version
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9650/ext/bc/{{ acp_relayer_expected_blockchain_id }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: eth_call
+          params:
+            - to: "{{ acp_relayer_manager_owner }}"
+              data: "0xffa1ad74"
+            - latest
+        return_content: true
+      register: acp_relayer_safe_version
+      when: acp_relayer_owner_code.json.result | default('0x') not in ['0x', '0x0', '']
+
+    - name: Reject unsupported contract owners
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_safe_threshold.status == 200
+          - (acp_relayer_safe_threshold.json.result | default('0x0') | int(base=16)) > 0
+          - acp_relayer_safe_version.status == 200
+          - acp_relayer_safe_version.json.result | default('0x') not in ['0x', '0x0', '']
+        fail_msg: >-
+          PoAManager owner {{ acp_relayer_manager_owner }} is a contract but does
+          not implement the Safe getThreshold interface. V1 supports only an EOA
+          or Safe owner.
+      when: acp_relayer_owner_code.json.result | default('0x') not in ['0x', '0x0', '']
+
+    - name: Discover existing services and persistent Relayer material
+      ansible.builtin.service_facts:
+
+    - name: Inspect managed Relayer service definitions
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/systemd/system/relayerd.service
+        - /etc/systemd/system/relayer-console.service
+      register: acp_relayer_service_units
+
+    - name: Check whether the Safe oneshot service is active
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - safe.service
+      register: acp_relayer_safe_service_active
+      changed_when: false
+      failed_when: false
+      when: acp_relayer_owner_code.json.result | default('0x') not in ['0x', '0x0', '']
+
+    - name: Check the active Safe Transaction Service
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8001/api/v1/about/
+        method: GET
+        status_code: 200
+      register: acp_relayer_safe_transaction_service
+      changed_when: false
+      failed_when: false
+      when:
+        - acp_relayer_owner_code.json.result | default('0x') not in ['0x', '0x0', '']
+        - (acp_relayer_safe_service_active.rc | default(1) | int) == 0
+
+    - name: Inspect the installed Relayer console environment
+      ansible.builtin.stat:
+        path: /etc/relayerd/secrets/console.env
+        get_checksum: false
+      register: acp_relayer_safe_console_env
+
+    - name: Check required Safe console environment keys without reading their values
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/grep
+          - -Eq
+          - "^{{ item }}=.+$"
+          - /etc/relayerd/secrets/console.env
+      loop:
+        - SAFE_TX_SERVICE_URL
+        - SAFE_UI_URL
+        - SAFE_ADDRESS
+      register: acp_relayer_safe_console_env_keys
+      changed_when: false
+      failed_when: false
+      no_log: true
+      when: acp_relayer_safe_console_env.stat.exists
+
+    - name: Inspect existing encrypted keys and funding metadata
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        checksum_algorithm: sha256
+      loop:
+        - /var/lib/relayerd/keystore.json
+        - /etc/relayerd/secrets/keystore-password
+        - /etc/relayerd/funding.json
+        - /etc/relayerd/config.json
+        - /var/lib/relayerd/relayer.db
+        - /var/lib/relayerd/tls/staker.crt
+        - /var/lib/relayerd/tls/staker.key
+        - /usr/local/bin/relayerd
+        - /usr/local/bin/relayer-restore
+        - /etc/relayerd/release.json
+        - /etc/relayerd/identity.json
+      register: acp_relayer_existing_files
+
+    - name: Reject incomplete preserved key material
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_existing_files.results[0].stat.exists == acp_relayer_existing_files.results[1].stat.exists
+          - acp_relayer_existing_files.results[0].stat.exists == acp_relayer_existing_files.results[2].stat.exists
+          - acp_relayer_existing_files.results[0].stat.exists == acp_relayer_existing_files.results[3].stat.exists
+          - not acp_relayer_existing_files.results[4].stat.exists or acp_relayer_existing_files.results[0].stat.exists
+          - acp_relayer_existing_files.results[5].stat.exists == acp_relayer_existing_files.results[6].stat.exists
+          - not acp_relayer_existing_files.results[10].stat.exists or acp_relayer_existing_files.results[5].stat.exists
+        fail_msg: >-
+          Existing Relayer key material is incomplete. Restore keystore.json,
+          its matching keystore-password credential, funding.json, config.json,
+          state, and TLS identity from the same backup before rerunning; the
+          installer will not combine or rotate partial state.
+
+    - name: Read preserved Relayer configuration
+      ansible.builtin.slurp:
+        src: /etc/relayerd/config.json
+      register: acp_relayer_existing_config_file
+      when: acp_relayer_existing_files.results[0].stat.exists
+
+    - name: Read installed release metadata
+      ansible.builtin.slurp:
+        src: /etc/relayerd/release.json
+      register: acp_relayer_existing_release_file
+      when: acp_relayer_existing_files.results[9].stat.exists
+
+    - name: Read installed daemon version
+      ansible.builtin.command:
+        argv: [/usr/local/bin/relayerd, --version]
+      register: acp_relayer_existing_version
+      changed_when: false
+      when: acp_relayer_existing_files.results[7].stat.exists
+
+    - name: Derive and verify the permanent Relayer P2P identity
+      ansible.builtin.script:
+        cmd: >-
+          {{ playbook_dir }}/files/relayer-verify-identity.py
+          --identity /etc/relayerd/identity.json
+          --certificate /var/lib/relayerd/tls/staker.crt
+      register: acp_relayer_existing_identity_result
+      changed_when: false
+      when: acp_relayer_existing_files.results[10].stat.exists
+
+    - name: Save the verified permanent Relayer P2P identity
+      ansible.builtin.set_fact:
+        acp_relayer_existing_identity: "{{ acp_relayer_existing_identity_result.stdout | from_json }}"
+      when: acp_relayer_existing_files.results[10].stat.exists
+
+    - name: Find retained manual backups
+      ansible.builtin.find:
+        paths: /var/backups/relayerd
+        patterns: relayer-*.tar.gz
+        file_type: file
+        recurse: false
+      register: acp_relayer_existing_backups
+      failed_when: false
+
+    - name: Select the latest retained manual backup
+      ansible.builtin.set_fact:
+        acp_relayer_latest_backup_path: >-
+          {{
+            acp_relayer_existing_backups.files
+            | default([])
+            | sort(attribute='mtime')
+            | map(attribute='path')
+            | last
+            | default('')
+          }}
+
+    - name: Checksum the latest retained manual backup
+      ansible.builtin.stat:
+        path: "{{ acp_relayer_latest_backup_path }}"
+        checksum_algorithm: sha256
+      register: acp_relayer_latest_backup_stat
+      when: acp_relayer_latest_backup_path | length > 0
+
+    - name: Read the latest non-secret backup manifest
+      ansible.builtin.slurp:
+        src: "{{ acp_relayer_latest_backup_path | regex_replace('\\.tar\\.gz$', '.manifest.json') }}"
+      register: acp_relayer_latest_backup_manifest_file
+      failed_when: false
+      when: acp_relayer_latest_backup_path | length > 0
+
+    - name: Resolve rpc[0] root filesystem capacity
+      ansible.builtin.set_fact:
+        acp_relayer_root_disk_available: >-
+          {{
+            ansible_mounts
+            | selectattr('mount', 'equalto', '/')
+            | map(attribute='size_available')
+            | first
+            | default(0)
+          }}
+
+    - name: Verify preserved keys and state belong to this L1
+      vars:
+        existing_config: "{{ acp_relayer_existing_config_file.content | b64decode | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - (existing_config['network-id'] | int) == (acp_relayer_expected_network_id | int)
+          - existing_config['subnet-id'] == acp_relayer_expected_subnet_id
+          - (existing_config['manager-address'] | lower) == (acp_relayer_expected_manager_address | lower)
+          - (existing_config['validator-manager-address'] | lower) == (acp_relayer_expected_validator_manager_address | lower)
+          - existing_config['evm-rpc-url'].endswith('/ext/bc/' ~ acp_relayer_expected_blockchain_id ~ '/rpc')
+          - existing_config['key-source']['backend'] == 'encrypted-file'
+        fail_msg: >-
+          Preserved Relayer keys/state belong to different L1 metadata than the
+          current l1.env. Restore the matching workspace or use PURGE=true remove
+          only after separately backing up the old installation.
+      when: acp_relayer_existing_files.results[0].stat.exists
+
+    - name: Initialize Relayer-compatible manual peer records
+      ansible.builtin.set_fact:
+        acp_relayer_peers: []
+        acp_relayer_rpc_nodes: []
+        acp_relayer_missing_validator_peers: []
+        acp_relayer_validator_privacy: []
+
+    - name: Build Relayer-compatible manual peer records
+      ansible.builtin.set_fact:
+        acp_relayer_peers: >-
+          {{
+            acp_relayer_peers
+            + [
+              {
+                'node-id': hostvars[item].acp_relayer_node_id,
+                'ip': acp_relayer_validator_private_ips[item] ~ ':9651'
+              }
+            ]
+          }}
+      loop: "{{ groups['validators'] }}"
+
+    - name: Build managed RPC NodeID records
+      ansible.builtin.set_fact:
+        acp_relayer_rpc_nodes: >-
+          {{
+            acp_relayer_rpc_nodes
+            + [
+              {
+                'name': item,
+                'nodeId': hostvars[item].acp_relayer_rpc_node_id
+              }
+            ]
+          }}
+      loop: "{{ groups['rpc'] }}"
+
+    - name: Record validators that are not visible to rpc[0]
+      ansible.builtin.set_fact:
+        acp_relayer_missing_validator_peers: >-
+          {{
+            acp_relayer_missing_validator_peers
+            + [
+              {
+                'name': item,
+                'nodeId': hostvars[item].acp_relayer_node_id
+              }
+            ]
+          }}
+      loop: "{{ groups['validators'] }}"
+      when: hostvars[item].acp_relayer_node_id not in acp_relayer_visible_peer_ids
+
+    - name: Build all-validator protocol-privacy records
+      ansible.builtin.set_fact:
+        acp_relayer_validator_privacy: >-
+          {{
+            acp_relayer_validator_privacy
+            + [
+              {
+                'name': item,
+                'nodeId': hostvars[item].acp_relayer_node_id,
+                'validatorOnly': hostvars[item].acp_relayer_validator_only | bool,
+                'allowedNodes': hostvars[item].acp_relayer_allowed_nodes,
+                'sourceMode': hostvars[item].acp_relayer_subnet_config_mode,
+                'source': hostvars[item].acp_relayer_subnet_config_source,
+                'runtimeConfigFresh': hostvars[item].acp_relayer_runtime_config_fresh | bool
+              }
+            ]
+          }}
+      loop: "{{ groups['validators'] }}"
+
+    - name: Resolve Safe service integration
+      ansible.builtin.set_fact:
+        acp_relayer_owner_type: "{{ 'safe' if acp_relayer_owner_code.json.result | default('0x') not in ['0x', '0x0', ''] else 'eoa' }}"
+        acp_relayer_safe_services_detected: >-
+          {{
+            acp_relayer_owner_code.json.result | default('0x') not in ['0x', '0x0', '']
+            and (acp_relayer_safe_service_active.rc | default(1) | int) == 0
+            and (acp_relayer_safe_transaction_service.status | default(0) | int) == 200
+          }}
+        acp_relayer_safe_console_env_complete: >-
+          {{
+            acp_relayer_safe_console_env.stat.exists
+            and (
+              acp_relayer_safe_console_env_keys.results
+              | default([])
+              | selectattr('rc', 'defined')
+              | selectattr('rc', 'equalto', 0)
+              | list
+              | length
+            ) == 3
+          }}
+
+    - name: Write machine-readable discovery results on the control host
+      ansible.builtin.copy:
+        content: >-
+          {{
+            {
+              'target': inventory_hostname,
+              'ansibleHost': ansible_host,
+              'architecture': ansible_architecture,
+              'memoryMb': ansible_memtotal_mb,
+              'rootDiskAvailableBytes': acp_relayer_root_disk_available | int,
+              'managerOwner': acp_relayer_manager_owner,
+              'ownerType': acp_relayer_owner_type,
+              'safeServicesDetected': acp_relayer_safe_services_detected | bool,
+              'safeServiceState': acp_relayer_safe_service_active.stdout | default('not-applicable'),
+              'safeServiceFactsState': (
+                ansible_facts.services['safe.service'].state
+                if 'safe.service' in ansible_facts.services
+                else 'not-found'
+              ),
+              'safeTransactionServiceStatus': acp_relayer_safe_transaction_service.status | default(0) | int,
+              'safeConsoleEnvPresent': acp_relayer_safe_console_env.stat.exists | bool,
+              'safeConsoleEnvComplete': acp_relayer_safe_console_env_complete | bool,
+              'peers': acp_relayer_peers,
+              'rpcNodes': acp_relayer_rpc_nodes,
+              'missingValidatorPeers': acp_relayer_missing_validator_peers,
+              'validatorPrivacy': acp_relayer_validator_privacy,
+              'infoRpcUrl': acp_relayer_info_rpc_url,
+              'bootstrapPeerCount': acp_relayer_bootstrap_peer_ids | length,
+              'primaryValidatorCount': acp_relayer_primary_validator_ids | length,
+              'eligibleBootstrapPeerCount': acp_relayer_eligible_bootstrap_peer_ids | length,
+              'configuredInfoRpcUrl': (
+                (acp_relayer_existing_config_file.content | b64decode | from_json)['info-rpc-url']
+                if acp_relayer_existing_config_file.content is defined
+                else ''
+              ),
+              'existingScanner': (
+                ((acp_relayer_existing_config_file.content | b64decode | from_json).scanner | default({}))
+                if acp_relayer_existing_config_file.content is defined
+                else {}
+              ),
+              'keystoreExists': acp_relayer_existing_files.results[0].stat.exists | bool,
+              'tlsPairExists': (
+                acp_relayer_existing_files.results[5].stat.exists
+                and acp_relayer_existing_files.results[6].stat.exists
+              ) | bool,
+              'tlsIdentityExists': (
+                acp_relayer_existing_files.results[5].stat.exists
+                and acp_relayer_existing_files.results[6].stat.exists
+                and acp_relayer_existing_files.results[10].stat.exists
+              ) | bool,
+              'p2pNodeId': (
+                acp_relayer_existing_identity.p2pNodeId
+                if acp_relayer_existing_identity is defined
+                else ''
+              ),
+              'tlsCertificateSha256': (
+                acp_relayer_existing_identity.tlsCertificateSha256
+                if acp_relayer_existing_identity is defined
+                else ''
+              ),
+              'restoreUtilityInstalled': acp_relayer_existing_files.results[8].stat.exists | bool,
+              'releaseMetadataExists': acp_relayer_existing_files.results[9].stat.exists | bool,
+              'installedVersion': acp_relayer_existing_version.stdout | default(''),
+              'daemonSha256': acp_relayer_existing_files.results[7].stat.checksum | default(''),
+              'recordedRelease': (
+                acp_relayer_existing_release_file.content | b64decode | from_json
+                if acp_relayer_existing_release_file.content is defined
+                else {}
+              ),
+              'latestBackupMtime': (
+                acp_relayer_existing_backups.files
+                | map(attribute='mtime')
+                | max
+                | default(0)
+              ),
+              'latestBackupSha256': acp_relayer_latest_backup_stat.stat.checksum | default(''),
+              'latestBackupManifest': (
+                acp_relayer_latest_backup_manifest_file.content | b64decode | from_json
+                if acp_relayer_latest_backup_manifest_file.content is defined
+                else {}
+              ),
+              'daemonInstalled': acp_relayer_service_units.results[0].stat.exists | bool,
+              'consoleInstalled': acp_relayer_service_units.results[1].stat.exists | bool
+            } | to_nice_json
+          }}
+        dest: "{{ acp_relayer_discovery_file }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false

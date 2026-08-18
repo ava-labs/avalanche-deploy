@@ -1,0 +1,344 @@
+---
+- name: Manage the Relayer on rpc[0]
+  hosts: rpc[0]
+  become: true
+  gather_facts: true
+  vars:
+    acp_relayer_manage_action: "{{ relayer_manage_action | default('status') }}"
+    acp_relayer_purge: "{{ relayer_purge | default(false) | bool }}"
+    acp_relayer_backup_fetch_dir: "{{ relayer_backup_fetch_dir | default('') }}"
+  tasks:
+    - name: Validate lifecycle action
+      ansible.builtin.assert:
+        that:
+          - acp_relayer_manage_action in ['status', 'backup', 'reset-scanner', 'remove']
+        fail_msg: "Unsupported Relayer lifecycle action: {{ acp_relayer_manage_action }}"
+
+    - name: Gather Relayer service state
+      ansible.builtin.service_facts:
+
+    - name: Inspect managed Relayer service definitions
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/systemd/system/relayerd.service
+        - /etc/systemd/system/relayer-console.service
+      register: acp_relayer_service_units
+
+    - name: Remember the exact pre-backup service state
+      ansible.builtin.set_fact:
+        acp_relayer_daemon_was_running: >-
+          {{
+            acp_relayer_service_units.results[0].stat.exists and
+            ansible_facts.services.get('relayerd.service', {}).get('state', '') == 'running'
+          }}
+        acp_relayer_console_was_running: >-
+          {{
+            acp_relayer_service_units.results[1].stat.exists and
+            ansible_facts.services.get('relayer-console.service', {}).get('state', '') == 'running'
+          }}
+      when: acp_relayer_manage_action in ['backup', 'reset-scanner']
+
+    - name: Query daemon health when installed
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8081/health
+        status_code: 200
+      register: acp_relayer_health
+      failed_when: false
+      when:
+        - acp_relayer_manage_action == 'status'
+        - acp_relayer_service_units.results[0].stat.exists
+
+    - name: Read funding metadata when present
+      ansible.builtin.slurp:
+        src: /etc/relayerd/funding.json
+      register: acp_relayer_funding
+      failed_when: false
+      when: acp_relayer_manage_action == 'status'
+
+    - name: Report Relayer status
+      ansible.builtin.debug:
+        msg:
+          target: "{{ inventory_hostname }}"
+          daemon: >-
+            {{
+              ansible_facts.services.get('relayerd.service', {}).get('state', 'not installed')
+              if acp_relayer_service_units.results[0].stat.exists
+              else 'not installed'
+            }}
+          console: >-
+            {{
+              ansible_facts.services.get('relayer-console.service', {}).get('state', 'not installed')
+              if acp_relayer_service_units.results[1].stat.exists
+              else 'not installed'
+            }}
+          healthy: "{{ acp_relayer_health.status | default(0) == 200 }}"
+          funding: "{{ (acp_relayer_funding.content | b64decode | from_json) if acp_relayer_funding.content is defined else 'unavailable' }}"
+      when: acp_relayer_manage_action == 'status'
+
+    - name: Create a consistent manual Relayer backup
+      when: acp_relayer_manage_action == 'backup'
+      block:
+        - name: Stop console before backup
+          ansible.builtin.systemd:
+            name: relayer-console
+            state: stopped
+          when: acp_relayer_service_units.results[1].stat.exists
+
+        - name: Gracefully drain relayerd before backup
+          ansible.builtin.systemd:
+            name: relayerd
+            state: stopped
+          when: acp_relayer_service_units.results[0].stat.exists
+
+        - name: Ensure backup directory exists
+          ansible.builtin.file:
+            path: /var/backups/relayerd
+            state: directory
+            owner: relayerd
+            group: relayerd
+            mode: "0700"
+
+        - name: Archive config, encrypted keys, state, and TLS identity
+          ansible.builtin.command:
+            argv:
+              - tar
+              - -C
+              - /
+              - -czf
+              - "/var/backups/relayerd/relayer-{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+              - etc/relayerd
+              - var/lib/relayerd
+          register: acp_relayer_backup_result
+          changed_when: true
+
+        - name: Read non-secret funding metadata
+          ansible.builtin.slurp:
+            src: /etc/relayerd/funding.json
+          register: acp_relayer_backup_funding_file
+
+        - name: Read non-secret release metadata
+          ansible.builtin.slurp:
+            src: /etc/relayerd/release.json
+          register: acp_relayer_backup_release_file
+
+        - name: Read non-secret runtime configuration
+          ansible.builtin.slurp:
+            src: /etc/relayerd/config.json
+          register: acp_relayer_backup_config_file
+
+        - name: Calculate the backup archive checksum
+          ansible.builtin.stat:
+            path: "/var/backups/relayerd/relayer-{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+            checksum_algorithm: sha256
+          register: acp_relayer_backup_stat
+
+        - name: Write the non-secret backup manifest
+          vars:
+            funding: "{{ acp_relayer_backup_funding_file.content | b64decode | from_json }}"
+            release: "{{ acp_relayer_backup_release_file.content | b64decode | from_json }}"
+            runtime_config: "{{ acp_relayer_backup_config_file.content | b64decode | from_json }}"
+            archive_name: "relayer-{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+          ansible.builtin.copy:
+            content: >-
+              {{
+                {
+                  'schemaVersion': 1,
+                  'kind': 'avalanche-deploy-relayer-backup',
+                  'version': release.version,
+                  'configSchema': release.configSchema | default(1) | int,
+                  'stateSchema': release.stateSchema | default(1) | int,
+                  'minimumReadableStateSchema': release.minimumReadableStateSchema | default(1) | int,
+                  'minimumAutomaticRollbackStateSchema': release.minimumAutomaticRollbackStateSchema | default(1) | int,
+                  'networkId': funding.networkId,
+                  'subnetId': funding.subnetId,
+                  'blockchainId': funding.blockchainId,
+                  'evmChainId': funding.evmChainId,
+                  'chainName': funding.chainName,
+                  'managerAddress': runtime_config['manager-address'],
+                  'validatorManagerAddress': runtime_config['validator-manager-address'],
+                  'fundingAddresses': {
+                    'pChain': funding.pChainAddress,
+                    'evm': funding.evmAddress
+                  },
+                  'p2pNodeId': funding.p2pNodeId | default(''),
+                  'tlsCertificateSha256': funding.tlsCertificateSha256 | default(''),
+                  'createdAt': ansible_date_time.iso8601,
+                  'archive': {
+                    'file': archive_name,
+                    'sha256': acp_relayer_backup_stat.stat.checksum
+                  }
+                } | to_nice_json
+              }}
+            dest: "/var/backups/relayerd/relayer-{{ ansible_date_time.iso8601_basic_short }}.manifest.json"
+            owner: root
+            group: root
+            mode: "0600"
+
+        - name: Restrict backup permissions
+          ansible.builtin.file:
+            path: "/var/backups/relayerd/relayer-{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+            owner: root
+            group: root
+            mode: "0600"
+
+        - name: Fetch retained backup archive to the Avalanche Deploy workspace
+          ansible.builtin.fetch:
+            src: "/var/backups/relayerd/relayer-{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+            dest: "{{ acp_relayer_backup_fetch_dir }}/"
+            flat: true
+          when: acp_relayer_backup_fetch_dir | length > 0
+
+        - name: Fetch retained backup manifest to the Avalanche Deploy workspace
+          ansible.builtin.fetch:
+            src: "/var/backups/relayerd/relayer-{{ ansible_date_time.iso8601_basic_short }}.manifest.json"
+            dest: "{{ acp_relayer_backup_fetch_dir }}/"
+            flat: true
+          when: acp_relayer_backup_fetch_dir | length > 0
+      always:
+        - name: Restart daemon after backup
+          ansible.builtin.systemd:
+            name: relayerd
+            state: started
+          when: acp_relayer_daemon_was_running | bool
+
+        - name: Restart console after backup
+          ansible.builtin.systemd:
+            name: relayer-console
+            state: started
+          when: acp_relayer_console_was_running | bool
+
+        - name: Report backup path
+          ansible.builtin.debug:
+            msg: >-
+              Backup: {{ acp_relayer_backup_fetch_dir | default('/var/backups/relayerd', true) }}/relayer-{{ ansible_date_time.iso8601_basic_short }}.tar.gz
+          when: acp_relayer_backup_result is defined and acp_relayer_backup_result.rc == 0
+
+    - name: Reset only the autonomous scanner cursor and queue
+      when: acp_relayer_manage_action == 'reset-scanner'
+      block:
+        - name: Inspect scanner reset prerequisites
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop:
+            - /usr/local/bin/relayer-restore
+            - /var/lib/relayerd/relayer.db
+            - /etc/relayerd/config.json
+          register: acp_relayer_scanner_reset_files
+
+        - name: Require a complete scanner-capable runtime
+          ansible.builtin.assert:
+            that:
+              - acp_relayer_scanner_reset_files.results | map(attribute='stat.exists') | min
+              - acp_relayer_service_units.results[0].stat.exists
+            fail_msg: >-
+              Scanner reset requires the managed relayer-restore utility, bbolt
+              database, config, and relayerd service. Install or repair the
+              scanner-capable Relayer before retrying.
+
+        - name: Read current Relayer configuration
+          ansible.builtin.slurp:
+            src: /etc/relayerd/config.json
+          register: acp_relayer_scanner_reset_config_file
+
+        - name: Refuse scanner reset when no scanner is configured
+          vars:
+            current_config: "{{ acp_relayer_scanner_reset_config_file.content | b64decode | from_json }}"
+          ansible.builtin.assert:
+            that:
+              - current_config.scanner is defined
+              - current_config.scanner.enabled | default(false) | bool
+            fail_msg: "The installed Relayer has no enabled scanner configuration to reset."
+
+        - name: Stop relayerd before the offline scanner reset
+          ansible.builtin.systemd:
+            name: relayerd
+            state: stopped
+
+        - name: Atomically clear scanner cursor and queued triggers
+          ansible.builtin.command:
+            argv:
+              - /usr/local/bin/relayer-restore
+              - --reset-scanner
+              - /var/lib/relayerd/relayer.db
+          register: acp_relayer_scanner_reset_result
+          changed_when: true
+
+        - name: Report scanner reset result
+          ansible.builtin.debug:
+            msg: "{{ acp_relayer_scanner_reset_result.stdout }}"
+
+      always:
+        - name: Restore the prior running daemon state after scanner reset
+          ansible.builtin.systemd:
+            name: relayerd
+            state: started
+          when: acp_relayer_daemon_was_running | bool
+
+        - name: Verify daemon readiness after scanner reset
+          ansible.builtin.uri:
+            url: http://127.0.0.1:8081/ready
+            status_code: 200
+          register: acp_relayer_scanner_reset_ready
+          until: acp_relayer_scanner_reset_ready.status == 200
+          retries: 60
+          delay: 5
+          when: acp_relayer_daemon_was_running | bool
+
+    - name: Stop and disable Relayer services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - relayer-console
+        - relayerd
+      failed_when: false
+      when: acp_relayer_manage_action == 'remove'
+
+    - name: Remove the console container
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, rm, -f, relayer-console]
+      register: acp_relayer_container_remove
+      changed_when: acp_relayer_container_remove.rc == 0
+      failed_when: false
+      when: acp_relayer_manage_action == 'remove'
+
+    - name: Remove service definitions and daemon binary
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/relayer-console.service
+        - /etc/systemd/system/relayerd.service
+        - /usr/local/bin/relayerd
+        - /usr/local/bin/relayer-restore
+      when: acp_relayer_manage_action == 'remove'
+
+    - name: Reload systemd after removal
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when: acp_relayer_manage_action == 'remove'
+
+    - name: Purge persistent Relayer material after explicit confirmation
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/relayerd
+        - /var/lib/relayerd
+        - /var/backups/relayerd
+      when:
+        - acp_relayer_manage_action == 'remove'
+        - acp_relayer_purge
+
+    - name: Report removal retention policy
+      ansible.builtin.debug:
+        msg: >-
+          {{
+            'Relayer keys, state, TLS identity, configuration, and backups were permanently deleted.'
+            if acp_relayer_purge
+            else
+            'Relayer services and binary were removed. Keys, state, TLS identity, configuration, and backups were preserved.'
+          }}
+      when: acp_relayer_manage_action == 'remove'

@@ -1,0 +1,57 @@
+[Unit]
+Description=Avalanche validator-lifecycle relayer daemon
+Documentation=https://github.com/ava-labs/validator-manager-relayer
+After=network-online.target avalanchego.service
+Wants=network-online.target
+# No start rate limit: after a reboot relayerd legitimately fails until
+# avalanchego finishes bootstrapping, and a parked unit never recovers.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User={{ acp_relayer_user }}
+Group={{ acp_relayer_group }}
+ExecStart={{ acp_relayer_binary_path }} --config-file={{ acp_relayer_config_dir }}/config.json
+Restart=always
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec={{ (acp_relayer_acceptance_timeout_seconds | int) + 540 }}s
+
+# The encrypted keystore password is copied by systemd to a private tmpfs and
+# read through $CREDENTIALS_DIRECTORY/keystore-password by relayerd.
+LoadCredential=keystore-password:{{ acp_relayer_secrets_dir }}/keystore-password
+
+StateDirectory={{ acp_relayer_state_dir | basename }}
+StateDirectoryMode=0700
+ReadWritePaths={{ acp_relayer_backup_dir }}
+UMask=0077
+
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallArchitectures=native
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=relayerd
+
+[Install]
+WantedBy=multi-user.target

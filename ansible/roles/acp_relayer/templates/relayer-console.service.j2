@@ -1,0 +1,35 @@
+[Unit]
+Description=Avalanche validator-lifecycle relayer console
+Requires=docker.service
+Wants=relayerd.service
+After=docker.service relayerd.service
+PartOf=relayerd.service
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=300
+TimeoutStopSec=60
+ExecStartPre=-/usr/bin/docker rm -f relayer-console
+ExecStart=/usr/bin/docker run --name relayer-console --network host --user 1000:1000 --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --cap-drop ALL --security-opt no-new-privileges --env-file {{ acp_relayer_secrets_dir }}/console.env --env HOSTNAME=127.0.0.1 --env PORT={{ acp_relayer_console_port }} {{ acp_relayer_console_image }}
+ExecStop=/usr/bin/docker stop --time 30 relayer-console
+ExecStopPost=-/usr/bin/docker rm -f relayer-console
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=relayer-console
+
+[Install]
+WantedBy=multi-user.target

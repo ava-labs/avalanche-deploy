@@ -1,0 +1,385 @@
+---
+- name: Validate Relayer authorization discovery inputs
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Require a complete managed inventory and L1 identity
+      ansible.builtin.assert:
+        that:
+          - groups['validators'] is defined
+          - groups['validators'] | length > 0
+          - groups['rpc'] is defined
+          - groups['rpc'] | length > 0
+          - acp_relayer_discovered_target in groups['rpc']
+          - acp_relayer_expected_subnet_id | length > 0
+          - acp_relayer_validator_private_ips | type_debug == 'dict'
+          - acp_relayer_discovery_file | length > 0
+        fail_msg: >-
+          Authorization discovery requires the deployed validator and RPC
+          inventory, the L1 subnet ID, validator private IPs, and an output path.
+
+- name: Discover validator identities and effective privacy configuration
+  hosts: validators
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read each validator NodeID
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.getNodeID
+        return_content: true
+      register: relayer_authorization_validator_node_id
+
+    - name: Require a valid validator NodeID
+      ansible.builtin.assert:
+        that:
+          - relayer_authorization_validator_node_id.status == 200
+          - relayer_authorization_validator_node_id.json.error is not defined
+          - relayer_authorization_validator_node_id.json.result.nodeID is match('^NodeID-')
+        fail_msg: >-
+          {{ inventory_hostname }} did not return a valid NodeID from its local
+          AvalancheGo Info API.
+
+    - name: Read the AvalancheGo node configuration
+      ansible.builtin.slurp:
+        src: /etc/avalanchego/node.json
+      register: relayer_authorization_node_config_file
+
+    - name: Resolve the subnet configuration source
+      vars:
+        node_config: "{{ relayer_authorization_node_config_file.content | b64decode | from_json }}"
+      ansible.builtin.set_fact:
+        relayer_authorization_node_id: "{{ relayer_authorization_validator_node_id.json.result.nodeID }}"
+        relayer_authorization_inline_content: "{{ node_config['subnet-config-content'] | default('') }}"
+        relayer_authorization_subnet_config_dir: >-
+          {{
+            node_config['subnet-config-dir']
+            | default('/home/avalanche/.avalanchego/configs/subnets')
+          }}
+
+    - name: Inspect the file-based subnet configuration
+      ansible.builtin.stat:
+        path: "{{ relayer_authorization_subnet_config_dir }}/{{ acp_relayer_expected_subnet_id }}.json"
+      register: relayer_authorization_subnet_config_stat
+      when: relayer_authorization_inline_content | length == 0
+
+    - name: Read the file-based subnet configuration
+      ansible.builtin.slurp:
+        src: "{{ relayer_authorization_subnet_config_dir }}/{{ acp_relayer_expected_subnet_id }}.json"
+      register: relayer_authorization_subnet_config_file
+      when:
+        - relayer_authorization_inline_content | length == 0
+        - relayer_authorization_subnet_config_stat.stat.exists | default(false)
+
+    - name: Resolve the effective subnet configuration
+      vars:
+        inline_configs: >-
+          {{
+            relayer_authorization_inline_content | b64decode | from_json
+            if relayer_authorization_inline_content | length > 0
+            else {}
+          }}
+      ansible.builtin.set_fact:
+        relayer_authorization_subnet_config: >-
+          {{
+            inline_configs[acp_relayer_expected_subnet_id] | default({})
+            if relayer_authorization_inline_content | length > 0
+            else (
+              relayer_authorization_subnet_config_file.content | b64decode | from_json
+              if relayer_authorization_subnet_config_file.content is defined
+              else {}
+            )
+          }}
+
+    - name: Resolve the effective subnet configuration path
+      ansible.builtin.set_fact:
+        relayer_authorization_effective_source_path: >-
+          {{
+            '/etc/avalanchego/node.json'
+            if relayer_authorization_inline_content | length > 0
+            else relayer_authorization_subnet_config_dir ~ '/' ~ acp_relayer_expected_subnet_id ~ '.json'
+          }}
+
+    - name: Inspect the effective subnet configuration source
+      ansible.builtin.stat:
+        path: "{{ relayer_authorization_effective_source_path }}"
+      register: relayer_authorization_effective_source_stat
+
+    - name: Read the running AvalancheGo process ID
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - avalanchego.service
+          - --property=MainPID
+          - --value
+      register: relayer_authorization_main_pid
+      changed_when: false
+
+    - name: Require a running AvalancheGo process
+      ansible.builtin.assert:
+        that:
+          - relayer_authorization_main_pid.rc == 0
+          - relayer_authorization_main_pid.stdout | trim is match('^[1-9][0-9]*$')
+        fail_msg: >-
+          {{ inventory_hostname }} does not have a running avalanchego.service.
+          Start or repair AvalancheGo before Relayer authorization.
+
+    - name: Inspect the running AvalancheGo process
+      ansible.builtin.stat:
+        path: "/proc/{{ relayer_authorization_main_pid.stdout | trim }}"
+      register: relayer_authorization_process_stat
+
+    - name: Require a stable process and private configuration source
+      vars:
+        validator_only: "{{ relayer_authorization_subnet_config.validatorOnly | default(false) }}"
+      ansible.builtin.assert:
+        that:
+          - relayer_authorization_process_stat.stat.exists
+          - not (validator_only | bool) or relayer_authorization_effective_source_stat.stat.exists
+        fail_msg: >-
+          {{ inventory_hostname }} changed state during discovery or has no
+          effective protocol-private subnet configuration source.
+
+    - name: Validate and save the effective privacy configuration
+      vars:
+        validator_only: "{{ relayer_authorization_subnet_config.validatorOnly | default(false) }}"
+        allowed_nodes: "{{ relayer_authorization_subnet_config.allowedNodes | default([]) }}"
+      block:
+        - name: Require supported privacy values
+          ansible.builtin.assert:
+            that:
+              - validator_only | type_debug == 'bool'
+              - allowed_nodes | type_debug == 'list'
+              - allowed_nodes | select('string') | list | length == allowed_nodes | length
+            fail_msg: >-
+              {{ inventory_hostname }} has an invalid validatorOnly or allowedNodes
+              value for {{ acp_relayer_expected_subnet_id }}.
+
+        - name: Save the validator privacy facts
+          ansible.builtin.set_fact:
+            relayer_authorization_validator_only: "{{ validator_only | bool }}"
+            relayer_authorization_allowed_nodes: "{{ allowed_nodes }}"
+            relayer_authorization_source_mode: >-
+              {{ 'content' if relayer_authorization_inline_content | length > 0 else 'file' }}
+            relayer_authorization_source: >-
+              {{
+                '/etc/avalanchego/node.json:subnet-config-content'
+                if relayer_authorization_inline_content | length > 0
+                else relayer_authorization_subnet_config_dir ~ '/' ~ acp_relayer_expected_subnet_id ~ '.json'
+              }}
+            relayer_authorization_runtime_config_fresh: >-
+              {{
+                not (validator_only | bool)
+                or (
+                  relayer_authorization_effective_source_stat.stat.exists
+                  and (
+                    relayer_authorization_effective_source_stat.stat.mtime | float
+                    < relayer_authorization_process_stat.stat.mtime | float
+                  )
+                )
+              }}
+
+- name: Discover managed RPC identities
+  hosts: rpc
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read each RPC NodeID
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.getNodeID
+        return_content: true
+      register: relayer_authorization_rpc_node_id
+
+    - name: Require a valid RPC NodeID
+      ansible.builtin.assert:
+        that:
+          - relayer_authorization_rpc_node_id.status == 200
+          - relayer_authorization_rpc_node_id.json.error is not defined
+          - relayer_authorization_rpc_node_id.json.result.nodeID is match('^NodeID-')
+        fail_msg: >-
+          {{ inventory_hostname }} did not return a valid NodeID from its local
+          AvalancheGo Info API.
+
+    - name: Save the RPC NodeID
+      ansible.builtin.set_fact:
+        relayer_authorization_rpc_node_id_value: "{{ relayer_authorization_rpc_node_id.json.result.nodeID }}"
+
+- name: Discover the staged identity and current peer visibility
+  hosts: rpc[0]
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Read visible AvalancheGo peers
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9650/ext/info
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: info.peers
+        return_content: true
+      register: relayer_authorization_peers_result
+
+    - name: Discover installed services
+      ansible.builtin.service_facts:
+
+    - name: Inspect managed Relayer service definitions
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/systemd/system/relayerd.service
+        - /etc/systemd/system/relayer-console.service
+      register: relayer_authorization_service_units
+
+    - name: Inspect retained Relayer material
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        checksum_algorithm: sha256
+      loop:
+        - /var/lib/relayerd/keystore.json
+        - /var/lib/relayerd/tls/staker.crt
+        - /var/lib/relayerd/tls/staker.key
+        - /etc/relayerd/identity.json
+      register: relayer_authorization_files
+
+    - name: Require complete TLS and identity material
+      ansible.builtin.assert:
+        that:
+          - relayer_authorization_files.results[1].stat.exists == relayer_authorization_files.results[2].stat.exists
+          - not relayer_authorization_files.results[3].stat.exists or relayer_authorization_files.results[1].stat.exists
+        fail_msg: >-
+          Retained Relayer TLS or identity material is partial. Restore matching
+          material or explicitly purge the test installation before continuing.
+
+    - name: Derive and verify the permanent Relayer identity
+      ansible.builtin.script:
+        cmd: >-
+          {{ playbook_dir }}/files/relayer-verify-identity.py
+          --identity /etc/relayerd/identity.json
+          --certificate /var/lib/relayerd/tls/staker.crt
+      register: relayer_authorization_identity_result
+      changed_when: false
+      when: relayer_authorization_files.results[3].stat.exists
+
+    - name: Save the verified permanent Relayer identity
+      ansible.builtin.set_fact:
+        relayer_authorization_identity: "{{ relayer_authorization_identity_result.stdout | from_json }}"
+      when: relayer_authorization_files.results[3].stat.exists
+
+    - name: Build authorization discovery records
+      ansible.builtin.set_fact:
+        relayer_authorization_visible_peer_ids: >-
+          {{ relayer_authorization_peers_result.json.result.peers | map(attribute='nodeID') | list }}
+        relayer_authorization_manual_peers: []
+        relayer_authorization_rpc_nodes: []
+        relayer_authorization_missing_validator_peers: []
+        relayer_authorization_validator_privacy: []
+
+    - name: Build manual validator peer records
+      ansible.builtin.set_fact:
+        relayer_authorization_manual_peers: >-
+          {{
+            relayer_authorization_manual_peers
+            + [{
+              'node-id': hostvars[item].relayer_authorization_node_id,
+              'ip': acp_relayer_validator_private_ips[item] ~ ':9651'
+            }]
+          }}
+      loop: "{{ groups['validators'] }}"
+
+    - name: Build managed RPC records
+      ansible.builtin.set_fact:
+        relayer_authorization_rpc_nodes: >-
+          {{
+            relayer_authorization_rpc_nodes
+            + [{
+              'name': item,
+              'nodeId': hostvars[item].relayer_authorization_rpc_node_id_value
+            }]
+          }}
+      loop: "{{ groups['rpc'] }}"
+
+    - name: Record validators that are not visible to rpc[0]
+      ansible.builtin.set_fact:
+        relayer_authorization_missing_validator_peers: >-
+          {{
+            relayer_authorization_missing_validator_peers
+            + [{
+              'name': item,
+              'nodeId': hostvars[item].relayer_authorization_node_id
+            }]
+          }}
+      loop: "{{ groups['validators'] }}"
+      when: hostvars[item].relayer_authorization_node_id not in relayer_authorization_visible_peer_ids
+
+    - name: Build validator privacy records
+      ansible.builtin.set_fact:
+        relayer_authorization_validator_privacy: >-
+          {{
+            relayer_authorization_validator_privacy
+            + [{
+              'name': item,
+              'nodeId': hostvars[item].relayer_authorization_node_id,
+              'validatorOnly': hostvars[item].relayer_authorization_validator_only | bool,
+              'allowedNodes': hostvars[item].relayer_authorization_allowed_nodes,
+              'sourceMode': hostvars[item].relayer_authorization_source_mode,
+              'source': hostvars[item].relayer_authorization_source,
+              'runtimeConfigFresh': hostvars[item].relayer_authorization_runtime_config_fresh | bool
+            }]
+          }}
+      loop: "{{ groups['validators'] }}"
+
+    - name: Write authorization discovery results on the control host
+      ansible.builtin.copy:
+        content: >-
+          {{
+            {
+              'target': inventory_hostname,
+              'ansibleHost': ansible_host,
+              'architecture': ansible_facts['architecture'],
+              'peers': relayer_authorization_manual_peers,
+              'rpcNodes': relayer_authorization_rpc_nodes,
+              'missingValidatorPeers': relayer_authorization_missing_validator_peers,
+              'validatorPrivacy': relayer_authorization_validator_privacy,
+              'keystoreExists': relayer_authorization_files.results[0].stat.exists | bool,
+              'tlsPairExists': (
+                relayer_authorization_files.results[1].stat.exists
+                and relayer_authorization_files.results[2].stat.exists
+              ) | bool,
+              'tlsIdentityExists': (
+                relayer_authorization_files.results[1].stat.exists
+                and relayer_authorization_files.results[2].stat.exists
+                and relayer_authorization_files.results[3].stat.exists
+              ) | bool,
+              'p2pNodeId': (
+                relayer_authorization_identity.p2pNodeId
+                if relayer_authorization_identity is defined
+                else ''
+              ),
+              'tlsCertificateSha256': (
+                relayer_authorization_identity.tlsCertificateSha256
+                if relayer_authorization_identity is defined
+                else ''
+              ),
+              'daemonInstalled': relayer_authorization_service_units.results[0].stat.exists | bool,
+              'consoleInstalled': relayer_authorization_service_units.results[1].stat.exists | bool
+            }
+            | to_nice_json
+          }}
+        dest: "{{ acp_relayer_discovery_file }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false

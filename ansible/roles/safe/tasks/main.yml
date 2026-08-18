@@ -280,6 +280,19 @@
       echo "NEEDS_BUILD"
       exit 0
     fi
+    # Safe Wallet Web v1.32.1 passes an empty WalletConnect module to
+    # web3-onboard when this value is blank. That prevents even injected
+    # Core/MetaMask wallets from opening the connection modal.
+    if docker run --rm --entrypoint="" safe-ui-patched:{{ evm_chain_id }} \
+      sh -c 'grep -rl '"'"'projectId:""'"'"' /usr/share/nginx/html/_next/static/chunks/*.js 2>/dev/null | head -1' | grep -q .; then
+      echo "NEEDS_BUILD"
+      exit 0
+    fi
+    if ! docker run --rm --entrypoint="" safe-ui-patched:{{ evm_chain_id }} \
+      sh -c 'grep -rl "{{ safe_walletconnect_project_id }}" /usr/share/nginx/html/_next/static/chunks/*.js 2>/dev/null | head -1' | grep -q .; then
+      echo "NEEDS_BUILD"
+      exit 0
+    fi
     echo "OK"
   args:
     executable: /bin/bash
@@ -313,6 +326,7 @@
     NEXT_PUBLIC_GATEWAY_URL_STAGING=https://{{ safe_host }}/cgw
     NEXT_PUBLIC_IS_PRODUCTION=true
     NEXT_PUBLIC_SAFE_VERSION=1.4.1
+    NEXT_PUBLIC_WC_PROJECT_ID={{ safe_walletconnect_project_id }}
     ENVEOF
     # Strip leading whitespace from env file (heredoc preserves indentation)
     sed -i 's/^[[:space:]]*//' /tmp/safe-ui-scripts/env.production
@@ -357,6 +371,20 @@
       exit 1
     fi
     echo "Verified: gateway URL does not contain safe-client.safe.global fallback"
+
+    # Empty NEXT_PUBLIC_WC_PROJECT_ID breaks the entire wallet-onboarding
+    # modal in Safe Wallet Web v1.32.1, including injected Core/MetaMask.
+    if grep -rl 'projectId:""' /tmp/safe-ui-patched/_next/static/chunks/*.js >/dev/null 2>&1; then
+      echo "ERROR: Safe UI contains an empty WalletConnect project ID." >&2
+      rm -rf /tmp/safe-ui-patched
+      exit 1
+    fi
+    if ! grep -rl '{{ safe_walletconnect_project_id }}' /tmp/safe-ui-patched/_next/static/chunks/*.js >/dev/null 2>&1; then
+      echo "ERROR: WalletConnect project ID was not compiled into the Safe UI." >&2
+      rm -rf /tmp/safe-ui-patched
+      exit 1
+    fi
+    echo "Verified: wallet connector configuration is present"
 
     # Build nginx image with the patched build output
     cat > /tmp/Dockerfile.safe-ui << 'EOF'
@@ -541,6 +569,9 @@
     path: /etc/nginx/sites-enabled/default
     state: absent
   notify: Reload nginx
+
+- name: Apply pending Safe nginx configuration
+  ansible.builtin.meta: flush_handlers
 
 - name: Start Safe services
   ansible.builtin.systemd:
@@ -853,16 +884,22 @@
     executable: /bin/bash
     cmd: |
       set -eo pipefail
-      missing=$(docker exec safe-txs-web python manage.py shell -c "
+      missing=$(docker exec safe-txs-web python manage.py shell --verbosity 0 -c "
       from safe_transaction_service.history.models import SafeContract, SafeLastStatus
       sc = set(SafeContract.objects.values_list('address', flat=True))
       have = set(SafeLastStatus.objects.values_list('address', flat=True))
-      print(' '.join(sorted(sc - have)))
-      " | tr -d '\r')
+      print('SAFE_MISSING=' + ' '.join(sorted(sc - have)))
+      " | tr -d '\r' | sed -n 's/^SAFE_MISSING=//p' | tail -n 1)
       if [ -z "$missing" ]; then
         echo "All indexed Safes have SafeLastStatus; nothing to repair"
         exit 0
       fi
+      for address in $missing; do
+        if [[ ! "$address" =~ ^0x[0-9a-fA-F]{40}$ ]]; then
+          echo "Refusing invalid Safe address returned by status query: $address" >&2
+          exit 2
+        fi
+      done
       echo "Safes missing SafeLastStatus (stuck/Canceled): $missing"
       docker exec safe-txs-web python manage.py reindex_master_copies \
         --addresses $missing --block-process-limit 500

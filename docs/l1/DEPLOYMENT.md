@@ -201,6 +201,28 @@ Your L1 is now running:
 
 If your genesis includes a ValidatorManager proxy contract:
 
+### Know the two owners
+
+The genesis proxy has two separate authorization paths:
+
+- The **ProxyAdmin owner** controls implementation upgrades. This owner is fixed
+  in the genesis allocation before the L1 is created.
+- `AVALANCHE_PRIVATE_KEY` is the runtime deployer. Its address becomes the
+  initial ValidatorManager administrator and the initial PoAManager owner.
+
+The initializer reads the ProxyAdmin owner on-chain before deploying anything.
+If that owner differs from the runtime deployer, provide its key separately
+through `GENESIS_PROXY_ADMIN_PRIVATE_KEY`; the runtime deployer key remains in
+`AVALANCHE_PRIVATE_KEY`.
+
+> **Development genesis warning:** the repository's sample genesis assigns
+> ProxyAdmin ownership to the public EWOQ test account. That configuration is
+> suitable only for disposable local/Fuji testing. Before creating a production
+> L1, replace the genesis ProxyAdmin owner with a secure deployment
+> administrator. After deploying a Safe, transfer both ProxyAdmin ownership
+> (upgrade authority) and PoAManager ownership (validator-lifecycle authority)
+> to the intended Safe.
+
 ```bash
 # Requires foundry
 curl -L https://foundry.paradigm.xyz | bash && foundryup
@@ -236,6 +258,29 @@ message. Two ways to obtain it:
   validator rejects the request, its error reports the expected value
   (`provided conversionID X != expected Y`).
 
+## Optional: Install the Validator-Lifecycle Relayer
+
+After the official PoAManager and ValidatorManager proxy are initialized, use
+the managed Relayer workflow:
+
+```bash
+make relayer-prereqs
+make relayer-doctor
+make relayer-prepare       # Required before protocol-private authorization
+make relayer-authorize     # Optional managed Terraform/Ansible authorization
+make relayer
+```
+
+This explicit post-deployment command discovers the managed L1, validates it,
+and installs one tunnel-only daemon/console pair on `rpc[0]`. It is different
+from the ICM Relayer. On a protocol-private L1, `make relayer-authorize` can
+merge the required NodeIDs into Terraform/Ansible-managed validators, perform
+rolling restarts, and recover RPC peering. Skip that command if the L1 owner
+completed authorization through another configuration system. See the
+[protocol-private authorization guide](RELAYER-AUTHORIZATION.md) for both
+paths, and the [managed Relayer operator runbook](RELAYER.md) for funding,
+access, lifecycle, backup/restore, and release details.
+
 ## Genesis Configuration
 
 Use the **[Genesis Builder](https://build.avax.network/tools/l1-toolbox/create-chain)** to generate your genesis JSON visually, then save it at `configs/l1/genesis/genesis.json`.
@@ -263,6 +308,6 @@ This guide covers the Terraform + Ansible path. To deploy L1 infrastructure on a
 
 ## Next Steps
 
-- [Deploy add-ons](ADD-ONS.md) (Blockscout, faucet, The Graph, ICM Relayer)
+- [Deploy add-ons](ADD-ONS.md) (Blockscout, faucet, The Graph, ICM Relayer, validator-lifecycle relayer)
 - [Operations guide](../OPERATIONS.md) (upgrades, monitoring, health checks)
 - [Troubleshooting](../TROUBLESHOOTING.md)
