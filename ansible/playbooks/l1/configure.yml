@@ -115,6 +115,40 @@
         avalanchego_base_node_config: "{{ avalanchego_base_node_config | combine(bootstrap_config) }}"
       when: l1_bootstrap_ids is defined and l1_bootstrap_ids | length > 0
 
+    # This playbook rebuilds node.json from scratch, so settings written by
+    # deploy-nodes.yml that it does not manage must be carried over explicitly.
+    # Dropping staking-rpc-signer-endpoint is silently destructive: avalanchego
+    # falls back to generating a plaintext BLS key on disk with a different
+    # identity than the one registered on the P-Chain (breaks warp signing and
+    # defeats the remote signer entirely).
+    - name: Read existing node configuration
+      ansible.builtin.slurp:
+        src: "{{ avalanchego_config_dir }}/node.json"
+      register: existing_node_json_raw
+      failed_when: false
+
+    - name: Determine remote-signer endpoint to carry over
+      vars:
+        existing_node_config: >-
+          {{
+            (existing_node_json_raw.content | b64decode | from_json)
+            if existing_node_json_raw.content is defined else {}
+          }}
+      ansible.builtin.set_fact:
+        l1_signer_endpoint: >-
+          {{
+            (remote_signer_endpoint | default('127.0.0.1:50051'))
+            if (remote_signer_enabled | default(false) | bool)
+            else existing_node_config.get('staking-rpc-signer-endpoint', '')
+          }}
+
+    - name: Keep BLS signing delegated to the remote signer
+      ansible.builtin.set_fact:
+        avalanchego_base_node_config: "{{ avalanchego_base_node_config | combine({'staking-rpc-signer-endpoint': l1_signer_endpoint}) }}"
+      when:
+        - l1_signer_endpoint | length > 0
+        - avalanchego_node_type == 'validator'
+
     - name: Merge custom config with base config
       ansible.builtin.set_fact:
         avalanchego_final_node_config: "{{ avalanchego_base_node_config | combine(avalanchego_custom_node_config | default({})) }}"

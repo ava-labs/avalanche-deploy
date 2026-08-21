@@ -381,7 +381,7 @@ resource "aws_instance" "validators" {
   key_name               = var.ssh_key_name != "" ? var.ssh_key_name : (length(aws_key_pair.main) > 0 ? aws_key_pair.main[0].key_name : null)
   subnet_id              = aws_subnet.public[count.index % length(aws_subnet.public)].id
   vpc_security_group_ids = [aws_security_group.validators.id]
-  iam_instance_profile   = local.enable_key_backup ? aws_iam_instance_profile.validator[0].name : null
+  iam_instance_profile   = local.enable_validator_role ? aws_iam_instance_profile.validator[0].name : null
 
   metadata_options {
     http_endpoint               = "enabled"
@@ -507,6 +507,10 @@ resource "aws_instance" "monitoring" {
 # Local to determine if we need staking key backup infrastructure
 locals {
   enable_key_backup = var.enable_staking_key_backup && var.validator_count > 0
+  # The validator IAM role/instance profile is shared by features that need
+  # instance credentials: S3 staking-key backup and the remote-signer KMS key
+  # (see remote-signer.tf). Created when either is enabled.
+  enable_validator_role = local.enable_key_backup || (var.enable_remote_signer_kms && var.validator_count > 0)
 }
 
 resource "aws_s3_bucket" "staking_keys" {
@@ -568,11 +572,11 @@ resource "aws_kms_alias" "staking_keys" {
 }
 
 #
-# IAM ROLE FOR VALIDATORS (S3 ACCESS)
+# IAM ROLE FOR VALIDATORS (S3 backup and/or remote-signer KMS)
 #
 
 resource "aws_iam_role" "validator" {
-  count = local.enable_key_backup ? 1 : 0
+  count = local.enable_validator_role ? 1 : 0
   name  = "${var.name_prefix}-validator-role"
 
   assume_role_policy = jsonencode({
@@ -622,7 +626,7 @@ resource "aws_iam_role_policy" "validator_s3" {
 }
 
 resource "aws_iam_instance_profile" "validator" {
-  count = local.enable_key_backup ? 1 : 0
+  count = local.enable_validator_role ? 1 : 0
   name  = "${var.name_prefix}-validator-profile"
   role  = aws_iam_role.validator[0].name
 }

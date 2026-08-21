@@ -90,6 +90,47 @@ l1:
   bootstrapIds: ""  # Comma-separated NodeIDs
   bootstrapIps: ""  # Comma-separated IP:port
 
+# ── Remote signer (BLS signing sidecar) ──────────────────────────────────────
+# Off by default: when disabled the pod is byte-for-byte unchanged from a
+# stock validator. When enabled, a remote-signer container runs alongside
+# avalanchego in the same pod; the node signs via --staking-rpc-signer-endpoint
+# over loopback and holds NO BLS key. The signer's backend (cloud KMS / Vault /
+# Nitro) is chosen in the config Secret referenced below.
+# Project: https://github.com/ava-labs/avalanche-remote-signer
+remote_signer:
+  enabled: false
+  port: 50051
+  image:
+    repository: rpinsker1/avalanche-remote-signer
+    # Pinned by digest (immutable) — this is v0.1.0. To upgrade, bump both.
+    digest: "sha256:98f98a3d75b77c9807c956dbbcb13fa00d191e42ca4714ebb36d26a07a48d193"
+    pullPolicy: IfNotPresent
+  # A Secret with key `config.yaml` holding the signer config (backend block +
+  # any inline key material / vault token). Defaults to
+  # "<release>-remote-signer". Create it out-of-band, e.g.:
+  #   kubectl create secret generic <release>-remote-signer \
+  #     --from-file=config.yaml=./remote-signer-config.yaml
+  # For cloud-KMS backends, prefer workload identity / IRSA on the pod service
+  # account over static credentials in this Secret.
+  configSecretName: ""
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+  # For mounting an encrypted key blob volume, cloud-cred projected tokens, etc.
+  extraVolumes: []
+  extraVolumeMounts: []
+
 # Liveness probe
 l1_validator_livenessProbe:
   httpGet:

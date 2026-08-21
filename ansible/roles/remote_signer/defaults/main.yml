@@ -1,0 +1,76 @@
+---
+# remote_signer role defaults
+#
+# Runs avalanche-remote-signer as a container alongside a native avalanchego
+# on the same host, so the validator's BLS key lives behind the signer's
+# backend (cloud KMS / Vault) instead of as plaintext on disk. Off by
+# default — the avalanchego role only wires --staking-rpc-signer-endpoint when
+# remote_signer_enabled is true.
+#
+# Project: https://github.com/ava-labs/avalanche-remote-signer
+
+remote_signer_enabled: false
+
+# Published image, pinned by digest (immutable) — this is v0.1.0.
+# NOTE: personal Docker Hub namespace until an org registry is provisioned.
+remote_signer_image: "rpinsker1/avalanche-remote-signer"
+remote_signer_image_digest: "sha256:98f98a3d75b77c9807c956dbbcb13fa00d191e42ca4714ebb36d26a07a48d193"
+
+# The signer listens here; avalanchego connects over loopback (the container
+# uses --network host, so this is the host's 127.0.0.1). Keep it loopback.
+remote_signer_listen: "127.0.0.1"
+remote_signer_port: 50051
+remote_signer_endpoint: "127.0.0.1:{{ remote_signer_port }}"
+
+# backend: aws-kms | gcp-kms | azure-kv | vault
+# (aws-nitro is NOT supported via this role — it needs host enclave devices;
+# use a dedicated Nitro host per the signer repo's docs/aws-nitro.md.)
+remote_signer_backend: "aws-kms"
+
+remote_signer_user: "avalanche-signer"
+remote_signer_config_dir: "/etc/avalanche-remote-signer"
+
+# Install Docker if absent. Set false if the host already manages Docker.
+remote_signer_manage_docker: true
+
+# Encrypted BLS key blobs (produced by `keytool generate`, one PER validator —
+# validators must never share a BLS key). Mounted read-only into the container
+# at {{ remote_signer_config_dir }}/bls.key.enc.
+#
+# Multi-validator: set remote_signer_encrypted_bls_key_dir to a directory on
+# the control node containing <inventory_hostname>.key.enc (validator-1.key.enc,
+# validator-2.key.enc, ...). Takes precedence over the single-file var.
+remote_signer_encrypted_bls_key_dir: ""
+# Single-validator convenience: path to the one blob. The role refuses to use
+# this with more than one validator in the inventory.
+remote_signer_encrypted_bls_key_src: ""
+
+# Per-host KMS key ARNs (inventory hostname -> ARN) for the aws-kms backend —
+# feed `terraform output -json remote_signer_kms_key_arns` straight in. Falls
+# back to remote_signer_aws.kms_key_id when a host is not in the map.
+remote_signer_kms_key_arns: {}
+
+# ── Backend settings (fill in the block matching remote_signer_backend) ──
+remote_signer_aws:
+  region: ""
+  kms_key_id: ""            # arn:aws:kms:...:key/...
+
+remote_signer_gcp:
+  project: ""
+  location: ""
+  key_ring: ""
+  key_name: ""
+
+remote_signer_azure:
+  vault_url: ""
+  key_name: ""
+
+remote_signer_vault:
+  address: "http://127.0.0.1:8200"
+  mount_path: "bls"
+  key_name: "validator"
+  auth_method: "token"      # token | kubernetes | aws-iam
+  token: ""
+
+# Container-side path where the encrypted blob is mounted.
+remote_signer_blob_container_path: "{{ remote_signer_config_dir }}/bls.key.enc"

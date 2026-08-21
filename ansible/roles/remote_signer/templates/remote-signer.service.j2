@@ -1,0 +1,34 @@
+[Unit]
+Description=Avalanche remote signer (BLS signing sidecar)
+Documentation=https://github.com/ava-labs/avalanche-remote-signer
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+# Start before the node so the signing endpoint is up when avalanchego dials
+# it (soft ordering — avalanchego retries the gRPC connection regardless).
+Before=avalanchego.service
+
+[Service]
+Type=simple
+# --network host: the container binds the host's {{ remote_signer_listen }},
+# so the native avalanchego reaches it over loopback and cloud-KMS backends
+# can read the instance's IMDS credentials. --pull=missing pins by digest.
+ExecStartPre=-/usr/bin/docker rm -f {{ remote_signer_user }}
+ExecStart=/usr/bin/docker run --rm --name {{ remote_signer_user }} \
+  --network host \
+  --pull=missing \
+  --read-only \
+  --user 1000:1000 \
+  --cap-drop=ALL \
+  --security-opt=no-new-privileges \
+  -v {{ remote_signer_config_dir }}:{{ remote_signer_config_dir }}:ro \
+  {{ remote_signer_image }}@{{ remote_signer_image_digest }} \
+  serve --config-file {{ remote_signer_config_dir }}/config.yaml
+ExecStop=/usr/bin/docker stop {{ remote_signer_user }}
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
