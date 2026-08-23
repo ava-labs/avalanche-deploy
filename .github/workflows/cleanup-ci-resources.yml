@@ -1,0 +1,93 @@
+name: Cleanup CI Resources
+
+# Safety net: terminates any EC2 instances tagged with ci-l1 or ci-primary
+# that have been running for more than 4 hours. Catches leaked infrastructure
+# from cancelled or failed E2E runs where both the trap and the always-step
+# failed to destroy resources.
+#
+# Runs weekly, 1 hour after the scheduled E2E window.
+
+permissions: {}
+
+on:
+  schedule:
+    - cron: "0 5 * * 0" # Sunday 5 AM UTC (1 hour after E2E)
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    name: Cleanup Orphaned CI Resources
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+
+    steps:
+      - name: Find and Terminate Orphaned Instances
+        run: |
+          echo "Scanning for CI instances older than 4 hours..."
+
+          CUTOFF=$(date -u -d '4 hours ago' '+%Y-%m-%dT%H:%M:%S' 2>/dev/null \
+                   || date -u -v-4H '+%Y-%m-%dT%H:%M:%S')
+
+          # Find running instances with CI name prefixes
+          INSTANCE_IDS=$(aws ec2 describe-instances \
+            --filters \
+              "Name=instance-state-name,Values=running" \
+              "Name=tag:Name,Values=ci-l1*,ci-primary*" \
+            --query "Reservations[].Instances[?LaunchTime<='${CUTOFF}'].InstanceId" \
+            --output text)
+
+          if [ -z "$INSTANCE_IDS" ] || [ "$INSTANCE_IDS" = "None" ]; then
+            echo "No orphaned CI instances found."
+            exit 0
+          fi
+
+          echo "Found orphaned instances: $INSTANCE_IDS"
+
+          # Also find any associated resources
+          for INSTANCE_ID in $INSTANCE_IDS; do
+            INSTANCE_INFO=$(aws ec2 describe-instances \
+              --instance-ids "$INSTANCE_ID" \
+              --query "Reservations[].Instances[].[InstanceId,InstanceType,LaunchTime,Tags[?Key=='Name'].Value|[0]]" \
+              --output text)
+            echo "  Terminating: $INSTANCE_INFO"
+          done
+
+          aws ec2 terminate-instances --instance-ids $INSTANCE_IDS
+          echo "Terminated $( echo "$INSTANCE_IDS" | wc -w | tr -d ' ') instances."
+
+      - name: Cleanup Orphaned VPCs
+        run: |
+          echo "Scanning for CI VPCs with no running instances..."
+
+          for PREFIX in ci-l1 ci-primary; do
+            VPC_IDS=$(aws ec2 describe-vpcs \
+              --filters "Name=tag:Name,Values=${PREFIX}*" \
+              --query "Vpcs[].VpcId" \
+              --output text)
+
+            for VPC_ID in $VPC_IDS; do
+              # Check if VPC has any running instances
+              RUNNING=$(aws ec2 describe-instances \
+                --filters "Name=vpc-id,Values=$VPC_ID" "Name=instance-state-name,Values=running,pending" \
+                --query "Reservations[].Instances[].InstanceId" \
+                --output text)
+
+              if [ -z "$RUNNING" ] || [ "$RUNNING" = "None" ]; then
+                echo "VPC $VPC_ID ($PREFIX) has no running instances - should be cleaned up by terraform destroy"
+                echo "  Manual cleanup may be needed if terraform state was lost"
+              fi
+            done
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## CI Resource Cleanup" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Scanned for orphaned CI infrastructure (instances running >4 hours)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Checked prefixes: \`ci-l1\`, \`ci-primary\`" >> "$GITHUB_STEP_SUMMARY"
