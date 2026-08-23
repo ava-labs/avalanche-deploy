@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -290,6 +293,29 @@ func run() error {
 			return fmt.Errorf("failed to gather validator info: %w", err)
 		}
 
+		// Overlay the P-Chain's registered weights and BLS keys — the
+		// authoritative source for the conversion data. Node-gathered values
+		// can differ from what ConvertSubnetToL1Tx registered (create-l1 uses
+		// units.Schmeckle as weight, not a round default), and any mismatch
+		// changes the conversion hash: the validators then refuse to sign
+		// ("provided conversionID X != expected Y") and the contract reverts
+		// with InvalidConversionID.
+		if err := overlayPChainValidators(ctx, networkName, parsedSubnetID, validatorInfo); err != nil {
+			if !jsonOutput {
+				fmt.Printf("  WARNING: could not fetch registered validators from P-Chain (%v); using node-reported values\n", err)
+			}
+		}
+
+		// ConvertSubnetToL1Tx canonicalizes validators to ascending NodeID
+		// bytes, so the on-chain conversion data is sorted regardless of the
+		// order they were submitted in. The recomputed hash AND the
+		// initializeValidatorSet calldata must use the same order or both
+		// fail (signing: "provided conversionID X != expected Y"; contract:
+		// InvalidConversionID). Invisible with a single validator.
+		sort.Slice(validatorInfo, func(i, j int) bool {
+			return bytes.Compare(validatorInfo[i].NodeID[:], validatorInfo[j].NodeID[:]) < 0
+		})
+
 		// Get aggregated signature
 		var signedMessage []byte
 		if useLocalSigAgg {
@@ -525,7 +551,9 @@ func gatherValidatorInfo(ctx context.Context, validatorIPsStr, rpcURL string) ([
 		validators = append(validators, ValidatorInfo{
 			NodeID:    nodeID,
 			PublicKey: pop.PublicKey[:],
-			Weight:    1000, // Default weight
+			// Placeholder — overlayPChainValidators replaces this with the
+			// registered weight. Only used if the P-Chain query fails.
+			Weight: 1000,
 		})
 	}
 
@@ -534,6 +562,78 @@ func gatherValidatorInfo(ctx context.Context, validatorIPsStr, rpcURL string) ([
 	}
 
 	return validators, nil
+}
+
+// overlayPChainValidators replaces node-gathered weights and BLS keys with the
+// values registered on the P-Chain (platform.getValidatorsAt at the proposed
+// height) — the source of truth for the conversion hash. Errors if a gathered
+// node is not in the L1's registered validator set.
+func overlayPChainValidators(ctx context.Context, networkName string, subnetID ids.ID, validators []ValidatorInfo) error {
+	var pChainURL string
+	switch networkName {
+	case "mainnet":
+		pChainURL = "https://api.avax.network/ext/bc/P"
+	case "fuji":
+		pChainURL = "https://api.avax-test.network/ext/bc/P"
+	default:
+		return fmt.Errorf("unsupported network %q", networkName)
+	}
+
+	reqBody, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "platform.getValidatorsAt",
+		"params":  map[string]string{"height": "proposed", "subnetID": subnetID.String()},
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, pChainURL, bytes.NewReader(reqBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var rpcResp struct {
+		Result map[string]struct {
+			PublicKey string `json:"publicKey"`
+			Weight    string `json:"weight"`
+		} `json:"result"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+		return err
+	}
+	if rpcResp.Error != nil {
+		return fmt.Errorf("platform.getValidatorsAt: %s", rpcResp.Error.Message)
+	}
+
+	for i := range validators {
+		reg, ok := rpcResp.Result[validators[i].NodeID.String()]
+		if !ok {
+			return fmt.Errorf("%s is not in the L1's registered validator set", validators[i].NodeID)
+		}
+		weight, err := strconv.ParseUint(reg.Weight, 10, 64)
+		if err != nil {
+			return fmt.Errorf("bad weight %q for %s: %w", reg.Weight, validators[i].NodeID, err)
+		}
+		validators[i].Weight = weight
+		if keyHex := strings.TrimPrefix(reg.PublicKey, "0x"); keyHex != "" {
+			key, err := hex.DecodeString(keyHex)
+			if err != nil {
+				return fmt.Errorf("bad publicKey for %s: %w", validators[i].NodeID, err)
+			}
+			validators[i].PublicKey = key
+		}
+	}
+	return nil
 }
 
 func getLocalAggregatedSignature(ctx context.Context, sigAggURL, networkName, conversionIDStr string, subnetID, chainID ids.ID, managerAddress string, validators []ValidatorInfo) ([]byte, error) {

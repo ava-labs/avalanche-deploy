@@ -258,6 +258,16 @@ func run() error {
 	var managerAddress []byte
 	var vmDeployment *ValidatorManagerDeployment
 
+	// Default the manager address to the genesis proxy when the genesis ships
+	// one. The conversion's manager address is immutable — leaving it empty
+	// permanently breaks initialize-validator-manager on the resulting L1.
+	if genesisProxyAddress == "" && !deployValidatorManager {
+		if detected := detectGenesisProxy(genesisBytes); detected != "" {
+			genesisProxyAddress = detected
+			fmt.Printf("  Auto-detected genesis proxy %s as the ValidatorManager address (override with --genesis-proxy-address)\n", detected)
+		}
+	}
+
 	// If genesis proxy address is provided, use it as the manager address
 	if genesisProxyAddress != "" {
 		fmt.Println("[4/N] Using genesis proxy address as ValidatorManager...")
@@ -945,6 +955,26 @@ func deriveEthAddress(key *secp256k1.PrivateKey) string {
 // GenesisAlloc represents the alloc section of a genesis file
 type GenesisAlloc struct {
 	Balance string `json:"balance"`
+	Code    string `json:"code"`
+}
+
+// detectGenesisProxy returns the canonical ValidatorManager proxy address if
+// the genesis allocates code to it, or "" if absent. Registering the
+// conversion with an empty manager address is irreversible: the conversion
+// data is immutable, so initializeValidatorSet can never succeed on that L1
+// and the ValidatorManager workflow is permanently broken.
+func detectGenesisProxy(genesisBytes []byte) string {
+	const canonicalProxy = "facade0000000000000000000000000000000000"
+	var genesis GenesisConfig
+	if err := json.Unmarshal(genesisBytes, &genesis); err != nil {
+		return ""
+	}
+	for addr, alloc := range genesis.Alloc {
+		if strings.EqualFold(strings.TrimPrefix(addr, "0x"), canonicalProxy) && alloc.Code != "" {
+			return "0x" + canonicalProxy
+		}
+	}
+	return ""
 }
 
 // GenesisConfig represents a simplified genesis file structure
