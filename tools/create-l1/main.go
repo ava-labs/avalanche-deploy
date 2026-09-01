@@ -58,6 +58,7 @@ var (
 	startSigAgg            bool
 	genesisProxyAddress    string
 	jsonOutput             bool
+	customVMID             string
 )
 
 // L1Output represents the JSON output structure for scripting
@@ -108,6 +109,7 @@ func main() {
 	flag.BoolVar(&startSigAgg, "start-sig-agg", false, "Start a local signature-aggregator process")
 	flag.StringVar(&genesisProxyAddress, "genesis-proxy-address", "", "Use existing proxy address from genesis (e.g., 0xfacade0000000000000000000000000000000000)")
 	flag.BoolVar(&jsonOutput, "json", false, "Output results as JSON (for scripting)")
+	flag.StringVar(&customVMID, "vm-id", "", "Custom VM ID (CB58-encoded). Default: SubnetEVM")
 	flag.Parse()
 
 	if err := run(); err != nil {
@@ -239,12 +241,22 @@ func run() error {
 		return fmt.Errorf("failed to re-sync wallet: %w", err)
 	}
 
+	// Resolve VM ID
+	vmID := constants.SubnetEVMID
+	if customVMID != "" {
+		vmID, err = ids.FromString(customVMID)
+		if err != nil {
+			return fmt.Errorf("invalid --vm-id %q: %w", customVMID, err)
+		}
+		fmt.Printf("  Using custom VM ID: %s\n", vmID)
+	}
+
 	// Create chain
 	fmt.Println("[3/4] Creating chain...")
 	chainTx, err := wallet.IssueCreateChainTx(
 		subnetID,
 		genesisBytes,
-		constants.SubnetEVMID,
+		vmID,
 		nil,
 		chainName,
 	)

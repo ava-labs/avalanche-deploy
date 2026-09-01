@@ -53,6 +53,19 @@
 - name: Install avalanchego binary and bundled subnet-evm plugin
   ansible.builtin.include_tasks: install.yml
 
+# Custom VM plugin support
+# When custom_vm_id and custom_vm_binary_path are set, copy the custom VM
+# binary to the plugins directory. This enables deploying arbitrary
+# AvalancheGo VMs (e.g., DAML VM, MoveVM) alongside SubnetEVM.
+- name: Install custom VM plugin
+  ansible.builtin.copy:
+    src: "{{ custom_vm_binary_path }}"
+    dest: "{{ avalanchego_plugin_dir }}/{{ custom_vm_id }}"
+    owner: "{{ avalanchego_user }}"
+    group: "{{ avalanchego_group }}"
+    mode: "0755"
+  when: custom_vm_id != "" and custom_vm_binary_path != ""
+
 - name: Resolve custom node config path
   ansible.builtin.set_fact:
     avalanchego_custom_node_config_path: >-
