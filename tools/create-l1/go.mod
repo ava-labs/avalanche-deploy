@@ -1,6 +1,7 @@
 module github.com/ava-labs/avalanche-deploy/tools/create-l1
 
 go 1.25.0
+
 toolchain go1.26.10
 
 require (

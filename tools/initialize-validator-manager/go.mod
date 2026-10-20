@@ -1,6 +1,7 @@
 module github.com/ava-labs/avalanche-deploy/tools/initialize-validator-manager
 
 go 1.25.0
+
 toolchain go1.26.10
 
 require (
