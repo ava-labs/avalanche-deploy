@@ -2,6 +2,8 @@ module init_valset
 
 go 1.25.0
 
+toolchain go1.26.10
+
 require (
 	github.com/ava-labs/avalanchego v1.14.1
 	github.com/ava-labs/libevm v1.13.15-0.20251210210615-b8e76562a300
