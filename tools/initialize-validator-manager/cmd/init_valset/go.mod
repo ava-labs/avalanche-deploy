@@ -1,6 +1,7 @@
 module init_valset
 
 go 1.25.0
+toolchain go1.26.10
 
 require (
 	github.com/ava-labs/avalanchego v1.14.1
